@@ -1,0 +1,62 @@
+# OnPremise Octopus space — library variable set overrides for env=development
+#
+# Source of truth for variables that route MageRunner to op-usxpress-dev (the
+# bare-metal Talos cluster) instead of cloud EKS. Applied via apply.py against
+# the OnPremise space (Spaces-302) at https://octopus.usxpress.io.
+#
+# CLOUD-SAFETY INVARIANTS:
+#   - This file ONLY writes to OnPremise space. USXpress space is never touched.
+#   - All changes are scoped to environment "development" (Environments-1081).
+#     Existing qa/staging/production scopes stay exactly as they are.
+#   - Cloud iaac repos (terraform-variant-apps, mage-runner) are not affected.
+#   - terraform-variant-apps' use_eks_api defaults to true → cloud path
+#     preserved; only on-prem deployments set it to false via the variables
+#     here.
+#
+# Idempotency: apply.py upserts by (variable name + scope). Re-running with
+# the same manifest is a no-op.
+#
+# When iaac-octopus-config (ONPREM-10) lands, port these to terraform
+# octopusdeploy_library_variable_set resources.
+
+space:
+  id: Spaces-302
+  name: OnPremise
+
+# Targets in OnPremise space — referenced by name. apply.py resolves IDs.
+target_environment: development          # Environments-1081
+target_worker_pool: onprem-development   # WorkerPools-1922
+target_cluster: op-usxpress-dev
+
+# Library variable sets to update. Each entry is upserted (env=development scope only).
+library_variable_sets:
+
+  DX__EKSCluster:
+    variables:
+      CLUSTER_NAME:    op-usxpress-dev
+      CLUSTER_REGION:  us-east-1   # eks-data SSM read region (us-east-1 mirror per iaac-talos 07d4955)
+
+  DX__Common:
+    variables:
+      WORKER_POOL:               onprem-development   # name; apply.py resolves to WorkerPools-1922
+      env_short:                 dev
+      environment_abbreviation:  dev
+
+  DX__TFState:
+    variables:
+      S3_BUCKET:        dpl2-local-test-tfstate   # us-east-1, Playground 786352483360
+      DYNAMO_DB_TABLE:  ""                        # locking off for on-prem; matches local test pattern
+
+  DX__AWSAccounts:
+    variables:
+      # Override the dev-account routing for on-prem: dev now means Playground us-east-1.
+      AWS_ACCOUNT_dev:  "786352483360"
+      AWS_REGION_dev:   us-east-1
+
+  # MageRunner-side toggles consumed by terraform-variant-apps eks-data module
+  # via the TF_VAR_* convention (mage-runner internal/terraform/terraform_helpers.go
+  # writes any TF_VAR_* env into env.auto.tfvars per module).
+  DX__Runner:
+    variables:
+      TF_VAR_use_eks_api:   "false"             # gates eks-data module to SSM fallback path
+      TF_VAR_cluster_name:  op-usxpress-dev

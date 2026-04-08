@@ -295,7 +295,7 @@ SSM Parameter Store setup (one-time per cluster):
 # Store cluster metadata in SSM (Playground account, us-east-1)
 aws ssm put-parameter --profile playground --region us-east-1 \
   --name "/clusters/op-usxpress-dev/endpoint" \
-  --value "https://10.10.82.30:6443" --type String
+  --value "https://10.10.82.50:6443" --type String
 
 aws ssm put-parameter --profile playground --region us-east-1 \
   --name "/clusters/op-usxpress-dev/certificate_authority" \
@@ -459,7 +459,45 @@ Worker registration:
 - Configuration managed in iaac-octopus-config repo, scoped to the OnPremise space
 
 
-4.5 Terraform State
+4.5 External DNS
+
+Cloud uses external-dns with Route53 to automatically create DNS records for app ingress.
+On-prem follows the same pattern:
+
+```
+Cloud:    external-dns -> Route53 -> A record -> EKS ALB/NLB IP
+On-Prem:  external-dns -> Route53 -> A record -> On-prem Istio ingress gateway IP
+```
+
+How it works:
+- external-dns runs on the on-prem cluster (deployed via Flux, same as cloud)
+- When an Istio VirtualService or Gateway is created, external-dns detects the hostname
+- external-dns creates/updates an A record in Route53 pointing to the on-prem ingress IP
+- Same Route53 hosted zone as cloud (usxpress.io) - no separate DNS provider needed
+- No GoDaddy or other registrar required - Route53 handles everything
+
+On-prem app DNS naming convention:
+
+```
+Cloud:    api.{app}.dev.usxpress.io  ->  EKS ingress IP
+On-prem:  api.{app}.op-dev.usxpress.io  ->  On-prem Istio ingress gateway IP
+```
+
+The on-prem ingress gateway IP is the external IP of the Istio ingress gateway service
+running on the on-prem cluster. For internal-only apps, this can be a private IP accessible
+within the corporate network.
+
+Requirements:
+- external-dns deployed on op-usxpress-dev via Flux
+- IAM role for external-dns with Route53 permissions (via IRSA)
+- Istio ingress gateway with a routable IP (internal or external)
+- Route53 hosted zone for on-prem subdomains
+
+Note: DNS configuration details (hosted zone, subdomain convention, internal vs external)
+still need to be finalized. This section will be updated once confirmed.
+
+
+4.7 Terraform State
 
 ```
 Resource              Account              Region     Value
@@ -471,7 +509,7 @@ DynamoDB lock table   786352483360 (PG)    us-east-1  usxpress_tf_state
 State is completely isolated from cloud environments.
 
 
-4.6 Secret Architecture
+4.8 Secret Architecture
 
 ```
 AWS Secrets Manager - Playground (786352483360)
@@ -641,6 +679,7 @@ Kafka consumer group collision  Message stealing     Medium     Different group 
 SSM parameter stale/missing     TF plan fails        Low        SSM params set once; alerting
 iaac-octopus-config integration Scripts dont work    Medium     Test in OnPremise space first
 Outbound network from on-prem   AWS API calls fail   Low        Verify firewall rules early
+DNS resolution for on-prem apps No app reachability  Medium     Route53 + external-dns (same as cloud)
 ```
 
 
@@ -708,6 +747,26 @@ Procedure:
 Variables managed through iaac-octopus-config are automatically configured per Space.
 Only project-specific sensitive variables require the Bento export/import process.
 
+9.4 Automation via Octopus API and SDK
+
+Project Bento operations can be automated through the Octopus REST API or the Go SDK
+that MageRunner already uses.
+
+Octopus REST API:
+- Swagger UI: https://octopus.usxpress.io/swaggerui/ (VPN required)
+- Export endpoint: POST /api/{SpaceId}/projects/import-export/export
+- Import endpoint: POST /api/{DestinationSpaceId}/projects/import-export/import
+- The entire Octopus UI is built on these APIs - anything done in the UI can be scripted
+
+Go SDK (go-octopusdeploy):
+- MageRunner already uses this SDK for Octopus operations
+- Migration service: github.com/OctopusDeploy/go-octopusdeploy/pkg/migrations/migration_service.go
+- This provides programmatic export/import without manual UI interaction
+- Same SDK, same authentication, same patterns MageRunner already uses
+
+This means Project Bento can be integrated into the existing automation pipeline rather
+than requiring manual export/import through the Octopus UI.
+
 
 10. FUTURE CONSIDERATIONS
 
@@ -730,6 +789,8 @@ Only project-specific sensitive variables require the Bento export/import proces
 2. Upstream timeline: When to submit SSM-backed eks-data as upstream PR to
    terraform-variant-apps
 3. Tracking ticket: Create Jira/Linear ticket for this work
+4. DNS subdomain convention: Finalize on-prem app DNS naming (e.g., op-dev.usxpress.io)
+   and confirm Route53 hosted zone setup
 
 
 APPENDIX A: ON-PREM CLUSTER SPECIFICATIONS
@@ -740,7 +801,7 @@ Property        Value
 Cluster Name    op-usxpress-dev
 Distribution    Talos Linux v1.32.0
 Kubernetes      v1.32.0
-API Server      https://10.10.82.30:6443
+API Server      https://10.10.82.50:6443
 Nodes           3 control plane + 5 worker
 CNI             Cilium
 Service Mesh    Istio (ambient mode)
@@ -794,7 +855,7 @@ APPENDIX D: LOCAL TEST EVIDENCE
 MageRunner was tested locally against the on-prem cluster (March 3, 2026). The test confirmed:
 
 1. spec.yaml parsing - standard spec loaded and validated successfully
-2. kubeconfig - MageRunner connected to Talos cluster at 10.10.82.30:6443
+2. kubeconfig - MageRunner connected to Talos cluster at 10.10.82.50:6443
 3. Namespace creation - test-app namespace created
 4. Module skipping - Modules without state (kafka, buckets, mongodb, auth, dynamodb,
    postgres, role) correctly skipped with "Skipping MODULE" log messages
