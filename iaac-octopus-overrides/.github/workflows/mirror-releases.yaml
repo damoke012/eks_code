@@ -1,0 +1,33 @@
+# Mirror cloud Octopus releases to OnPremise space.
+#
+# Runs on a 15-minute schedule: checks the latest cloud release for each
+# module-coverage app, creates a matching release in OnPremise if it doesn't
+# already exist. Does NOT deploy — deployment is manual per the feature-manual
+# lifecycle in OnPremise space.
+#
+# Cloud-safety: reads from USXpress space (read-only), writes only to
+# OnPremise space. Cloud projects, GHA workflows, and iaac repos are untouched.
+#
+# To use: move this file to .github/workflows/ in whichever repo hosts the
+# automation (iaac-octopus-config when it exists, or a dedicated repo).
+# Set the OCTOPUS_API_KEY secret in the repo settings.
+
+name: Mirror Octopus releases to OnPremise
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes
+  workflow_dispatch:          # manual trigger for smoke tests
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mirror releases
+        env:
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+        run: |
+          cd iaac-octopus-overrides
+          python3 mirror-release.py --all
