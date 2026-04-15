@@ -1,0 +1,54 @@
+# OnPremise space setup — applies all Octopus overrides and patches.
+#
+# Runs on push to main (after PR merge) or manual trigger.
+# Idempotent: safe to re-run at any time.
+#
+# Cloud-safety: Only writes to OnPremise space (Spaces-302).
+# USXpress space, cloud repos, and cloud infrastructure are untouched.
+
+name: OnPremise Octopus Setup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'octopus/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview without making changes'
+        type: boolean
+        default: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Apply library variable set overrides
+        env:
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+        run: |
+          cd octopus
+          FLAGS="${{ inputs.dry_run == 'true' && '--dry-run' || '' }}"
+          python3 apply.py onprem-development.yaml $FLAGS
+
+      - name: Patch DX__SetupVariables module
+        env:
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+        run: |
+          cd octopus
+          FLAGS="${{ inputs.dry_run == 'true' && '--dry-run' || '' }}"
+          python3 patch-setup-variables.py $FLAGS
+
+      - name: Patch DX-Apply deployment process (all apps)
+        env:
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+        run: |
+          cd octopus
+          FLAGS="${{ inputs.dry_run == 'true' && '--dry-run' || '' }}"
+          python3 patch-dx-apply.py --all $FLAGS

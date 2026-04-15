@@ -60,3 +60,12 @@ library_variable_sets:
     variables:
       TF_VAR_use_eks_api:   "false"             # gates eks-data module to SSM fallback path
       TF_VAR_cluster_name:  op-usxpress-dev
+
+  # On-prem worker uses IRSA directly (no cross-account role chaining).
+  # AWS_ROLE_TO_ASSUME must be the worker's own role so the SetAWSCredentials
+  # function in DX__SetupVariables doesn't chain to a cloud account.
+  DX__AWSAccessKeys:
+    variables:
+      AWS_ROLE_TO_ASSUME:  arn:aws:iam::786352483360:role/iaac-octopus-worker-op-usxpress-dev
+      AWS_DEFAULT_REGION:  us-east-1
+      DOMAIN:              dev.usxpress.io

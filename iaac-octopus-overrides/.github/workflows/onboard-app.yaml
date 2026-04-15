@@ -1,0 +1,53 @@
+# Onboard a new app to OnPremise space.
+#
+# Seeds terraform state, copies secrets, syncs project variables.
+# Run manually via workflow_dispatch when adding a new app.
+
+name: Onboard App to OnPremise
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'App name to onboard (e.g., brands-api)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Preview without making changes'
+        type: boolean
+        default: true
+      all_apps:
+        description: 'Onboard all 6 module-coverage apps'
+        type: boolean
+        default: false
+
+jobs:
+  onboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ONPREM_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Onboard app
+        env:
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+          AWS_PROFILE_CLOUD: ${{ secrets.CLOUD_AWS_PROFILE }}
+        run: |
+          cd octopus
+          FLAGS="${{ inputs.dry_run == 'true' && '--dry-run' || '' }}"
+          APP="${{ inputs.all_apps == 'true' && '--all' || inputs.app_name }}"
+          python3 onboard-app.py $APP $FLAGS
+
+      - name: Patch DX-Apply for app
+        if: ${{ !inputs.all_apps }}
+        env:
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+        run: |
+          cd octopus
+          FLAGS="${{ inputs.dry_run == 'true' && '--dry-run' || '' }}"
+          python3 patch-dx-apply.py --project ${{ inputs.app_name }} $FLAGS

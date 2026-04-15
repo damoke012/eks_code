@@ -29,5 +29,5 @@ jobs:
         env:
           OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
         run: |
-          cd iaac-octopus-overrides
+          cd octopus
           python3 mirror-release.py --all
