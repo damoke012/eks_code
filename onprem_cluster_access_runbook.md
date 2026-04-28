@@ -6,6 +6,21 @@
 
 ---
 
+## Two access models — read this first
+
+This document covers two access models for the on-prem cluster:
+
+| Model | When to use | Status |
+|---|---|---|
+| **Azure AD OIDC** ([§ Target state](#target-state--azure-ad-oidc-the-ideal-process)) | Once configured. This is the documented ideal. | 🎯 Target — implementation pending |
+| **Per-user X.509 certs** ([§ Bridge process](#bridge-process--per-user-x509-certs)) | Right now, until OIDC is wired up | 🟡 Active — every new user today goes through this |
+
+**The Azure AD OIDC flow is what we want to standardize on.** It mirrors how cloud-team users access EKS (one SSO login, no manual ops per user, AD groups drive permissions). The cert-based flow is a working bridge solution while we get OIDC stood up.
+
+If you're provisioning a user **today**, jump to [§ Bridge process](#bridge-process--per-user-x509-certs). If you're planning the rollout, start with [§ Target state](#target-state--azure-ad-oidc-the-ideal-process).
+
+---
+
 ## The principle (read this first)
 
 **The user generates their own private key. It never leaves their machine.**
@@ -52,7 +67,11 @@ The split-provisioning flow fixes all four.
 
 ---
 
-## One-time cluster setup
+## Bridge process — per-user X.509 certs
+
+The flow below (one-time setup → 5-step provisioning → renewal → revocation) is the **bridge** while we build out OIDC. Use it for every user we onboard today. Once OIDC is in production, this section is retired.
+
+### One-time cluster setup
 
 Run this **once per cluster** (not per user). It creates the read-only ClusterRole that all per-user bindings will reference.
 
@@ -382,18 +401,349 @@ For a hard cryptographic revocation (suspected serious compromise), the only opt
 
 ---
 
-## Future state — Azure AD OIDC
+## Target state — Azure AD OIDC (the ideal process)
 
-The current flow requires manual ops per user. The destination is **OIDC against the USXpress Azure AD tenant**:
+This is the documented **target** for cluster access on op-usxpress-dev (and all future on-prem clusters). Once configured, every step in the bridge process above goes away — no more CSRs, no more per-user kubeconfigs, no more manual cert renewals.
 
-1. Configure Talos kube-apiserver with OIDC pointing at Azure AD.
-2. User installs `kubectl oidc-login` plugin.
-3. They run `kubectl get nodes` → browser opens → they auth with USXpress AD → kubectl gets a JWT → cluster trusts the JWT.
-4. RBAC binds against AD groups (e.g., `onprem-platform-readers` AD group → `onprem-platform-reader` ClusterRole).
+### Why this is the right destination
 
-Add/remove people from the AD group → cluster access changes automatically. No CSR ops, no per-user kubeconfigs.
+| Property | Per-user certs (bridge) | Azure AD OIDC (target) |
+|---|---|---|
+| Onboarding ops per user | Manual CSR sign + kubeconfig assembly | Add to AD group. Done. |
+| Offboarding ops per user | Delete ClusterRoleBinding + CSR | Remove from AD group. Done. |
+| Audit trail in cluster logs | Username (CN of cert) | Username + groups (from JWT) |
+| Cred rotation | Annual cert reissue | Token refresh per session, automatic |
+| MFA enforcement | Trust the user has it on their laptop | Enforced at Azure AD login (centralized policy) |
+| Conditional access (geo, device compliance) | Not possible | Native via Azure AD policies |
+| Time-bounded elevated access (JIT) | Not possible | Native via Azure AD PIM |
+| Identity source | One-off cert, no link to corporate identity | Same identity used for AWS SSO, M365, Octopus — single source of truth |
+| Scales to 50+ users | Painful | Trivial |
 
-This is on the platform backlog. Until it lands, this runbook is the operational standard.
+### How it works end-to-end
+
+```
+1. User runs:   kubectl get nodes
+                     │
+2. kubectl checks kubeconfig and sees an `exec` block calling kubelogin/oidc-login
+                     │
+3. kubelogin opens browser → user logs into Azure AD (with MFA) → returns JWT
+                     │
+4. kubectl includes the JWT as a bearer token in the API request
+                     │
+5. Talos kube-apiserver validates the JWT against the Azure AD OIDC issuer
+   (signature, issuer, audience, expiry — all checked)
+                     │
+6. The JWT contains:
+   - `preferred_username` claim → mapped to K8s user name
+   - `groups` claim → mapped to K8s groups
+                     │
+7. RBAC bindings against those groups grant the user permissions
+                     │
+8. Request executes (or denied with `forbidden`)
+```
+
+The user logs in **once per ~8 hours**. kubelogin caches the token; subsequent kubectl calls reuse it until expiry.
+
+### Implementation outline (4 phases)
+
+**Phase 1 — Azure AD app registration**
+
+Done by an Azure AD admin (Vibin or USXpress IT):
+
+1. Register a new app in Azure AD: name `op-usxpress-dev-kubernetes` (or per cluster).
+2. Set redirect URIs: `http://localhost:8000` (for kubelogin browser flow). Multiple ports for fallback: 8000, 18000, 28000.
+3. Configure **Token Configuration** → add the **groups** claim (Security groups) — Azure AD doesn't emit groups by default.
+4. Optional: configure **Optional Claims** → emit `preferred_username` (or `upn` or `email`).
+5. Create AD security groups:
+   - `onprem-platform-admins` — cluster-admin
+   - `onprem-platform-operators` — namespace-scoped write
+   - `onprem-platform-readers` — read-only
+   - Optionally per-app: `onprem-app-<appname>-readers`, `onprem-app-<appname>-operators`
+6. Capture: tenant ID, app client ID, group ObjectIDs.
+
+**Phase 2 — Talos kube-apiserver config**
+
+Update the Talos machineconfig (`iaac-talos/deploy/terraform/modules/talos/`) to add OIDC flags to kube-apiserver:
+
+```yaml
+# In Talos cluster machine config, under cluster.apiServer.extraArgs:
+extraArgs:
+  oidc-issuer-url: https://login.microsoftonline.com/<TENANT_ID>/v2.0
+  oidc-client-id: <APP_CLIENT_ID>
+  oidc-username-claim: preferred_username
+  oidc-username-prefix: "oidc:"          # avoids collision with cert users
+  oidc-groups-claim: groups
+  oidc-groups-prefix: "oidc:"
+```
+
+Apply via terraform → triggers a control-plane node config rolling apply. **Test on a non-prod cluster first** — wrong OIDC config can lock out the apiserver. Have the cert-based admin kubeconfig ready as break-glass.
+
+**Phase 3 — RBAC bindings against AD groups**
+
+Once OIDC is wired in, bind the K8s ClusterRoles/Roles to the AD group ObjectIDs (the `oidc:` prefix above prevents typo collisions with cert-based usernames):
+
+```yaml
+---
+# Cluster-wide read for the readers group
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onprem-platform-reader-azure
+subjects:
+- kind: Group
+  name: oidc:<READERS_GROUP_OBJECT_ID>      # e.g., oidc:abc123-...
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: onprem-platform-reader               # the same role we use for cert users
+  apiGroup: rbac.authorization.k8s.io
+---
+# Cluster-admin for platform team
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onprem-platform-admin-azure
+subjects:
+- kind: Group
+  name: oidc:<ADMINS_GROUP_OBJECT_ID>
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin                         # built-in
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Commit these to `iaac-talos-flux-platform/infrastructure/rbac/` so they're declaratively managed.
+
+**Phase 4 — User onboarding**
+
+The user runs once:
+
+```bash
+# Install kubelogin (Azure AD-aware OIDC plugin)
+kubectl krew install oidc-login
+# or: brew install int128/kubelogin/kubelogin
+
+# Generate kubeconfig — no admin involvement needed
+kubectl oidc-login setup \
+  --oidc-issuer-url=https://login.microsoftonline.com/<TENANT_ID>/v2.0 \
+  --oidc-client-id=<APP_CLIENT_ID>
+
+# Add the cluster
+cat >> ~/.kube/config <<EOF
+- cluster:
+    server: https://10.10.82.50:6443
+    certificate-authority-data: <CLUSTER_CA_BASE64>
+  name: op-usxpress-dev
+- context:
+    cluster: op-usxpress-dev
+    user: oidc-user
+  name: op-usxpress-dev
+- user:
+    name: oidc-user
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: kubectl
+      args:
+      - oidc-login
+      - get-token
+      - --oidc-issuer-url=https://login.microsoftonline.com/<TENANT_ID>/v2.0
+      - --oidc-client-id=<APP_CLIENT_ID>
+EOF
+
+# First use — opens browser for Azure AD login
+kubectl --context=op-usxpress-dev get nodes
+```
+
+**No admin involvement.** Provisioning becomes self-service for anyone in the right AD group.
+
+The cluster CA (still public) and a one-line kubeconfig template can be checked into a public-readable repo or wiki — users just clone + edit `<TENANT_ID>` and `<APP_CLIENT_ID>`.
+
+---
+
+## Restricting access (the access-control patterns)
+
+OIDC is only the auth layer. The actual access restrictions still live in K8s RBAC + Azure AD groups. Here's how to compose them.
+
+### Pattern 1 — Tiered cluster-wide access (the basic three roles)
+
+Define three AD groups, three ClusterRoleBindings:
+
+| AD Group | K8s ClusterRole | Permissions |
+|---|---|---|
+| `onprem-platform-admins` | `cluster-admin` (built-in) | Everything. Reserved for on-prem platform team only. |
+| `onprem-platform-operators` | Custom — see below | Cluster-wide read + write to non-system namespaces |
+| `onprem-platform-readers` | `onprem-platform-reader` (already defined in this runbook) | Read-only cluster-wide, no secrets |
+
+Custom `onprem-platform-operator` ClusterRole (write but not cluster-destructive):
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: onprem-platform-operator
+rules:
+# Inherit reader rules + add write
+- apiGroups: [""]
+  resources: ["configmaps", "services", "pods", "pods/exec", "pods/portforward", "events", "namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses", "networkpolicies"]
+  verbs: ["*"]
+# Explicitly NO: secrets, RBAC, CRDs, nodes — those need admin
+```
+
+### Pattern 2 — Namespace-scoped access (most common for app teams)
+
+App teams should **only** see their own app's namespace. Use Role + RoleBinding (namespace-scoped), not ClusterRole + ClusterRoleBinding.
+
+AD groups per app:
+- `onprem-app-brands-api-readers`
+- `onprem-app-brands-api-operators`
+
+K8s manifest pattern (one per app namespace):
+
+```yaml
+---
+# Namespace-scoped reader role (could also use built-in `view`)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-reader
+  namespace: enterprise         # brands-api lives in enterprise
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "services", "configmaps", "events", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: brands-api-readers-azure
+  namespace: enterprise
+subjects:
+- kind: Group
+  name: oidc:<BRANDS_API_READERS_GROUP_OBJECT_ID>
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: app-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+User in `onprem-app-brands-api-readers` group can `kubectl -n enterprise get pods` but **cannot** see other namespaces. Their `kubectl get pods -A` returns only what they can read.
+
+Generate these manifests programmatically via Kustomize/Helm so onboarding a new app namespace is consistent.
+
+### Pattern 3 — Time-bounded elevated access (JIT via Azure AD PIM)
+
+For "needs to be cluster-admin for an hour to debug a prod issue" — don't put people permanently in `onprem-platform-admins`. Use Azure AD **Privileged Identity Management (PIM)**:
+
+1. Configure `onprem-platform-admins` as an "eligible" group in PIM.
+2. User in PIM has eligibility but no active membership.
+3. To get admin: user requests activation in Azure AD portal → reason + duration (1h, 4h, 8h) → optional approval workflow.
+4. PIM activates membership for the requested window, then automatically removes them.
+5. Cluster access reflects this in real time (next token refresh, ~5 min lag).
+
+PIM logs every activation in Azure AD audit logs — full breadcrumb trail of who got admin when and why.
+
+Requires Azure AD Premium P2 license. Worth it for cluster admins.
+
+### Pattern 4 — Conditional access (geo / device / MFA enforcement)
+
+Azure AD Conditional Access policies apply at login time, before the JWT is issued. Cluster doesn't see denied users at all.
+
+Examples to consider:
+
+- **Block sign-in from countries we don't operate in.** Trims a huge attack surface.
+- **Require compliant device** (Intune-managed laptop). Personal laptops can't get a JWT.
+- **Require MFA for `onprem-platform-admins` group.** Even if password is compromised, MFA blocks the login.
+- **Require sign-in from corp network OR via VPN.** Combines with the existing 10.10.82.x network restriction for defense in depth.
+
+These are configured by IT/Azure AD admin, not by us — but we can request specific policies for the cluster app.
+
+### Pattern 5 — Read-only by default, write requires explicit elevation
+
+For prod, default everyone to read-only. Treat write access as an exception that requires:
+
+1. A justification (Slack thread, ticket).
+2. Explicit AD group addition (or PIM activation).
+3. Audit trail of when and why.
+
+Concretely: only ~3-5 people in `onprem-platform-operators`. The rest are in `onprem-platform-readers`. App teams in their namespace-scoped reader groups.
+
+### Pattern 6 — Audit and quarterly review
+
+Same as the bridge process, but the source of truth is now Azure AD group membership:
+
+```bash
+# List who has cluster-wide read (via OIDC)
+# This shows the GROUP NAME from the binding — actual members live in Azure AD
+kubectl get clusterrolebinding onprem-platform-reader-azure -o jsonpath='{.subjects}'
+
+# Cross-reference: in Azure AD portal or via Microsoft Graph CLI
+az ad group member list --group "onprem-platform-readers" --output table
+```
+
+Quarterly: walk the Azure AD group memberships against the team roster. Remove orphans. Document the review.
+
+### Quick-reference: AD group → K8s permission matrix
+
+Document this as a table in your platform wiki so people know what to ask for:
+
+| Need | Ask for | What it grants |
+|---|---|---|
+| "I want to look at platform components for debugging" | `onprem-platform-readers` | Read-only cluster-wide, no secrets |
+| "I'm on the on-prem team and operate the platform" | `onprem-platform-operators` | Read everything + write non-system resources |
+| "I'm on the on-prem core team" (rare) | `onprem-platform-admins` (PIM eligible) | cluster-admin, time-bounded |
+| "I'm an app developer for X" | `onprem-app-X-readers` | Read-only in app's namespace |
+| "I'm an app on-call for X" | `onprem-app-X-operators` | Read + restart pods + edit configmaps in app's namespace |
+
+---
+
+## Migration plan (cert-based → OIDC)
+
+Once OIDC is configured and tested, retire cert-based access in two phases:
+
+**Phase A — Both auth methods active (transition period, ~2 weeks)**
+- OIDC works for users in the right AD groups.
+- Existing cert users still work.
+- All new onboarding goes through OIDC.
+- Document outage rollback plan: if OIDC breaks, cert-based admin kubeconfigs are the break-glass.
+
+**Phase B — Cert-based deprecated**
+- Notify all cert users 30 days in advance.
+- They re-onboard via the OIDC flow (5-min self-serve).
+- Once everyone's confirmed working on OIDC, delete the cert-based ClusterRoleBindings.
+- Remove the OIDC-irrelevant `oidc:` prefix isn't strictly needed but kept for clarity.
+- The cert-based flow stays in this runbook as **break-glass-only** (e.g., when Azure AD itself is down — use cert from offline backup to recover).
+
+### Break-glass plan
+
+Always keep ONE cert-based admin kubeconfig stored offline (in a sealed envelope, in a safe, with quarterly rotation reminder). If Azure AD is unreachable and the cluster needs urgent operation, this is the recovery path. Don't keep it on a laptop or in cloud storage.
+
+---
+
+## When to file the OIDC project ticket
+
+This runbook is the source of truth for both the bridge and the target. The actual implementation is a 1–2 week platform project (per phase 1–4 above). File an INFRA ticket scoped to:
+
+- Azure AD app registration
+- Talos machineconfig OIDC flags
+- RBAC group bindings
+- kubelogin setup docs for users
+- Migration of existing cert users
+
+Best done **after** the on-prem POC apps stabilize (so we're not changing auth + rolling out new apps simultaneously).
 
 ---
 
