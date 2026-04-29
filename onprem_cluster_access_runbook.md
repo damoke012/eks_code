@@ -341,6 +341,62 @@ history -c && history -w
 
 ---
 
+## Upgrading an existing user (reader → operator → admin)
+
+Permissions are layered via additive bindings. To upgrade a user, add a new ClusterRoleBinding; remove old ones if cleanup matters (RBAC is additive, so leaving them is harmless).
+
+### Reader → Operator
+
+The operator role is read+write cluster-wide except secrets, RBAC, CRDs. See `onprem-platform-operator` ClusterRole earlier in this runbook.
+
+```bash
+# Optionally remove the reader binding for cleanliness
+kubectl delete clusterrolebinding onprem-platform-reader-<USER_CN>
+
+# Add the operator binding
+kubectl create clusterrolebinding onprem-platform-operator-<USER_CN> \
+  --clusterrole=onprem-platform-operator \
+  --user=<USER_CN> \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### Operator → Admin (cluster-admin)
+
+When the user needs to install operators (CRDs), modify cluster-wide RBAC, or operate as a platform engineer. Reserved for the on-prem platform team.
+
+```bash
+kubectl create clusterrolebinding cluster-admin-<USER_CN> \
+  --clusterrole=cluster-admin \
+  --user=<USER_CN> \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Verify
+kubectl auth can-i create customresourcedefinitions --as=<USER_CN>   # → yes
+kubectl auth can-i '*' '*' --as=<USER_CN>                            # → yes
+```
+
+cluster-admin **supersedes** the operator and reader roles, so you don't need to delete those bindings — they become redundant. Cleanup is optional.
+
+### Adding namespace-scoped edit (for app teams)
+
+When a user needs full edit on a single namespace (incl. secrets there), without cluster-wide write:
+
+```bash
+# Create the namespace if not exists
+kubectl create namespace <APP_NAMESPACE> --dry-run=client -o yaml | kubectl apply -f -
+
+# Bind built-in `edit` role at namespace scope
+kubectl create rolebinding <USER_CN>-edit-<APP_NAMESPACE> \
+  --clusterrole=edit \
+  --user=<USER_CN> \
+  --namespace=<APP_NAMESPACE> \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Use this layered with `onprem-platform-operator` (cluster-wide read) when the user owns one namespace and just needs visibility elsewhere.
+
+---
+
 ## Renewal (annual)
 
 Set a calendar reminder ~30 days before cert expiry. The user reuses their existing key — only the cert is reissued.

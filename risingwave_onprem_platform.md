@@ -39,8 +39,8 @@ The deliverable for Phase 1: working RW cluster on op-usxpress-dev, healthy pods
 
 ### Cluster access (Idris)
 - **Identity**: `idris-fagbemi` (cert-based, expires 2027-04-28)
-- **Cluster-wide**: `onprem-platform-operator` role — read+write on most resources, no secrets
-- **Namespace-scoped**: `edit` ClusterRole bound at `risingwave` namespace — full edit incl. secrets
+- **Cluster-admin** — bound directly. He can install operators, manage CRDs, modify cluster-wide RBAC. This is the right tier for a platform engineer; we treat the cluster as prod and audit-log every action against his identity.
+- Also has (redundant but harmless): `onprem-platform-operator` cluster-wide and `edit` on `risingwave` namespace from earlier provisioning.
 - See [onprem_cluster_access_runbook.md](onprem_cluster_access_runbook.md) for the per-user access pattern
 
 ### Namespace
@@ -90,65 +90,116 @@ The deliverable for Phase 1: working RW cluster on op-usxpress-dev, healthy pods
 
 ---
 
-## Two deployment paths
+## Deployment path — operator-based (production-grade, no POC detour)
 
-The RW Helm-charts repo offers **two charts**. Pick deliberately.
-
-### Path A — Standalone chart (recommended for POC)
-
-- **Chart**: `risingwavelabs/risingwave`
-- **Reference**: https://docs.risingwave.com/deploy/risingwave-k8s-helm
-- Deploys raw K8s primitives (Deployments / StatefulSets / Services) — no CRDs.
-- **No cluster-admin needed** for any step. Idris can do this 100% himself.
-- Lifecycle: kubectl/helm-driven. No operator-managed reconciliation.
-
-**Why this is right for POC**: it works. CRDs aren't needed. Idris stays unblocked even when cluster-admin (Dare) is on PTO.
-
-### Path B — Operator-based deploy
+We use the **operator chart**. No standalone-chart detour. POC ≠ prod-ready, and switching paths later is wasted work. Path is:
 
 - **Operator chart**: `risingwavelabs/risingwave-operator`
 - **Reference**: https://github.com/risingwavelabs/helm-charts/tree/main/charts/risingwave-operator
-- Operator install creates ~5-10 cluster-scoped CRDs (`RisingWave`, `RisingWaveScaleView`, etc.).
-- User then creates `RisingWave` CR instances in their namespace; operator reconciles.
-- **Requires cluster-admin** for operator install (CRDs).
-- **Production-grade** — better lifecycle, rolling upgrades, scale operations declarative.
+- Installs ~5-10 cluster-scoped CRDs (`RisingWave`, `RisingWaveScaleView`, etc.).
+- Operator runs as a Deployment, watches CRs cluster-wide.
+- Idris creates `RisingWave` CR instances in `risingwave` namespace; operator reconciles them into Deployments/StatefulSets.
 
-**When to use**: production. After POC stability is proven. Plan a joint session with Dare/cluster-admin to install the operator + extend Idris's RBAC to cover the `risingwave.risingwavelabs.com` API group.
+Idris has **cluster-admin** so he installs the operator + creates CRs himself. No admin gating on the deployment path during PTO.
 
----
-
-## The CRD blocker (and why it doesn't block POC)
-
-If anyone tries to install the **operator chart** while logged in as a non-admin (Idris, with `onprem-platform-operator` role), it fails:
-
-1. `helm install risingwave-operator` → **403 Forbidden** on creating CustomResourceDefinitions.
-2. Even if CRDs existed, `kubectl apply -f rw-cluster.yaml` (a `RisingWave` CR) → **403** because the API group `risingwave.risingwavelabs.com` isn't in his role.
-
-**Avoidance for POC**: use the **standalone chart** (Path A). No CRDs. He's never blocked.
-
-**If we move to operator path**: the steps below need to happen **once**, by a cluster-admin. Document them here so any cluster-admin (not just Dare) can run them.
+### Operator install (Idris runs this himself)
 
 ```bash
-# 1. Install the operator chart (creates CRDs + operator Deployment)
+# Verify cert-manager is healthy (operator's webhook needs it)
+kubectl get pods -n cert-manager
+# All Running
+
+# Install the operator
 helm repo add risingwavelabs https://risingwavelabs.github.io/helm-charts
 helm repo update
+
 helm install rw-operator risingwavelabs/risingwave-operator \
   --namespace risingwave-operator-system \
   --create-namespace
 
-# 2. Verify CRDs are present
+# Verify operator + CRDs landed
+kubectl get pods -n risingwave-operator-system
 kubectl get crd | grep risingwave
+# Expected: risingwaves.risingwave.risingwavelabs.com,
+#           risingwavescaleviews.risingwave.risingwavelabs.com,
+#           risingwavepodtemplates.risingwave.risingwavelabs.com (and a few more)
 
-# 3. Extend the onprem-platform-operator ClusterRole to allow Idris (and future operators)
-#    to create/manage RisingWave CRs. Patch into the existing CRD-rule (rules[3]):
-kubectl patch clusterrole onprem-platform-operator --type=json -p='[
-  {"op":"add","path":"/rules/3/apiGroups/-","value":"risingwave.risingwavelabs.com"}
-]'
-
-# 4. Verify Idris can now manage RW CRs
-kubectl auth can-i create risingwaves.risingwave.risingwavelabs.com -n risingwave --as=idris-fagbemi
-# → should be: yes
+# Read CR examples to model from
+helm show values risingwavelabs/risingwave-operator > /tmp/rw-operator-values.yaml
+# Browse: https://github.com/risingwavelabs/helm-charts/tree/main/examples
 ```
+
+### RisingWave CR (Idris writes this)
+
+```yaml
+# rw-cluster.yaml — namespace: risingwave
+apiVersion: risingwave.risingwavelabs.com/v1alpha1
+kind: RisingWave
+metadata:
+  name: rw
+  namespace: risingwave
+spec:
+  # Image / version — pin explicitly, don't track latest
+  image: risingwavelabs/risingwave:v2.x.x
+
+  # ServiceAccount — must be 'risingwave' (matches IRSA trust)
+  global:
+    serviceAccountName: risingwave
+
+  # State store — S3 via IRSA (no access keys)
+  stateStore:
+    s3:
+      bucket: risingwave-state-op-usxpress-dev
+      region: us-east-2
+      # No accessKey/secretAccessKey — IRSA handles auth via the SA annotation
+
+  # Metadata store — PostgreSQL
+  metaStore:
+    postgresql:
+      host: pg-postgresql.risingwave.svc.cluster.local
+      port: 5432
+      database: risingwave
+      username: risingwave
+      passwordSecret:
+        name: pg-postgresql
+        key: password
+
+  # Component sizing — tune with Tim's input post-deploy
+  components:
+    meta:
+      replicas: 1
+      resources:
+        requests: { cpu: 200m, memory: 1Gi }
+    frontend:
+      replicas: 1
+      resources:
+        requests: { cpu: 200m, memory: 1Gi }
+    compute:
+      replicas: 2
+      resources:
+        requests: { cpu: 1, memory: 4Gi }
+        limits:   { cpu: 2, memory: 8Gi }
+    compactor:
+      replicas: 1
+      resources:
+        requests: { cpu: 500m, memory: 2Gi }
+```
+
+```bash
+kubectl apply -f rw-cluster.yaml
+kubectl -n risingwave get risingwave rw -w
+# Wait for Status.Phase = Ready
+kubectl -n risingwave get pods
+```
+
+CR field names vary between operator versions — verify against the values file from `helm show values` for the version you install. Example CRs at https://github.com/risingwavelabs/helm-charts/tree/main/examples are the source of truth.
+
+### Why this approach
+
+- **Production-grade lifecycle**: operator handles rolling updates, scale ops, and component coordination declaratively. Standalone chart can't.
+- **No re-platforming work later**: same path POC → prod, just sizing/replicas change.
+- **Standard RW pattern**: matches what Tim's deployments use; matches RW Cloud's model; matches the upstream docs.
+- **Cluster-admin is fine for Idris** — he's a platform engineer onboarded to the on-prem core team.
 
 ---
 
@@ -202,14 +253,14 @@ Tim is the RW SME. He owns Phase 2 (SQL pipelines / MV design). Idris's job in P
 
 ---
 
-## Idris's first-week task list (POC build)
+## Idris's first-week task list (operator-first build)
 
 Calendared for the week Dare is on PTO (May 4–8 2026):
 
-- [ ] Day 1: Create SA with IRSA annotation. Deploy Bitnami Postgres. Pods up.
-- [ ] Day 2: Read `risingwavelabs/risingwave` chart values. Draft custom `values.yaml` with bucket, PG, SA references.
-- [ ] Day 3: Dry-run, then install. Verify all RW pods Running.
-- [ ] Day 4: Verify IRSA (S3 list from compute pod). Verify psql connection. Capture sample query output.
+- [ ] Day 1: Create SA `risingwave/risingwave` with IRSA annotation. Deploy Bitnami Postgres in `risingwave` ns. PG pods up.
+- [ ] Day 2: Install `risingwave-operator` chart (`helm install` — he has cluster-admin). Verify CRDs landed. Read example CRs in upstream `helm-charts/examples/`.
+- [ ] Day 3: Write `RisingWave` CR YAML referencing his SA + bucket + PG metadata DB. `kubectl apply` it. Watch reconciliation.
+- [ ] Day 4: Verify IRSA (S3 list from compute pod). Verify psql via port-forward. Capture sample query output.
 - [ ] Day 5: Wire ServiceMonitor for Prometheus. Mirror RW reference Grafana dashboards into iaac-monitoring.
 - [ ] Friday meeting with Tim: walk-through, pick first Kafka topic.
 
@@ -250,7 +301,8 @@ psql -h localhost -p 4566 -d dev -U root
 |---|---|---|---|
 | 2026-03-31 | RW lives in iaac-eks-style separate repo, NOT in DX pipeline | Decouple from app-deploy machinery, separate ownership/release cadence | Vibin |
 | 2026-04-28 | Cluster target = op-usxpress-dev (on-prem) for first POC | Leverage on-prem skills, AWS-outage-independence story | Steve / Dare |
-| 2026-04-29 | Use standalone chart for POC (not operator) | Avoid CRD blocker; Idris fully unblocked | Dare (this doc) |
+| 2026-04-29 | Use **operator** chart (production-grade); skip standalone POC | POC ≠ prod-ready; switching paths later is wasted work | Dare (revised same day) |
+| 2026-04-29 | Bind Idris to **cluster-admin** | Required for operator install (CRDs, webhook configs); appropriate for platform engineer; audit-logged per his identity | Dare |
 | 2026-04-29 | IRSA for S3 (no IAM access keys) | Standard prod pattern, leverages existing Talos OIDC infra | Dare |
 | 2026-04-29 | Bitnami Postgres for metadata (POC) | Simple, no extra operator. Migrate to CNPG/RDS for prod. | Dare |
 | TBD | Flyway vs Liquibase vs go-migrate for migrations | Pending Tim's recommendation + Idris's eval | Tim + Idris |
@@ -275,10 +327,11 @@ psql -h localhost -p 4566 -d dev -U root
 - [x] S3 bucket created
 - [x] IAM role for IRSA created
 - [x] Idris briefed via Slack with full step-by-step
-- [ ] Confirm with Idris that he can deploy via standalone chart with no admin help
-- [ ] Walk Idris through `kubectl auth can-i` on the namespace so he understands his ceiling
+- [ ] **Bind Idris to cluster-admin** (`kubectl create clusterrolebinding cluster-admin-idris-fagbemi --clusterrole=cluster-admin --user=idris-fagbemi`)
+- [ ] Verify cert-manager is healthy (operator dependency)
+- [ ] Send Idris updated message: operator-first path, you have cluster-admin, install away
 - [ ] Document this doc's location in #cloud-platform Slack channel for visibility
-- [ ] Alert Steve to be backup contact for any cluster-admin-needs (CRDs, cluster-scoped resources) during PTO
+- [ ] Alert Steve as backup contact for emergencies during PTO (Idris is now self-sufficient for normal work)
 - [ ] Tim Preble intro meeting Friday — Idris + Tim aligned on Phase 1 vs Phase 2 scope
 
 ---
@@ -300,12 +353,12 @@ For Idris if he hits a wall:
 
 | Need | Contact |
 |---|---|
-| Cluster-admin task (CRD install, cluster-scoped resources) | Steve Duck (or wait until Dare is back) |
+| Cluster-admin task | **Idris does this himself** — he has cluster-admin |
 | RisingWave technical question | Tim Preble |
 | AWS account / IAM emergency | Vibin (back later in week) |
 | GitHub variant-inc invite issue | Vibin |
-| General platform outage | Cloud-platform on-call rotation |
+| General platform outage / break-glass | Steve Duck (offline cert kubeconfig backup) |
 
 **Default for non-urgent**: queue questions in Slack with full context; Dare picks them up May 11.
 
-**Default for urgent cluster-admin**: Steve has admin kubeconfig access (break-glass cert from offline backup if needed). Direct him to this doc for context.
+**Default for urgent cluster-admin work**: Idris is the cluster-admin during PTO — he handles his own operator/CRD/RBAC needs. Steve is break-glass only.
