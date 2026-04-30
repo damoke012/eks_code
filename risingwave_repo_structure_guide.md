@@ -559,7 +559,10 @@ spec:
 > ```
 > Store the password in AWS SM (`op-usxpress-dev/risingwave/root`) and rotate periodically.
 
-> **Transitional location**: Until `iaac-risingwave` exists, this manifest lives at `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` (registered via `iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml`). When `iaac-risingwave` lands, the manifest moves there verbatim and the cluster Kustomization's `sourceRef` re-points.
+> **Transitional location** (live as of 2026-04-30):
+> - **Manifest**: `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` on branch `op-dev` (the on-prem platform branch — note: NOT `bm-dev`).
+> - **Cluster registration**: `iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml` on branch `master`. The directory is named `bm-dev/` for legacy reasons but is the active config for `op-usxpress-dev`. Worth renaming to `clusters/op-usxpress-dev/` in a separate commit.
+> - **When `iaac-risingwave` lands**, the manifest moves there verbatim and the cluster Kustomization's `sourceRef` re-points.
 
 ### `manifests/op-usxpress-dev/servicemonitor.yaml`
 
