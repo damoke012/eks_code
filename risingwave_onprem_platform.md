@@ -76,8 +76,8 @@ The deliverable for Phase 1: working RW cluster on op-usxpress-dev, healthy pods
 
 | Item | Owner | Status |
 |---|---|---|
-| variant-inc GitHub org invite for `ifagbemi-usxpress` | Vibin | ⏳ blocking repo work; not blocking Helm CLI install |
-| `iaac-risingwave` repo creation in variant-inc | Vibin/Dare | ⏳ after Vibin's PTO ends |
+| variant-inc GitHub org invite for `ifagbemi-usxpress` | On-prem team | ⏳ blocking repo work; not blocking Helm CLI install |
+| `iaac-risingwave` repo creation in variant-inc | On-prem team | ⏳ create when ready to move from laptop to GitOps |
 | RW pods running on cluster | Idris | ⏳ in progress |
 | IRSA verification (S3 list from compute pod) | Idris | ⏳ |
 | psql connection test | Idris | ⏳ |

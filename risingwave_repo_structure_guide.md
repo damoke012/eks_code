@@ -1,21 +1,21 @@
 # `iaac-risingwave` Repo Structure & Build Guide
 
 **Audience**: Idris Fagbemi (Phase 1 platform owner)
-**Goal**: Build the `iaac-risingwave` repo locally now. Once Vibin creates the repo on `variant-inc`, push and let Flux take over. No wasted work — every manifest you write on your laptop becomes the repo's initial commit.
+**Goal**: Build the `iaac-risingwave` repo locally now. Once the repo exists on `variant-inc`, push and let Flux take over. No wasted work — every manifest you write on your laptop becomes the repo's initial commit.
 
-This is the **iaac-eks-style pattern** Vibin asked for: own repo, own CI/CD, decoupled from DX / mage-runner / Octopus. RisingWave's release cadence and ownership are separate from app deploys.
+This is the **iaac-eks-style pattern**: own repo, own CI/CD, decoupled from DX / mage-runner / Octopus. RisingWave's release cadence and ownership are separate from app deploys. **The on-prem team owns this end-to-end** — no cross-team dependency.
 
 ---
 
 ## The two-phase workflow
 
-### Phase A — Local-only (now, until Vibin grants `variant-inc` invite)
+### Phase A — Local-only (now)
 
 You build the full directory tree on your laptop under `~/code/iaac-risingwave/` (or wherever you keep work). You install RW on the cluster manually (`helm install ...`, `kubectl apply -f ...`) using the same files that will eventually be in the repo. Nothing is wasted — the laptop install proves the manifests work; the manifests go into the repo verbatim.
 
-### Phase B — Committed & Flux-managed (after Vibin's PTO)
+### Phase B — Committed & Flux-managed
 
-1. Vibin creates `variant-inc/iaac-risingwave` (empty)
+1. On-prem team creates `variant-inc/iaac-risingwave` (empty)
 2. You `git init`, add origin, push your local tree as the initial commit
 3. We add a `GitRepository` + `Kustomization` to `iaac-talos-flux-cluster` pointing at this repo
 4. Flux reconciles it like everything else
@@ -622,9 +622,9 @@ This is a Dare-side change. You don't need to do it — just know it's the wirin
 
 ---
 
-## Working order — once Vibin grants access
+## Working order — once the repo exists
 
-1. Vibin creates `variant-inc/iaac-risingwave` (empty).
+1. On-prem team creates `variant-inc/iaac-risingwave` (empty).
 2. From your laptop:
    ```bash
    cd ~/code/iaac-risingwave
@@ -675,7 +675,7 @@ Manifests don't need workflows — Flux applies them. Optionally add a `kubeval`
 
 ---
 
-## Open questions to resolve with Tim & Vibin
+## Open questions to resolve with Tim
 
 - Operator chart **version pin** — Tim may have preference based on POC experience
 - **Resource sizing** for compute nodes — depends on Phase 2 workload
