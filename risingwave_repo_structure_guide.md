@@ -617,7 +617,11 @@ This is a Dare-side change. You don't need to do it — just know it's the wirin
    kubectl apply -f manifests/op-usxpress-dev/risingwave-cr.yaml
    kubectl apply -f manifests/op-usxpress-dev/servicemonitor.yaml
    ```
-5. **Verify** — pods `Running`, IRSA works (`kubectl exec -it <compute-pod> -n risingwave -- aws s3 ls`), psql via port-forward, metrics scraping.
+5. **Verify**:
+   - All pods `Running` — `kubectl get pods -n risingwave`
+   - **psql** via port-forward — `kubectl -n risingwave port-forward svc/risingwave-frontend 4567:4567` then `psql -h localhost -p 4567 -d dev -U root` (operator default port is **4567**, not 4566)
+   - **IRSA** — RW images don't include `aws` CLI, so verify two ways: (a) env-var inspection — `kubectl exec -n risingwave statefulset/risingwave-compute -- env | grep AWS_` should show `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_REGION`; (b) debug pod — `kubectl run aws-debug -n risingwave --rm -it --restart=Never --image=amazon/aws-cli:latest --overrides='{"spec":{"serviceAccountName":"risingwave"}}' -- s3 ls s3://risingwave-state-op-usxpress-dev/`
+   - **Metrics** — `kubectl -n risingwave port-forward svc/risingwave-meta 1250:1250` then `curl localhost:1250/metrics | head`
 6. **Iterate** the manifests until everything is healthy. Every fix to a YAML file = the laptop install matches the repo content.
 
 ---
