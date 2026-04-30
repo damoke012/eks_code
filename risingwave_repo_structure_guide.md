@@ -52,6 +52,7 @@ iaac-risingwave/
 │       ├── postgres-helmrelease.yaml
 │       ├── operator-helmrelease.yaml
 │       ├── risingwave-cr.yaml
+│       ├── frontend-lb.yaml          # LAN VIP for human/external psql access
 │       └── servicemonitor.yaml
 ├── docs/
 │   ├── architecture.md
@@ -522,6 +523,43 @@ spec:
 ```
 
 > **CR schema caveat**: The exact field names depend on the operator version you install. Run `kubectl explain risingwave.spec` after the operator is installed and adjust. The structure above matches recent versions; pin the operator chart and lock the schema.
+
+### `manifests/op-usxpress-dev/frontend-lb.yaml`
+
+Stable LAN VIP for human/external psql access. The operator-managed `risingwave-frontend` ClusterIP Service stays untouched (in-cluster apps use it via DNS); this is a **sibling** Service for anyone outside the cluster.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: risingwave-frontend-lb
+  namespace: risingwave
+  labels:
+    app: risingwave
+    role: external-access
+  annotations:
+    "lbipam.cilium.io/ips": "10.10.82.221"   # pin to a stable LAN IP from the Cilium pool
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+    - 10.10.0.0/16   # USXpress LAN/VPN clients only — defense in depth
+  selector:
+    risingwave/component: frontend
+    risingwave/name: risingwave
+  ports:
+    - name: postgres
+      port: 4567
+      targetPort: service   # operator names the pod port "service"
+      protocol: TCP
+```
+
+> **Auth gate**: Don't apply this until `root` (or a non-root user) has a password. RW's default `root` is password-less, which is fine for in-cluster ClusterIP traffic but unsafe on a LAN VIP. Set with:
+> ```sql
+> ALTER USER root WITH ENCRYPTED PASSWORD '<from openssl rand -base64 24>';
+> ```
+> Store the password in AWS SM (`op-usxpress-dev/risingwave/root`) and rotate periodically.
+
+> **Transitional location**: Until `iaac-risingwave` exists, this manifest lives at `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` (registered via `iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml`). When `iaac-risingwave` lands, the manifest moves there verbatim and the cluster Kustomization's `sourceRef` re-points.
 
 ### `manifests/op-usxpress-dev/servicemonitor.yaml`
 

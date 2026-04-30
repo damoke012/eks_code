@@ -63,6 +63,19 @@ The deliverable for Phase 1: working RW cluster on op-usxpress-dev, healthy pods
 - **Attached policy**: `op-usxpress-dev-risingwave-s3` — S3 R/W on the bucket above
 - **No IAM access keys** — pods authenticate via projected SA tokens through IRSA
 
+### SQL endpoints
+
+| Path | Address | Who uses it | Notes |
+|---|---|---|---|
+| **In-cluster (ClusterIP, operator-managed)** | `risingwave-frontend.risingwave.svc.cluster.local:4567` | Tim's Kafka pipelines, in-cluster apps | Operator owns; do not modify |
+| **LAN VIP (LoadBalancer, GitOps-managed)** | `10.10.82.221:4567` | Humans on USXpress VPN, BI tools, pgAdmin | Cilium L2/ARP; source-IP gated to `10.10.0.0/16`; manifest in `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` |
+
+### Authentication
+
+- `root` user **has a password set** (encrypted, via `ALTER USER`). Store the password in AWS SM at `op-usxpress-dev/risingwave/root` and rotate periodically.
+- Default RW user/database: `root` / `dev`. No other users provisioned yet.
+- **Don't expose RW without a password** — the LB Service has `loadBalancerSourceRanges` as defense in depth, but auth is the primary gate.
+
 ### What Idris has been told to do
 - Create the SA `risingwave/risingwave` with the `eks.amazonaws.com/role-arn` annotation
 - Deploy Bitnami Postgres for RW metadata DB (`pg-postgresql.risingwave.svc.cluster.local`)
