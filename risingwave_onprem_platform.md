@@ -68,7 +68,7 @@ The deliverable for Phase 1: working RW cluster on op-usxpress-dev, healthy pods
 | Path | Address | Who uses it | Notes |
 |---|---|---|---|
 | **In-cluster (ClusterIP, operator-managed)** | `risingwave-frontend.risingwave.svc.cluster.local:4567` | Tim's Kafka pipelines, in-cluster apps | Operator owns; do not modify |
-| **LAN VIP (LoadBalancer, GitOps-managed)** | `10.10.82.221:4567` | Humans on USXpress VPN, BI tools, pgAdmin | Cilium L2/ARP; source-IP gated to `10.10.0.0/16`; manifest in `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` (branch `op-dev`); registered in `iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml` (branch `master`) — **note: cluster dir is `bm-dev/` for legacy reasons but it's the live op-usxpress-dev config** |
+| **NodePort on worker IPs (GitOps-managed)** | `10.10.82.26:32567` (any worker IP works) | Humans on USXpress VPN, BI tools, pgAdmin | `type: NodePort`, `nodePort: 32567`. Manifest in `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` (branch `op-dev`); registered in `iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml` (branch `master`). **Worker IPs only** — Talos blocks NodePort on CP nodes. **NOT LoadBalancer** — Cilium L2/ARP doesn't propagate to VPN clients in this network (no BGP on-prem). |
 
 ### Authentication
 

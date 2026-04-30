@@ -524,40 +524,48 @@ spec:
 
 > **CR schema caveat**: The exact field names depend on the operator version you install. Run `kubectl explain risingwave.spec` after the operator is installed and adjust. The structure above matches recent versions; pin the operator chart and lock the schema.
 
-### `manifests/op-usxpress-dev/frontend-lb.yaml`
+### `manifests/op-usxpress-dev/frontend-lb.yaml` — NodePort for VPN access
 
-Stable LAN VIP for human/external psql access. The operator-managed `risingwave-frontend` ClusterIP Service stays untouched (in-cluster apps use it via DNS); this is a **sibling** Service for anyone outside the cluster.
+External entry point for human/dev SQL access (psql from a laptop, BI tools, etc.). The operator-managed `risingwave-frontend` ClusterIP Service stays untouched — in-cluster apps use that via DNS. This is a sibling Service exposed on every worker node IP at a fixed NodePort.
 
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: risingwave-frontend-lb
+  name: risingwave-frontend-lb       # name kept for legacy reasons; rename to *-ext is a follow-up
   namespace: risingwave
   labels:
     app: risingwave
     role: external-access
-  annotations:
-    "lbipam.cilium.io/ips": "10.10.82.221"   # pin to a stable LAN IP from the Cilium pool
 spec:
-  type: LoadBalancer
-  loadBalancerSourceRanges:
-    - 10.10.0.0/16   # USXpress LAN/VPN clients only — defense in depth
+  type: NodePort
   selector:
     risingwave/component: frontend
     risingwave/name: risingwave
   ports:
     - name: postgres
       port: 4567
-      targetPort: service   # operator names the pod port "service"
+      targetPort: service       # operator names the pod port "service"
+      nodePort: 32567           # fixed for stable docs; in default 30000-32767 range
       protocol: TCP
 ```
 
-> **Auth gate**: Don't apply this until `root` (or a non-root user) has a password. RW's default `root` is password-less, which is fine for in-cluster ClusterIP traffic but unsafe on a LAN VIP. Set with:
+> **Connect from your laptop (USXpress VPN)**:
+> ```bash
+> psql -h 10.10.82.26 -p 32567 -d dev -U root
+> # 10.10.82.26 = talos-wk-op-dev-1; any worker IP works
+> # password from AWS SM: op-usxpress-dev/risingwave/root
+> ```
+
+> **Auth gate**: `root` MUST have a password before this is exposed. Set via psql:
 > ```sql
 > ALTER USER root WITH ENCRYPTED PASSWORD '<from openssl rand -base64 24>';
 > ```
-> Store the password in AWS SM (`op-usxpress-dev/risingwave/root`) and rotate periodically.
+> Store in AWS SM `op-usxpress-dev/risingwave/root` and rotate.
+
+> **Why NodePort and not LoadBalancer**: This cluster's Cilium uses **L2/ARP** for LB advertisement (no BGP on-prem). L2/ARP claims the IP only on the cluster's L2 broadcast domain — VPN clients are routed *into* that subnet from a different segment, and routers don't relay ARP. Result: a Cilium-announced LB VIP is invisible to anyone on VPN. Confirmed in testing 2026-04-30: LB at `10.10.82.221` was reachable from inside the cluster but timed out from VPN. NodePort sidesteps this entirely because node IPs are routable from VPN (you can already reach the API VIP at `10.10.82.50`). When BGP is added at the network layer, we can revisit and reintroduce LoadBalancer Services.
+
+> **Why worker IPs and not the API VIP**: Talos blocks NodePort traffic on **control plane nodes** by default (security). The API VIP `10.10.82.50` floats among CP nodes, so connections to it on NodePort port get TCP RST. Workers allow NodePort. Pick any worker IP from `kubectl get nodes -o wide --selector='!node-role.kubernetes.io/control-plane'`.
 
 > **Transitional location** (live as of 2026-04-30):
 > - **Manifest**: `iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml` on branch `op-dev` (the on-prem platform branch — note: NOT `bm-dev`).
