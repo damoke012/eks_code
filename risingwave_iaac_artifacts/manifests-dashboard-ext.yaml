@@ -1,0 +1,32 @@
+# NodePort Service exposing the RisingWave Dashboard UI to USXpress VPN clients.
+# Sibling of risingwave-frontend-lb (which exposes the SQL endpoint).
+#
+# The operator's risingwave-meta Service is headless (ClusterIP: None) on port 5691;
+# this is a sibling Service that targets the same pods but as ClusterIP+NodePort.
+#
+# Connect from VPN: http://10.10.82.26:32569 (or any worker IP)
+#
+# Place at: iaac-talos-flux-platform/infrastructure/risingwave/dashboard-ext.yaml
+# (and add to kustomization.yaml resources list)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risingwave-dashboard-ext
+  namespace: risingwave
+  labels:
+    app: risingwave
+    role: external-access
+spec:
+  type: NodePort
+  selector:
+    risingwave/component: meta
+    risingwave/name: risingwave
+  ports:
+    - name: dashboard
+      port: 5691
+      targetPort: dashboard   # confirm the named port on the meta pod with:
+                              #   kubectl describe pod -n risingwave -l risingwave/component=meta
+                              # if "dashboard" doesn't exist, change to a numeric port: 5691
+      nodePort: 32569
+      protocol: TCP
