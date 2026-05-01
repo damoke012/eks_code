@@ -55,16 +55,25 @@ The codespace can't push to `variant-inc/*` repos directly — auth issue, separ
      - dashboard-ext.yaml
    ```
 
-## Things to verify before applying
+## Verified-correct values (after live deployment 2026-05-01)
 
-- `aws-secretsmanager` ClusterSecretStore name on the cluster — the manifests assume it
-  exists. If named differently, edit `secretStoreRef.name` in the ExternalSecrets.
-- The `targetPort: dashboard` on the Dashboard NodePort — confirm the meta pod actually
-  has a port named "dashboard" (kubectl describe pod). If not, change to numeric `5691`.
-- The Postgres StatefulSet (Idris's hand-rolled one) — when it starts consuming
-  `pg-credentials` Secret instead of hardcoded values, **the existing data may not
-  be accessible** if the password changed. Plan: snapshot existing DB state before
-  cutover, or accept that RW's metadata gets recreated and the operator re-bootstraps.
+The manifests are now updated to match what's actually in the cluster:
+
+- **API version**: `external-secrets.io/v1` (NOT `v1beta1` — the cluster only has v1)
+- **ClusterSecretStore name**: `default` (NOT `aws-secretsmanager` — the AWS SM-backed store on this cluster is `default`)
+- **Target Secret name for Postgres**: `risingwave-pg-credentials` (matches RW CR's reference, NOT `pg-credentials`)
+- **Target Secret name for RW root**: `rw-root-credentials` (new Secret, no transition needed)
+- **creationPolicy**: `Owner` (after Merge transition for pg, fresh for root)
+
+## Status of each artifact
+
+| File | Deployed? | Notes |
+|---|---|---|
+| `manifests-pg-externalsecret.yaml` | ✅ DEPLOYED 2026-05-01 | Merge → Owner transition successful. Self-heal verified. |
+| `manifests-rw-root-externalsecret-and-bootstrap-job.yaml` (ExternalSecret part) | ✅ DEPLOYED 2026-05-01 | Owner from start. Secret materialized correctly. |
+| `manifests-rw-root-externalsecret-and-bootstrap-job.yaml` (Job part) | ❌ NOT deployed | Rotation flow needs design. Current state matches anyway. |
+| `manifests-dashboard-ext.yaml` | ❌ NOT deployed | Pending. NodePort for Dashboard UI. |
+| `cluster-secrets-rw.yaml` | ❌ NOT used (manual SM seeding 2026-05-01 instead) | Use post-PTO when iaac-risingwave-onprem repo + IAM role exist. |
 
 ## Caveats and known gaps
 

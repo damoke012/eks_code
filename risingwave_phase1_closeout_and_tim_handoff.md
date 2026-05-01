@@ -236,7 +236,11 @@ Today: each engineer hand-installs the cert (Idris stuck on this for terraform).
 - [x] AWS SM seeding (DONE 2026-05-01 — manual via `aws secretsmanager create-secret`):
   - `op-usxpress-dev/risingwave/postgres` ✓ (current values: risingwave/risingwave)
   - `op-usxpress-dev/risingwave/root` ✓ (current value: WLThdeIQznAJ9RxSdWV3SaCFMY1yFjO1)
-- [ ] **NEXT** (separate deliberate change, not during PTO): deploy ExternalSecrets to populate k8s Secrets from SM. The existing `risingwave-pg-credentials` is hand-rolled — ExternalSecret transition needs a planned window.
+- [x] **ExternalSecrets deployed** (DONE 2026-05-01 — `kubectl apply` on cluster):
+  - `risingwave-pg-credentials`: Merge → Owner transition, SecretSynced=True, self-heal verified
+  - `rw-root-credentials`: Owner from start, SecretSynced=True
+  - Both API: `external-secrets.io/v1`, ClusterSecretStore: `default`
+- [ ] Commit ExternalSecret manifests to `iaac-talos-flux-platform/infrastructure/risingwave/` (op-dev branch) so Flux owns them — not just kubectl apply
 - [ ] Get USXpress corp CA installed in WSL (unblock terraform install)
 - [ ] Set up Prometheus/Grafana ServiceMonitor for RW metrics (chart already there, Idris just wires it up)
 
