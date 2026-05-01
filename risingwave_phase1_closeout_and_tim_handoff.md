@@ -33,8 +33,8 @@ Phase 1 platform deployment is **functionally complete**. RisingWave v2.8.2 is u
 | Postgres metastore (StatefulSet `pg-postgresql-0`) | 1/1 Running, hand-rolled | `kubectl apply` (NOT in git) |
 | External SQL Service `risingwave-frontend-lb` (NodePort 32567) | Flux-managed | iaac-talos-flux-platform/infrastructure/risingwave/frontend-lb.yaml (op-dev branch, commit 70f3b70) |
 | Flux Kustomization `risingwave` | Ready=True, applied revision op-dev@sha1:6b3e9bc9 | iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml (master, commit b86a8bc) |
-| RW root password | Set via `ALTER USER` once (`WLThdeIQznAJ9RxSdWV3SaCFMY1yFjO1`) | NOT in AWS SM yet — manual one-time |
-| Postgres credentials | Hardcoded in StatefulSet (default RW/RW values) | NOT in AWS SM yet |
+| RW root password | Set via `ALTER USER` once (`WLThdeIQznAJ9RxSdWV3SaCFMY1yFjO1`) | ✅ In AWS SM as `op-usxpress-dev/risingwave/root` (seeded 2026-05-01, ARN suffix `-I8UORc`) |
+| Postgres credentials | Hardcoded in StatefulSet (default RW/RW values: `username=risingwave, password=risingwave`) | ✅ In AWS SM as `op-usxpress-dev/risingwave/postgres` (seeded 2026-05-01, ARN suffix `-uscTgj`) |
 
 ### AWS-side state
 
@@ -233,9 +233,10 @@ Today: each engineer hand-installs the cert (Idris stuck on this for terraform).
   - [ ] Bootstrap Job for RW root password (manifest drafted below)
   - [ ] Dashboard NodePort Service (manifest drafted below)
 - [ ] Recorded meeting with Tim — Phase 2 walkthrough, demo of Tim's POC Red Hat server, demo of his RAG pipeline
-- [ ] AWS SM seeding: via GHA workflow (drafted below) OR manually:
-  - `op-usxpress-dev/risingwave/postgres` (username/password/postgres-password)
-  - `op-usxpress-dev/risingwave/root` (password)
+- [x] AWS SM seeding (DONE 2026-05-01 — manual via `aws secretsmanager create-secret`):
+  - `op-usxpress-dev/risingwave/postgres` ✓ (current values: risingwave/risingwave)
+  - `op-usxpress-dev/risingwave/root` ✓ (current value: WLThdeIQznAJ9RxSdWV3SaCFMY1yFjO1)
+- [ ] **NEXT** (separate deliberate change, not during PTO): deploy ExternalSecrets to populate k8s Secrets from SM. The existing `risingwave-pg-credentials` is hand-rolled — ExternalSecret transition needs a planned window.
 - [ ] Get USXpress corp CA installed in WSL (unblock terraform install)
 - [ ] Set up Prometheus/Grafana ServiceMonitor for RW metrics (chart already there, Idris just wires it up)
 
