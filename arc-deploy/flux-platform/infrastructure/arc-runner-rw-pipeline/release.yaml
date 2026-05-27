@@ -1,0 +1,43 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: risingwave-pipeline
+  namespace: arc-runners
+spec:
+  interval: 30m
+  timeout: 10m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: gha-runner-scale-set
+      version: "0.14.2"
+      sourceRef:
+        kind: HelmRepository
+        name: actions-runner-controller
+        namespace: flux-system
+  values:
+    # Repo-scoped registration. The runner only serves
+    # variant-inc/risingwave-pipeline (matches the gha-...-secrets IAM role
+    # trust which is also scoped to this repo's master branch).
+    githubConfigUrl: https://github.com/variant-inc/risingwave-pipeline
+
+    # k8s secret created by the arc-runner-pat ExternalSecret (key github_token).
+    githubConfigSecret: arc-runner-pat
+
+    # Becomes the `runs-on` label in pipeline.yaml -> runs-on: risingwave-pipeline
+    runnerScaleSetName: risingwave-pipeline
+
+    # Scale to zero when idle; cap at 2 concurrent. SQL pipeline runs are
+    # infrequent so this keeps the cluster footprint near-zero between jobs.
+    minRunners: 0
+    maxRunners: 2
+
+    # Default container mode: the runner pod runs the job steps directly.
+    # No dind (we don't build images) and no kubernetes mode (no job
+    # `container:`/`services:` usage in pipeline.yaml). Keeps PodSecurity at
+    # baseline and avoids a per-job work-volume PVC.

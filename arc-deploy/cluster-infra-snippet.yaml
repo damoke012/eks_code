@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# APPEND these two Kustomizations to:
+#   iaac-talos-flux-cluster: clusters/bm-dev/flux-system/infra.yaml
+#
+# They wire the two new flux-platform infrastructure dirs into Flux:
+#   infrastructure/arc-controller        (ARC controller + OCI HelmRepository)
+#   infrastructure/arc-runner-rw-pipeline (runner scale set + PAT ExternalSecret)
+#
+# Ordering: arc-controller must be healthy first (it installs the
+# AutoscalingRunnerSet CRD the scale set depends on). The runner set also
+# needs external-secrets-config (ClusterSecretStore "default") for the PAT.
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: arc-controller
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/arc-controller
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: arc-runner-rw-pipeline
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: arc-controller
+    - name: external-secrets-config
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/arc-runner-rw-pipeline
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
