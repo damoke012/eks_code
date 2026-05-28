@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+    createdBy: cert-manager
+  labels:
+    # cert-manager controller pods are not privileged; baseline is enough.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: baseline

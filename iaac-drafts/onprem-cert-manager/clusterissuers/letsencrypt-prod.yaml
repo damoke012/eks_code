@@ -1,0 +1,23 @@
+# LE PROD issuer — only after staging issuance verified end-to-end.
+# Real public-trust certs. Mind the rate limits:
+#   - 50 certs/registered-domain/week
+#   - 5 duplicate certs/week (same set of SANs)
+# Open question per design doc: LE PROD vs AWS PCA. Steve to weigh in.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: doke@usxpress.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+    - selector:
+        dnsZones:
+        - op-dev.usxpress.io
+      dns01:
+        route53:
+          region: us-east-1
+          role: arn:aws:iam::155768531003:role/iaac-route53-zone

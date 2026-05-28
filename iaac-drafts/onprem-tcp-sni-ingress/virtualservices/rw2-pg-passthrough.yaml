@@ -1,0 +1,29 @@
+# Same pattern as rw2-sql but for the postgres meta backend of RW-2.
+# SNI `rw2-pg.op-dev.usxpress.io:5432` → postgres-postgresql.risingwave-2.svc:5432
+#
+# Note: exposing the meta postgres externally has limited utility (mostly
+# for debugging / migrations). Consider whether to actually publish DNS for
+# this — could leave it gateway-routed but not in DNS until needed.
+
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw2-pg-passthrough
+  namespace: istio-ingress
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: rw2-pg.op-dev.usxpress.io
+spec:
+  hosts:
+  - "rw2-pg.op-dev.usxpress.io"
+  gateways:
+  - tcp-passthrough
+  tls:
+  - match:
+    - port: 5432
+      sniHosts:
+      - rw2-pg.op-dev.usxpress.io
+    route:
+    - destination:
+        host: postgres-postgresql.risingwave-2.svc.cluster.local
+        port:
+          number: 5432

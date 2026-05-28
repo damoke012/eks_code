@@ -1,0 +1,57 @@
+# TLS-PASSTHROUGH Gateway for the on-prem TCP plane.
+# Lives in istio-ingress namespace where the gateway DaemonSet runs.
+#
+# Each `servers:` entry declares a TLS-PT listener on a port. Hostnames are
+# the SNI labels Envoy peeks at to select a backend (matched by the
+# downstream VirtualService).
+#
+# Adding a new TCP service:
+#   1. Add a `servers:` entry for the new port (if a new port family) OR
+#      reuse an existing one (e.g., another psql backend can share 5432
+#      with a different SNI hostname).
+#   2. Add a VirtualService with `hosts: [<sni-name>]` and `tls: [{match:[{sniHosts:[<sni-name>]}], route:[...]}]`.
+#
+# IMPORTANT: With TLS PASSTHROUGH, the gateway does NOT terminate. The
+# backend pod must serve TLS itself (Phase 2 enables this per-service).
+#
+# Apply order: this Gateway can be present BEFORE backends have TLS — until
+# then, connect attempts will SNI-route correctly but the backend will RST
+# (Envoy proxies the failed TCP setup). That's safe; no half-state risk.
+
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: tcp-passthrough
+  namespace: istio-ingress
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  # PostgreSQL wire / RisingWave SQL on 4567
+  - port:
+      number: 4567
+      name: rwsql-passthrough
+      protocol: TLS
+    tls:
+      mode: PASSTHROUGH
+    hosts:
+    # SNI hosts. Add a new entry per RW frontend that should be reachable.
+    # The * wildcard is intentional — VirtualServices below narrow per SNI.
+    - "*.op-dev.usxpress.io"
+
+  # PostgreSQL wire on 5432
+  - port:
+      number: 5432
+      name: postgres-passthrough
+      protocol: TLS
+    tls:
+      mode: PASSTHROUGH
+    hosts:
+    - "*.op-dev.usxpress.io"
+
+  # Future protocol slots — add as backends come online:
+  # - port: {number: 6379, name: redis-passthrough, protocol: TLS}
+  #   tls: {mode: PASSTHROUGH}
+  #   hosts: ["*.op-dev.usxpress.io"]
+  # - port: {number: 27017, name: mongo-passthrough, protocol: TLS}
+  #   ... etc

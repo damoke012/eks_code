@@ -1,0 +1,41 @@
+# VirtualService routing SNI `rw2-sql.op-dev.usxpress.io:4567` to the RW-2
+# frontend Service. PASSTHROUGH-only: no payload inspection, no L7 policy.
+#
+# This must live in the SAME ns as the Gateway (`istio-ingress`) OR be
+# explicitly bound via `exportTo` if placed elsewhere. Keep simple: same ns.
+#
+# Backend Service: risingwave-frontend.risingwave-2.svc.cluster.local:4567
+# Pre-req for full E2E: backend has TLS enabled (Phase 2 / INFRA-1495).
+# Without that, the TCP handshake completes at the Envoy proxy, then the
+# backend RSTs because it speaks plain psql, not TLS.
+#
+# external-dns hint: target the gateway DaemonSet pods' worker IPs.
+# external-dns watches Gateway resources by default; the target annotation
+# on the Gateway above propagates here. If we want a per-VS annotation
+# override, add: external-dns.alpha.kubernetes.io/target: "<csv worker IPs>"
+
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw2-sql-passthrough
+  namespace: istio-ingress
+  annotations:
+    # external-dns will use these to create the A-records pointing at worker
+    # IPs. Confirm the resolver flag list on external-dns; istio-gateway
+    # source typically picks this up automatically from the Gateway parent.
+    external-dns.alpha.kubernetes.io/hostname: rw2-sql.op-dev.usxpress.io
+spec:
+  hosts:
+  - "rw2-sql.op-dev.usxpress.io"
+  gateways:
+  - tcp-passthrough
+  tls:
+  - match:
+    - port: 4567
+      sniHosts:
+      - rw2-sql.op-dev.usxpress.io
+    route:
+    - destination:
+        host: risingwave-frontend.risingwave-2.svc.cluster.local
+        port:
+          number: 4567

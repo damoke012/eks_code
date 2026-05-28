@@ -1,0 +1,111 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 5m
+  timeout: 15m
+  chart:
+    spec:
+      chart: cert-manager
+      # Pinned. Bump after release-notes review only.
+      version: "v1.16.1"
+      sourceRef:
+        kind: HelmRepository
+        name: charts-jetstack-io
+      interval: 12h
+  maxHistory: 10
+  releaseName: cert-manager
+  targetNamespace: cert-manager
+  storageNamespace: cert-manager
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    disableWait: false
+    disableWaitForJobs: false
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      strategy: rollback
+      remediateLastFailure: true
+    disableWait: false
+    disableWaitForJobs: false
+  driftDetection:
+    mode: enabled
+  values:
+    # CRDs are installed by Flux above (CreateReplace) — keep chart side off
+    # so we don't double-manage them.
+    crds:
+      enabled: false
+      keep: true
+
+    # IRSA service account. Role lives in USX-Dev (700736442855). Name MUST
+    # start with `cert-manager-` to match the wildcard trust on
+    # iaac-route53-zone in 155768531003 (verified — no patch needed).
+    serviceAccount:
+      create: true
+      name: cert-manager
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::700736442855:role/cert-manager-op-usxpress-dev
+
+    # ACME requires accurate clock skew handling; ensure metrics are on for
+    # alerting and issuance is observable.
+    prometheus:
+      enabled: true
+      servicemonitor:
+        enabled: true
+
+    # Modest resources — DNS-01 is bursty (lots of polling during issuance),
+    # otherwise idle.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    webhook:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+      # SecurityContext stays at chart default (runAsNonRoot, no privilege).
+
+    cainjector:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 512Mi
+
+    startupapicheck:
+      enabled: true
+      # Job exits cleanly after first successful API check; safe to enable.
+
+    # Don't override CA injectors or anything network-policy related here —
+    # those land in Phase 4 if we add backend NetworkPolicies that need to
+    # talk to cert-manager.
+
+    # Pin to workers (control planes are tainted; cert-manager doesn't need
+    # to schedule there and we keep CP free for kube-system).
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: DoesNotExist
+
+    # Mesh-ambient: cert-manager pods don't need mesh inclusion (they only
+    # talk to ACME servers + Route53 over public internet via NAT, and to
+    # the in-cluster API for Certificate CRUD).

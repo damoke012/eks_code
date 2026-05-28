@@ -1,0 +1,35 @@
+# Wildcard cert for `*.op-dev.usxpress.io`, mounted by the Istio gateway
+# DaemonSet for HTTPS listener (Phase 1 of HTTP plane completion).
+#
+# Lives in `istio-ingress` ns so the gateway pods can read the resulting
+# Secret without cross-namespace plumbing.
+#
+# DO NOT issue this against letsencrypt-prod on first apply. First:
+#   1. Apply letsencrypt-staging.yaml
+#   2. Apply a SMALL throwaway Certificate against `letsencrypt-staging`
+#      (e.g., `smoketest.op-dev.usxpress.io`) and confirm Ready=True
+#   3. THEN switch this manifest's issuerRef.name to `letsencrypt-prod`
+#
+# Rate limits on LE prod are real — burning the duplicate-certificate
+# allowance on bad config is annoying.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-op-dev
+  namespace: istio-ingress
+spec:
+  secretName: wildcard-op-dev-tls
+  duration: 2160h    # 90d (LE default)
+  renewBefore: 360h  # 15d
+  issuerRef:
+    name: letsencrypt-staging  # SWITCH to letsencrypt-prod after smoke succeeds
+    kind: ClusterIssuer
+  commonName: "*.op-dev.usxpress.io"
+  dnsNames:
+  - "*.op-dev.usxpress.io"
+  - "op-dev.usxpress.io"
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always

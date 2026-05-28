@@ -1,0 +1,26 @@
+# LE staging issuer — use for smoke-testing DNS-01 BEFORE switching to prod.
+# Staging certs are not publicly trusted but rate limits are generous.
+# Issue a throwaway Certificate against this first; only after success switch
+# to letsencrypt-prod.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: doke@usxpress.com
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+    - selector:
+        # Restrict this issuer to the on-prem dev subzone. Future subzones
+        # (op-qa, op-prod) get their own selector blocks or their own issuer.
+        dnsZones:
+        - op-dev.usxpress.io
+      dns01:
+        route53:
+          region: us-east-1
+          # Cross-account: assume into the network-team-owned zone role.
+          # Source role is cert-manager-op-usxpress-dev (IRSA-attached via SA).
+          role: arn:aws:iam::155768531003:role/iaac-route53-zone

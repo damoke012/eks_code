@@ -1,0 +1,50 @@
+# Add to iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml
+# (paste as NEW Kustomization blocks; do NOT replace existing entries).
+#
+# cert-manager depends on:
+#   - external-secrets / pod-identity-webhook for IRSA to function (already up)
+# Optional: external-dns must be up if we ever expect DNS-01 to traverse
+# external-dns-managed records (we don't — cert-manager writes its own _acme
+# TXT records via the iaac-route53-zone role).
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: pod-identity-webhook   # IRSA must work before cert-manager can assume the role
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/cert-manager
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager-issuers
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: cert-manager           # ClusterIssuer CRDs must be installed first
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/cert-manager-issuers
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+
+# NOTE: wildcard cert is hand-applied (and switched staging->prod manually)
+# to avoid burning LE rate limits on a Flux loop. Once stable, can wrap in
+# its own Kustomization.
