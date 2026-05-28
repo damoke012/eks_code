@@ -1,5 +1,7 @@
 # On-Prem Networking — STATE
-*Last updated 2026-05-28 evening (Phase 0 + worker-4 + Track A all shipped + HTTPS proven end-to-end on depth-N).*
+*Last updated 2026-05-28 evening (Phase 0 + worker-4 + Track A all shipped + HTTPS proven on depth-N + networking/CySec meeting prep done for 2026-05-29).*
+
+**Networking + CySec meeting tomorrow** — Steve Duck + Brendan Buschel (CySec) + Steve Vives (kube configs). Brendan already verbal-approved LE PROD ("no issues with LE, simpler to use"). Prep doc: [`steve-meeting-prep-may29.md`](steve-meeting-prep-may29.md).
 
 ## Where it stands
 
