@@ -1,11 +1,24 @@
 # On-Prem Networking — STATE
-*Last updated 2026-05-28 (Phase 0 cert-manager + wildcard cert SHIPPED).*
+*Last updated 2026-05-28 PM (Phase 0 SHIPPED + 8-day istio-ingress regression fixed via istiod right-sizing).*
 
 ## Where it stands
 
-**HTTP DNS proven** 2026-05-19. **Phase 0 of TCP/SNI ingress (cert-manager + IRSA + wildcard cert) SHIPPED 2026-05-28.** Real public-trust cert `*.op-dev.usxpress.io` from LE PROD live at `Secret istio-ingress/wildcard-op-dev-tls`.
+**HTTP DNS proven** 2026-05-19. **Phase 0 of TCP/SNI ingress (cert-manager + IRSA + wildcard cert) SHIPPED 2026-05-28.** Real public-trust cert `*.op-dev.usxpress.io` from LE PROD live at `Secret istio-ingress/wildcard-op-dev-tls`. **Gateway DaemonSet 7/7 Ready** (was 6/7 for 8 days — fixed same session by right-sizing istiod memory request 2Gi → 1Gi). HR `istio-ingressgateway` Ready=True, Kustomization `istio-ingress` Ready=True.
 
-Architecture: **Istio gateway DaemonSet + hostPort** + sidecar injection via `istio.io/rev=default` + external-dns with per-Gateway target annotation. Canonical commit on op-dev: `13ea1ad` (post Phase 0).
+Architecture: **Istio gateway DaemonSet + hostPort** + sidecar injection via `istio.io/rev=default` + external-dns with per-Gateway target annotation. Canonical commit on op-dev: **`f76a85f`** (Phase 0 cert-manager + istiod right-size).
+
+## ✅ Worker-4 / istio-ingress regression — RESOLVED 2026-05-28 same session
+
+| Before | After |
+|---|---|
+| 8-day-old HR install-failure | HR Ready=True (Helm upgrade succeeded at 21:51:49 UTC) |
+| Gateway DS 6/7 (one pod Pending on worker-4) | **7/7 Running, Ready, Available** |
+| Worker-4 memory 3310Mi / 97% allocated | **1390Mi / 40%** (~1.9Gi freed) |
+| Kustomization `istio-ingress` False | Ready=True |
+
+**Fix:** [PR #10](https://github.com/variant-inc/iaac-talos-flux-platform/pull/10) on op-dev — `pilot.resources.requests.memory: 2Gi → 1Gi` in `istiod-values` ConfigMap. Single istiod restart, no cert drift, mesh PKI unchanged, RW workloads Running=True throughout.
+
+See [memory `istiod_memory_rightsize_may28`](../../wip/onprem-networking/STATE.md) for the gotchas captured (valuesFrom-ConfigMap reconcile requires `flux reconcile helmrelease`, sticky HR install-failure needs `--force`).
 
 ## ✅ Phase 0 closed (INFRA-1493) — 2026-05-28
 
@@ -59,10 +72,12 @@ Markdown drafts at [`jira/sent/INFRA-149*-tcp-sni-*.md`](../../jira/sent/). All 
 
 | Item | Owner | Notes |
 |---|---|---|
-| **Worker-4 missing** | Doke | `istio-ingressgateway-5zbp2` Pending 8d (no node assigned). 6/7 DS pods Running; gateway data plane functional. Blocks clean Phase 1 — need to fix before TCP listener delta. |
-| **Phase 1 — TCP/SNI listeners (INFRA-1494)** | Doke | IaC drafts already staged in `iaac-drafts/onprem-tcp-sni-ingress/`. Gated on worker-4 fix. |
-| **HTTPS plane completion** | Doke | Wildcard cert now exists. Trivial change to add HTTPS Gateway resources mounting the cert. ~10 min once Phase 1 baseline lands. Not yet a Jira ticket. |
-| **Send the Steve message** | Doke | Existing draft pre-dates Phase 0 shipping; should be updated or skipped now that we proved the pattern doesn't need network team for the cert chain. Subzone delegation still a Steve item. |
+| ~~**Worker-4 / istio-ingress regression**~~ | ~~Doke~~ | ✅ RESOLVED 2026-05-28 via PR #10 istiod right-size. See section above. |
+| **Track A — HTTPS plane completion** | Doke | Wildcard cert exists. Add HTTPS server block to existing HTTP Gateway resources referencing `credentialName: wildcard-op-dev-tls`. ~10 min. Recommended next move. |
+| **Track B — Phase 1 TCP/SNI listeners (INFRA-1494)** | Doke | IaC drafts staged at [`iaac-drafts/onprem-tcp-sni-ingress/`](../../iaac-drafts/onprem-tcp-sni-ingress/). Gateway HR now healthy → clean Helm values delta. |
+| **Worker memory expansion 4Gi → 8Gi** | Doke (weekend) | No longer urgent (istiod right-size freed enough). Defer to a deliberate window — capacity headroom move, not an unblocker. |
+| **Idris's PR #7 (iaac-talos-flux-cluster)** | Idris | Request-changes posted with 5-item review (placeholder cleanup + Option B audit confirmation + Tim coord). Waiting on his fixes. |
+| **Send the Steve message** | Doke | Existing draft pre-dates Phase 0 shipping; should be updated or skipped — Phase 0 proved the pattern doesn't need network team for the cert chain. Subzone delegation still a Steve item. |
 
 ## IaC drafts staged (codespace, ready for WSL pickup)
 
