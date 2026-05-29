@@ -1,9 +1,11 @@
 ---
-key: INFRA-xxx        # fill in after filing in Jira
-status: draft         # draft | filed | in-progress | done
+key: INFRA-1501
+status: filed
 assignee: Idris Fagbemi
 reporter: Doke
 created: 2026-05-29
+filed: 2026-05-29
+parent_link: INFRA-1487 (Relates — INFRA-1487 is itself a sub-task so we linked rather than sub-tasked)
 initiative: rw-onprem-flux
 ---
 
