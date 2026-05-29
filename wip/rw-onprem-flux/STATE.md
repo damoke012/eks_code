@@ -4,16 +4,17 @@
 **Jira:** [INFRA-1487](https://usxpress.atlassian.net/browse/INFRA-1487)
 **Goal:** Bring Tim's `risingwave` ns workload under Flux GitOps via `iaac-risingwave-onprem` repo. Removes drift risk from Idris's hand-applied state.
 
-## Current state (2026-05-29, post-Round 3)
+## Current state (2026-05-29, post-approval)
 
-- PR [#7](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7) on iaac-talos-flux-cluster — OPEN, MERGEABLE, reviewDecision=CHANGES_REQUESTED
-- Latest commit `d2dfdd5` — addresses all 3 remaining blockers
-- **All 3 review rounds posted**:
+- PR [#7](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7) on iaac-talos-flux-cluster — **APPROVED 2026-05-29 PM**, awaiting Idris to merge
+- Latest commit `d2dfdd5` — addressed all 3 remaining blockers
+- **3 review rounds + approval**:
   - Round 1: [comment-4578051242](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7#issuecomment-4578051242)
   - Round 2: [comment-4578141644](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7#issuecomment-4578141644)
   - Round 3: [comment-4578356999](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7#issuecomment-4578356999)
+  - Approval comment with merge guidance posted via `gh pr review --approve`
+- Tim coord MET per Idris's Teams confirmation (Tim on his redhat server, not actively using cluster RW; aware of the changes)
 - Review captured in [pr-7-review-2026-05-29.md](pr-7-review-2026-05-29.md)
-- **Decision: ALL CODE BLOCKERS CLEARED — Approve pending coordination**
 
 ## All blockers — final state
 
@@ -30,12 +31,12 @@
 - A1: Dead `postgres` HR in source — Idris has `POSTGRES_FOLLOWUP_PLAN.md` (gitignored). Asked him to put plan in PR comment or Jira sub-task for visibility.
 - A2: Legacy `pg-postgresql` not in source — long-term drift risk on the postgres RW actually uses. Follow-up adoption needed.
 
-## What remains before approve
+## What remains
 
-Per [[feedback_protect_rw_onprem_workload]] applied to `risingwave` ns:
-
-1. **Idris**: confirm branch test against live cluster (Tim's RW stayed Running=True end-to-end). Recent pod ages (postgres-postgresql 4h17m, meta 3h28m, operator 3h52m) suggest he already pre-applied. Need explicit confirmation of what he saw.
-2. **Tim**: acknowledge reconcile window. Patches are no-ops on stateStore + compute; env additions on meta + frontend will restart those pods.
+- Idris merges PR #7 (when he's ready)
+- Post-merge: watch first Flux reconcile against live; confirm Tim's RW stays Running=True
+- Post-merge: update [[rw-manifest-landscape-2026-05-28]] (Tim's RW now Flux-managed)
+- Follow-up tickets needed for the 2 advisories (A1 + A2)
 
 ## Tim coord rule (locked in 2026-05-29)
 
