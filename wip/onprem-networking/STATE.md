@@ -1,7 +1,9 @@
 # On-Prem Networking — STATE
-*Last updated 2026-06-01 (Mon) — networking/CySec call held 2026-05-29; Phase 1 cleared to proceed.*
+*Last updated 2026-06-01 (Mon) — **Phase 1 (INFRA-1494) DONE end-to-end.***
 
-**Networking + CySec call HELD 2026-05-29 (Fri)** — Steve Duck + Brendan Buschel + Steve Vives + Doke. **Phase 1 (INFRA-1494) cleared to proceed.** Full review with decisions / action items / 7 new ticket recommendations: [`networking-call-review-may29.md`](networking-call-review-may29.md). 5 follow-up coordination asks pending. Prep doc (pre-call): [`steve-meeting-prep-may29.md`](steve-meeting-prep-may29.md).
+**Phase 1 closed 2026-06-01.** TCP/SNI listeners 4567 + 5432 live on `istio-ingressgateway`; `rw2-sql.op-dev.usxpress.io` DNS resolves to all 7 worker IPs; `openssl s_client` reaches the gateway and proxies to `risingwave-frontend.risingwave-2.svc` (backend RST as expected pre-Phase-2). Full closure trail: [`phase1-closure-jun01.md`](phase1-closure-jun01.md).
+
+**Networking + CySec call review** (2026-05-29): [`networking-call-review-may29.md`](networking-call-review-may29.md). 7 follow-up tickets filed (INFRA-1502..1508). Pre-call prep: [`steve-meeting-prep-may29.md`](steve-meeting-prep-may29.md).
 
 ## Where it stands
 
