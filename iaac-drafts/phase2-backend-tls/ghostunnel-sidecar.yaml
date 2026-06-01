@@ -90,8 +90,9 @@ spec:
             # No client cert required — psql clients connect with sslmode=require
             # but don't present mTLS material (use --allow-cn=... if mTLS later).
             - --disable-authentication
+            # --status server at :9090 auto-exposes Prometheus metrics at /metrics.
+            # ghostunnel v1.7.3 has no separate --metrics-prometheus flag.
             - --status=:9090
-            - --metrics-prometheus
           ports:
             - name: tls
               containerPort: 4567
