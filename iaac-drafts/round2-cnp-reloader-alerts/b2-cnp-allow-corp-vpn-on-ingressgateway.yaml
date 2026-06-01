@@ -1,0 +1,66 @@
+# CiliumNetworkPolicy — restrict who can hit the istio-ingressgateway.
+#
+# Goal: only allow corp VPN clients (10.11.0.0/19 Cisco AnyConnect pool) plus
+# internal cluster traffic (Service/pod CIDRs, worker subnet) to reach the
+# ingressgateway pods on the four external-facing ports (80, 443, 4567, 5432).
+#
+# Cilium evaluates fromCIDR + fromEntities. Endpoint selection matches the
+# istio-ingressgateway DaemonSet pods only.
+#
+# CIDR rationale (Round 2 README B2 has full table):
+#   10.11.0.0/19    Corp VPN (Cisco AnyConnect, confirmed from laptop ipconfig)
+#   10.10.82.0/24   Cluster worker node subnet
+#   10.244.0.0/16   Cluster pod CIDR
+#   10.96.0.0/12    Cluster Service CIDR (kube-proxy / Cilium)
+#
+# DEPLOY MODE: enforce. Pair with the audit-mode preview policy below for the
+# first 24h if anyone wants belt-and-suspenders. Default-go is enforce.
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-corp-vpn-to-ingressgateway
+  namespace: istio-ingress
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: network-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      istio: ingressgateway
+  ingress:
+    - fromCIDR:
+        - 10.11.0.0/19      # corp VPN
+        - 10.10.82.0/24     # worker nodes
+        - 10.244.0.0/16     # pod CIDR
+        - 10.96.0.0/12      # service CIDR
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+            - port: "4567"
+              protocol: TCP
+            - port: "5432"
+              protocol: TCP
+    # Allow control plane health probes (kubelet, hostNetwork)
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "15021"   # istio readiness
+              protocol: TCP
+            - port: "9090"    # ghostunnel-style status (for any sidecar)
+              protocol: TCP
+    # Allow Prometheus to scrape (the prometheus-stack runs in `prometheus` ns)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: prometheus
+      toPorts:
+        - ports:
+            - port: "15020"   # envoy admin
+              protocol: TCP
+            - port: "15090"   # envoy stats
+              protocol: TCP

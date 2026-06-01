@@ -1,0 +1,49 @@
+# CiliumNetworkPolicy — RW-2 namespace only accepts ingress from the
+# istio-ingressgateway pods + intra-namespace traffic + prometheus scrapes.
+#
+# Prevents direct pod-to-pod ingress from outside the ns (e.g., compromised
+# pod in another ns can't talk straight to RW frontend / ghostunnel).
+#
+# Egress is left unrestricted for now — RW needs to talk to S3, Atlas, etc.
+# Tighten later in a separate PR (INFRA-1497 monitoring/audit phase).
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: only-from-gateway-or-intrans
+  namespace: risingwave-2
+  labels:
+    app.kubernetes.io/part-of: platform
+    app.kubernetes.io/component: network-policy
+spec:
+  endpointSelector: {}  # all pods in risingwave-2
+  ingress:
+    # intra-namespace
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: risingwave-2
+    # from istio-ingressgateway pods in istio-ingress ns
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: istio-ingress
+            istio: ingressgateway
+    # from prometheus-stack scrapers
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: prometheus
+    # from cluster control plane (kubelet probes, API server, etc)
+    - fromEntities:
+        - host
+        - remote-node
+    # from flux-system (kustomization controller patches resources here)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: flux-system
+    # from cert-manager (for any Secret it manages)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: cert-manager
+    # from reloader (it doesn't talk to pods, but its SA may watch endpoints)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: reloader

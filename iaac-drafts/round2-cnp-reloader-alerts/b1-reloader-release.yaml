@@ -1,0 +1,76 @@
+# stakater/reloader — watches ConfigMaps + Secrets, triggers rolling restart
+# on Deployments/StatefulSets/DaemonSets when those resources change.
+#
+# Activated per-workload via annotation:
+#   reloader.stakater.com/auto: "true"     -> watch ALL CM + Secret refs
+#   secret.reloader.stakater.com/reload: "secret-name"
+#   configmap.reloader.stakater.com/reload: "cm-name"
+#
+# ghostunnel-rw2-sql already carries reloader.stakater.com/auto: "true"
+# from Round 1 PR #8 — once this chart is installed, ghostunnel will
+# rolling-restart automatically when cert-manager rotates rw2-sql-tls.
+
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: reloader
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 10m
+  chart:
+    spec:
+      chart: reloader
+      version: "v1.4.7"
+      sourceRef:
+        kind: HelmRepository
+        name: stakater-github-io
+      interval: 12h
+  releaseName: reloader
+  targetNamespace: reloader
+  storageNamespace: reloader
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      strategy: rollback
+      remediateLastFailure: true
+  values:
+    reloader:
+      # Watch all namespaces. Workload-level opt-in via annotations.
+      watchGlobally: true
+      # Reduce blast radius by only triggering on REAL data changes (compares
+      # SHA256 of the data field; ignores metadata churn from kustomize labels etc).
+      reloadStrategy: annotations
+      # Minimal RBAC — only get/list/watch on CM+Secret + patch on Deploy/STS/DS.
+      readOnlyRootFileSystem: true
+      podMonitor:
+        enabled: false  # Wire to ServiceMonitor in Round 2 B3 if we want metrics
+      serviceMonitor:
+        enabled: true
+        namespace: monitoring
+      deployment:
+        labels:
+          app.kubernetes.io/part-of: platform
+        replicas: 1
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+        containerSecurityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        priorityClassName: ""

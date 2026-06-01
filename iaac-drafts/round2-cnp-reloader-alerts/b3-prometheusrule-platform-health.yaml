@@ -1,0 +1,168 @@
+# PrometheusRule — platform health alerts.
+#
+# Selector match: kube-prometheus-stack picks up rules labelled
+# release=prometheus-stack (default selector in the stack's Prometheus CR).
+# We use that label so the rules are picked up automatically.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-health
+  namespace: prometheus
+  labels:
+    release: prometheus-stack
+    app.kubernetes.io/part-of: platform
+spec:
+  groups:
+    # =========================================================================
+    - name: certificates
+      rules:
+        - alert: CertificateExpiringSoon
+          expr: |
+            (avg by (name, namespace) (certmanager_certificate_expiration_timestamp_seconds) - time()) < (7 * 24 * 3600)
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: 'cert-manager Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in < 7 days'
+            description: 'Certificate Ready=True but expiry < 7d. cert-manager normally rotates LE certs 30d before expiry; if this triggers, automation has failed silently.'
+
+        - alert: CertificateRenewalFailed
+          expr: |
+            certmanager_certificate_ready_status{condition="False"} == 1
+          for: 30m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: 'cert-manager Certificate {{ $labels.namespace }}/{{ $labels.name }} Ready=False > 30m'
+            description: 'CertificateRequest may be stuck; check cert-manager logs and the bound Issuer/ClusterIssuer.'
+
+    # =========================================================================
+    - name: flux
+      rules:
+        - alert: FluxKustomizationFailed
+          expr: |
+            gotk_reconcile_condition{type="Ready", status="False", kind="Kustomization"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: 'Flux Kustomization {{ $labels.namespace }}/{{ $labels.name }} not Ready > 10m'
+            description: 'kustomize.toolkit.fluxcd.io reconcile failing. Check `flux get kustomization` for details.'
+
+        - alert: FluxHelmReleaseFailed
+          expr: |
+            gotk_reconcile_condition{type="Ready", status="False", kind="HelmRelease"} == 1
+          for: 10m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: 'Flux HelmRelease {{ $labels.namespace }}/{{ $labels.name }} not Ready > 10m'
+            description: 'helm.toolkit.fluxcd.io install/upgrade failure. Check `flux get hr` and the release events.'
+
+        - alert: FluxGitRepositoryFailed
+          expr: |
+            gotk_reconcile_condition{type="Ready", status="False", kind="GitRepository"} == 1
+          for: 10m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: 'Flux GitRepository {{ $labels.namespace }}/{{ $labels.name }} not Ready > 10m'
+            description: 'Source fetch failing. Check auth, branch existence, repo accessibility.'
+
+    # =========================================================================
+    - name: ingress
+      rules:
+        - alert: ExternalDNSErrors
+          expr: |
+            rate(external_dns_registry_errors_total[10m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: external-dns registry errors > 0 for 15m
+            description: 'external-dns is failing to write to the DynamoDB registry. Check IAM role chain (iaac-route53-zone) and DynamoDB access.'
+
+        - alert: GhostunnelDown
+          expr: |
+            kube_deployment_status_replicas_available{namespace="risingwave-2", deployment="ghostunnel-rw2-sql"} < 2
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: ghostunnel-rw2-sql < 2 replicas Ready > 5m
+            description: 'Phase 2 TLS terminator degraded. Corp-VPN psql clients may see connection failures. Check `kubectl -n risingwave-2 describe deploy ghostunnel-rw2-sql`.'
+
+        - alert: IstioIngressGatewayDown
+          expr: |
+            kube_daemonset_status_number_ready{namespace="istio-ingress", daemonset="istio-ingressgateway"}
+            < kube_daemonset_status_desired_number_scheduled{namespace="istio-ingress", daemonset="istio-ingressgateway"}
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: istio-ingressgateway DaemonSet not fully Ready
+            description: '{{ $value }} pods Ready out of desired. Ingress traffic may be unevenly distributed.'
+
+    # =========================================================================
+    - name: platform-pods
+      rules:
+        - alert: PodCrashLoopBackOffPlatformNS
+          expr: |
+            sum by (namespace, pod, container) (
+              rate(kube_pod_container_status_restarts_total{
+                namespace=~"istio-ingress|risingwave-2|cert-manager|external-dns|flux-system|reloader|monitoring|prometheus"
+              }[10m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: 'Pod {{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }} CrashLoopBackOff > 5m'
+            description: 'Pod in a platform namespace is restarting. Check logs and recent changes.'
+
+        - alert: PodNotReadyPlatformNS
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{condition="false",
+                namespace=~"istio-ingress|risingwave-2|cert-manager|external-dns|flux-system|reloader|monitoring|prometheus"}
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: 'Pod {{ $labels.namespace }}/{{ $labels.pod }} Ready=False > 10m'
+
+    # =========================================================================
+    - name: cluster
+      rules:
+        - alert: NodeNotReady
+          expr: |
+            kube_node_status_condition{condition="Ready", status="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: 'Node {{ $labels.node }} NotReady > 5m'
+
+        - alert: NodeMemoryHigh
+          expr: |
+            (100 - ((node_memory_MemAvailable_bytes * 100) / node_memory_MemTotal_bytes)) > 90
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: 'Node {{ $labels.instance }} memory > 90% for 15m'
+            description: 'Memory pressure on a worker node. Pods at risk of eviction.'
