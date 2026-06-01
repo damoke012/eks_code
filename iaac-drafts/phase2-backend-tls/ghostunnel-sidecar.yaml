@@ -86,6 +86,11 @@ spec:
             - server
             - --listen=:4567
             - --target=risingwave-frontend.risingwave-2.svc.cluster.local:4567
+            # ghostunnel defaults to sidecar usage; --target to a remote address
+            # requires explicit opt-in via --unsafe-target. We run as a standalone
+            # Deployment proxying to a different Service in the same ns — that's
+            # the standard cross-pod ghostunnel pattern (not a security regression).
+            - --unsafe-target
             - --keystore=/tls-out/keystore.pem
             # No client cert required — psql clients connect with sslmode=require
             # but don't present mTLS material (use --allow-cn=... if mTLS later).
