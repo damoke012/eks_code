@@ -1,17 +1,17 @@
-# Option B — ghostunnel sidecar Deployment (fallback if Option A sslConfig
-# isn't supported by our RW operator version).
+# Phase 2 — ghostunnel TLS terminator in front of RW-2 frontend (Option B).
 #
-# Listens on port 4567 with TLS, proxies plaintext to risingwave-frontend
-# on port 4566 (or whatever port the RW frontend exposes internally).
-# Mounts the cert-manager-issued Secret `rw2-sql-tls` at /tls.
+# Lives in risingwave-2 namespace, alongside the RW-2 workload.
+# Listens on :4567 with TLS using cert from Secret rw2-sql-tls (issued by
+# the cert-manager Certificate `rw2-sql-tls` — see rw2-sql-frontend-cert.yaml).
+# Proxies plaintext to the RW frontend Service on its native port 4567.
 #
-# Service exposes 4567 → ghostunnel:4567 → upstream risingwave-frontend.
-# CHANGE: requires the existing `risingwave-frontend` Service to either
-# rename its 4567 port OR have ghostunnel front it on a different Service.
+# Sidecar inject is disabled — ghostunnel terminates TLS at the pod, no need
+# for mesh re-encryption inside the namespace for this hop.
 #
-# This sidecar pattern keeps RW untouched. To switch internal callers later,
-# add them to a NetworkPolicy that points at the ghostunnel Service instead
-# of the RW frontend Service directly.
+# Wire-up: the VirtualService rw2-sql-passthrough in iaac-talos-flux-platform
+# swaps its destination host from `risingwave-frontend.risingwave-2.svc` to
+# `ghostunnel-rw2-sql.risingwave-2.svc`. That's a separate PR landed AFTER
+# this ghostunnel resource is Running.
 
 ---
 apiVersion: apps/v1
@@ -20,16 +20,22 @@ metadata:
   name: ghostunnel-rw2-sql
   namespace: risingwave-2
   labels:
-    app: ghostunnel-rw2-sql
+    app.kubernetes.io/name: ghostunnel-rw2-sql
+    app.kubernetes.io/component: tls-terminator
+    app.kubernetes.io/part-of: risingwave-2
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: ghostunnel-rw2-sql
+      app.kubernetes.io/name: ghostunnel-rw2-sql
   template:
     metadata:
       labels:
-        app: ghostunnel-rw2-sql
+        app.kubernetes.io/name: ghostunnel-rw2-sql
+        app.kubernetes.io/component: tls-terminator
+      annotations:
+        sidecar.istio.io/inject: "false"
+        ambient.istio.io/redirection: "disabled"
     spec:
       containers:
         - name: ghostunnel
@@ -37,51 +43,67 @@ spec:
           args:
             - server
             - --listen=:4567
-            - --target=risingwave-frontend.risingwave-2.svc.cluster.local:4566
+            - --target=risingwave-frontend.risingwave-2.svc.cluster.local:4567
             - --keystore=/tls/tls.crt
             - --keystore-key=/tls/tls.key
-            - --disable-authentication  # client doesn't need to present cert
+            # No client cert required — psql clients connect with sslmode=require
+            # but don't present mTLS material (use --allow-cn=... if mTLS later).
+            - --disable-authentication
             - --status=:9090
             - --metrics-prometheus
           ports:
             - name: tls
               containerPort: 4567
+              protocol: TCP
             - name: status
               containerPort: 9090
+              protocol: TCP
           volumeMounts:
             - name: tls
               mountPath: /tls
               readOnly: true
           resources:
-            requests: { cpu: "50m", memory: "64Mi" }
-            limits:   { cpu: "500m", memory: "256Mi" }
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
           livenessProbe:
-            tcpSocket: { port: 4567 }
+            tcpSocket:
+              port: 4567
             initialDelaySeconds: 5
+            periodSeconds: 10
           readinessProbe:
-            tcpSocket: { port: 4567 }
+            tcpSocket:
+              port: 4567
             initialDelaySeconds: 2
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
       volumes:
         - name: tls
           secret:
             secretName: rw2-sql-tls
+            defaultMode: 0400
 
 ---
-# Service the Phase 1 VirtualService backend.host should point at — note:
-# the VirtualService draft points at `risingwave-frontend.risingwave-2.svc`.
-# Either:
-#   - swap VS destination to `ghostunnel-rw2-sql.risingwave-2.svc`, OR
-#   - rename this Service to `risingwave-frontend` (after renaming the
-#     existing RW Service to something like `risingwave-frontend-plain`)
-# The first is simpler — one VS edit, no rename cascade.
 apiVersion: v1
 kind: Service
 metadata:
   name: ghostunnel-rw2-sql
   namespace: risingwave-2
+  labels:
+    app.kubernetes.io/name: ghostunnel-rw2-sql
+    app.kubernetes.io/component: tls-terminator
 spec:
   selector:
-    app: ghostunnel-rw2-sql
+    app.kubernetes.io/name: ghostunnel-rw2-sql
   ports:
     - name: tls
       port: 4567
@@ -91,3 +113,17 @@ spec:
       port: 9090
       targetPort: 9090
       protocol: TCP
+
+---
+# PodDisruptionBudget — keep at least 1 ghostunnel up during voluntary disruptions
+# so the SQL endpoint stays reachable through node drains.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ghostunnel-rw2-sql
+  namespace: risingwave-2
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ghostunnel-rw2-sql
