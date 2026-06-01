@@ -1,0 +1,93 @@
+# Option B — ghostunnel sidecar Deployment (fallback if Option A sslConfig
+# isn't supported by our RW operator version).
+#
+# Listens on port 4567 with TLS, proxies plaintext to risingwave-frontend
+# on port 4566 (or whatever port the RW frontend exposes internally).
+# Mounts the cert-manager-issued Secret `rw2-sql-tls` at /tls.
+#
+# Service exposes 4567 → ghostunnel:4567 → upstream risingwave-frontend.
+# CHANGE: requires the existing `risingwave-frontend` Service to either
+# rename its 4567 port OR have ghostunnel front it on a different Service.
+#
+# This sidecar pattern keeps RW untouched. To switch internal callers later,
+# add them to a NetworkPolicy that points at the ghostunnel Service instead
+# of the RW frontend Service directly.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ghostunnel-rw2-sql
+  namespace: risingwave-2
+  labels:
+    app: ghostunnel-rw2-sql
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ghostunnel-rw2-sql
+  template:
+    metadata:
+      labels:
+        app: ghostunnel-rw2-sql
+    spec:
+      containers:
+        - name: ghostunnel
+          image: ghostunnel/ghostunnel:v1.7.3
+          args:
+            - server
+            - --listen=:4567
+            - --target=risingwave-frontend.risingwave-2.svc.cluster.local:4566
+            - --keystore=/tls/tls.crt
+            - --keystore-key=/tls/tls.key
+            - --disable-authentication  # client doesn't need to present cert
+            - --status=:9090
+            - --metrics-prometheus
+          ports:
+            - name: tls
+              containerPort: 4567
+            - name: status
+              containerPort: 9090
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "500m", memory: "256Mi" }
+          livenessProbe:
+            tcpSocket: { port: 4567 }
+            initialDelaySeconds: 5
+          readinessProbe:
+            tcpSocket: { port: 4567 }
+            initialDelaySeconds: 2
+      volumes:
+        - name: tls
+          secret:
+            secretName: rw2-sql-tls
+
+---
+# Service the Phase 1 VirtualService backend.host should point at — note:
+# the VirtualService draft points at `risingwave-frontend.risingwave-2.svc`.
+# Either:
+#   - swap VS destination to `ghostunnel-rw2-sql.risingwave-2.svc`, OR
+#   - rename this Service to `risingwave-frontend` (after renaming the
+#     existing RW Service to something like `risingwave-frontend-plain`)
+# The first is simpler — one VS edit, no rename cascade.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ghostunnel-rw2-sql
+  namespace: risingwave-2
+spec:
+  selector:
+    app: ghostunnel-rw2-sql
+  ports:
+    - name: tls
+      port: 4567
+      targetPort: 4567
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

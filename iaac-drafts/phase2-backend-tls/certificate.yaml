@@ -1,0 +1,50 @@
+# cert-manager Certificate for the RW-2 frontend TLS edge.
+#
+# Issuer: letsencrypt-prod ClusterIssuer (Phase 0, INFRA-1493).
+# Challenge: DNS01 via the cert-manager IRSA chain set up in Phase 0
+#   (cert-manager SA assumes `cert-manager-op-usxpress-dev` → chains into
+#   `iaac-route53-zone`).
+# Renewal: cert-manager auto-renews when ~2/3 of lifetime elapsed.
+#
+# The Secret name (rw2-sql-tls) is referenced by:
+#   - Option A: RW CR's frontend.tls.secretName
+#   - Option B: ghostunnel sidecar mounted at /tls
+#
+# Hostname matches the SNI we route through the gateway. psql with
+# sslmode=verify-full will validate this SAN.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: rw2-sql-tls
+  namespace: risingwave-2
+spec:
+  secretName: rw2-sql-tls
+  # 90-day cert (LE default); cert-manager rotates at ~60 days.
+  duration: 2160h    # 90d — LE max
+  renewBefore: 720h  # 30d — leaves 60d cushion
+
+  # Match the gateway SNI label exactly. Putting both the FQDN and a
+  # workaround dns alias here doesn't help — clients connect by FQDN.
+  dnsNames:
+    - rw2-sql.op-dev.usxpress.io
+
+  # Issuer setup is in Phase 0. The ClusterIssuer handles the DNS01 challenge
+  # via cert-manager's IRSA role, no per-namespace permissions needed.
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+  # ECDSA P-256 — lighter than RSA-2048 for psql TLS handshake, widely supported.
+  # If a client doesn't support ECDSA, swap to RSA 2048 here.
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+
+  # Adopt-everywhere usage: server auth (for psql clients), digital signature.
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment

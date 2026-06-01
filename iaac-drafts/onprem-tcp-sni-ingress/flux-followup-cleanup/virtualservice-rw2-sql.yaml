@@ -1,0 +1,31 @@
+# VirtualService routing SNI `rw2-sql.op-dev.usxpress.io:4567` to the RW-2
+# frontend Service. Mirrors what was kubectl-applied during Phase 1 closure,
+# MINUS the `external-dns.alpha.kubernetes.io/target` annotation — that
+# moves to `--default-targets` on external-dns (see external-dns-release-delta.md).
+#
+# Backend: risingwave-frontend.risingwave-2.svc.cluster.local:4567
+# Full E2E waits on Phase 2 (INFRA-1495). Until then: SNI route lands at the
+# Envoy proxy, backend RSTs because it speaks plain psql, not TLS yet.
+
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw2-sql-passthrough
+  namespace: istio-ingress
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: rw2-sql.op-dev.usxpress.io
+spec:
+  hosts:
+  - "rw2-sql.op-dev.usxpress.io"
+  gateways:
+  - tcp-passthrough
+  tls:
+  - match:
+    - port: 4567
+      sniHosts:
+      - rw2-sql.op-dev.usxpress.io
+    route:
+    - destination:
+        host: risingwave-frontend.risingwave-2.svc.cluster.local
+        port:
+          number: 4567

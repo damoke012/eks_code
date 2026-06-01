@@ -1,0 +1,24 @@
+# Option A — Native RisingWave frontend TLS.
+# Apply this as a patch (kubectl patch or in-source edit) to the existing
+# RisingWave CR in risingwave-2 namespace.
+#
+# Before applying, verify operator version supports sslConfig:
+#   kubectl get risingwave -n risingwave-2 -o jsonpath='{.items[0].spec.image}'
+# Tentative minimum: v0.1.36 (matches the operator pinned in iaac-talos-flux-cluster PR #7).
+#
+# The Secret `rw2-sql-tls` is created by the cert-manager Certificate
+# (see certificate.yaml). Wait for `kubectl get cert -n risingwave-2 rw2-sql-tls`
+# to show Ready=True before applying this patch.
+
+apiVersion: risingwave.risingwavelabs.com/v1alpha1
+kind: RisingWave
+metadata:
+  name: risingwave-2
+  namespace: risingwave-2
+spec:
+  frontend:
+    sslConfig:
+      enabled: true
+      secretName: rw2-sql-tls
+      # cert-manager writes tls.crt + tls.key into the Secret;
+      # the RW operator mounts at a fixed path internally.

@@ -1,0 +1,41 @@
+# TLS-PASSTHROUGH Gateway for the on-prem TCP plane.
+# Mirrors what was kubectl-applied during Phase 1 (INFRA-1494) closure
+# 2026-06-01. Persisting to GitOps so a cluster rebuild keeps it.
+#
+# Adding a new TCP service:
+#   1. Add a `servers:` entry for a new port (or reuse one of the existing
+#      protocol slots).
+#   2. Add a VirtualService selecting this gateway with a `tls.match.sniHosts`
+#      and `route.destination` to the backend Service.
+#
+# Backends must terminate TLS themselves (PASSTHROUGH = gateway does not).
+# Phase 2 (INFRA-1495) lights up backend TLS on RW-2 frontend.
+
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: tcp-passthrough
+  namespace: istio-ingress
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  # PostgreSQL wire / RisingWave SQL on 4567
+  - port:
+      number: 4567
+      name: rwsql-passthrough
+      protocol: TLS
+    tls:
+      mode: PASSTHROUGH
+    hosts:
+    - "*.op-dev.usxpress.io"
+
+  # PostgreSQL wire on 5432
+  - port:
+      number: 5432
+      name: postgres-passthrough
+      protocol: TLS
+    tls:
+      mode: PASSTHROUGH
+    hosts:
+    - "*.op-dev.usxpress.io"
