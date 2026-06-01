@@ -122,22 +122,20 @@ spec:
             limits:
               cpu: "500m"
               memory: "256Mi"
-          # Probes hit the ghostunnel --status server (:9090) instead of the TLS
-          # listener (:4567). The status server returns plain HTTP 200 on /;
-          # probing the TLS listener via tcpSocket generates noisy log lines
-          # "error on TLS handshake from <linkLocal>: EOF" on every probe.
+          # Probes hit the ghostunnel --status server port (:9090) via tcpSocket
+          # to avoid both (a) the TLS handshake EOF noise from probing :4567
+          # and (b) HTTP path semantics — ghostunnel /_status returns 200 but /
+          # returns 404, so a httpGet probe at the root would fail. tcpSocket
+          # is the safest option: it confirms the status server is listening
+          # without speaking any application protocol.
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: status
-              scheme: HTTP
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: status
-              scheme: HTTP
             initialDelaySeconds: 2
             periodSeconds: 5
           securityContext:
