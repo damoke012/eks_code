@@ -1,0 +1,37 @@
+# HTTP VirtualService for the RW-2 dashboard.
+#
+# Hostname: rw2-dashboard.op-dev.usxpress.io
+# Cert: served by shared-http Gateway via the *.op-dev.usxpress.io wildcard
+#       (Phase 0 / per-team-cert pattern — no new Certificate needed).
+# Backend: risingwave-meta.risingwave-2.svc.cluster.local:5691
+#         (the operator-managed meta Service; dashboard lives on the meta pod).
+#
+# Replaces the direct NodePort path (risingwave-dashboard-ext:5691:30371)
+# which was a TLS bypass.
+#
+# target annotation lists worker IPs because external-dns v0.20.0's
+# istio-virtualservice source produces no endpoint when the bound Gateway
+# Service is ClusterIP — see [[feedback_externaldns_v020_target_required]].
+
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw2-dashboard
+  namespace: istio-ingress
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: rw2-dashboard.op-dev.usxpress.io
+    external-dns.alpha.kubernetes.io/target: 10.10.82.21,10.10.82.22,10.10.82.26,10.10.82.27,10.10.82.28,10.10.82.178,10.10.82.180
+spec:
+  hosts:
+  - rw2-dashboard.op-dev.usxpress.io
+  gateways:
+  - shared-http
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: risingwave-meta.risingwave-2.svc.cluster.local
+        port:
+          number: 5691

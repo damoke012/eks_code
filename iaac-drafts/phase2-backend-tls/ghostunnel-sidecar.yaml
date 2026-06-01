@@ -28,6 +28,12 @@ metadata:
     app.kubernetes.io/name: ghostunnel-rw2-sql
     app.kubernetes.io/component: tls-terminator
     app.kubernetes.io/part-of: risingwave-2
+  annotations:
+    # stakater/reloader auto-restarts pods when the referenced Secret rotates.
+    # cert-manager refreshes rw2-sql-tls at ~60d (30d before LE expiry).
+    # Reloader picks up the Secret content change and triggers a rolling restart;
+    # the initContainer then rebuilds keystore.pem from the new cert+key.
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   selector:
@@ -116,14 +122,22 @@ spec:
             limits:
               cpu: "500m"
               memory: "256Mi"
+          # Probes hit the ghostunnel --status server (:9090) instead of the TLS
+          # listener (:4567). The status server returns plain HTTP 200 on /;
+          # probing the TLS listener via tcpSocket generates noisy log lines
+          # "error on TLS handshake from <linkLocal>: EOF" on every probe.
           livenessProbe:
-            tcpSocket:
-              port: 4567
+            httpGet:
+              path: /
+              port: status
+              scheme: HTTP
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
-            tcpSocket:
-              port: 4567
+            httpGet:
+              path: /
+              port: status
+              scheme: HTTP
             initialDelaySeconds: 2
             periodSeconds: 5
           securityContext:
