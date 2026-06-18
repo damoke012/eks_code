@@ -1,0 +1,92 @@
+From 3fb0cc9093b7c18423d07315bc131ee1b9825dac Mon Sep 17 00:00:00 2001
+From: damoke012 <103553692+damoke012@users.noreply.github.com>
+Date: Thu, 18 Jun 2026 21:05:43 +0000
+Subject: [PATCH] feat(rook): add 2nd raw disk per worker for Ceph OSDs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds an optional second SCSI disk (/dev/sdb) to each worker VM, sized
+via the new worker_ceph_disk_gb variable (default 50 GB). CPs are
+untouched — they don't host OSDs.
+
+Why: single-disk Talos VMs are not a supported Rook topology per Sidero
+docs. Rook requires a dedicated raw block device per OSD. This unblocks
+the CephCluster CR switch to deviceFilter: ^sdb$ (separate PR on
+iaac-talos-flux-platform).
+
+Cluster impact: with vSphere hot-add ON, no reboot. With hot-add OFF,
+rolling worker reboot — coordinate with RW owner first.
+
+INFRA-XXXX
+---
+ deploy/terraform/main.tf                         |  1 +
+ deploy/terraform/modules/vsphere_vm/main.tf      | 10 ++++++++++
+ deploy/terraform/modules/vsphere_vm/variables.tf |  6 ++++++
+ deploy/terraform/variables.tf                    |  6 ++++++
+ 4 files changed, 23 insertions(+)
+
+diff --git a/deploy/terraform/main.tf b/deploy/terraform/main.tf
+index 39e0e6a..a1f8082 100644
+--- a/deploy/terraform/main.tf
++++ b/deploy/terraform/main.tf
+@@ -28,6 +28,7 @@ module "vsphere_worker" {
+   cpus                      = var.worker_cpus
+   memory_mb                 = var.worker_memory_mb
+   disk_size_gb              = var.disk_size_gb
++  extra_disk_size_gb        = var.worker_ceph_disk_gb
+   name_prefix               = var.worker_name_prefix
+   sleep_seconds             = var.sleep_seconds
+ }
+diff --git a/deploy/terraform/modules/vsphere_vm/main.tf b/deploy/terraform/modules/vsphere_vm/main.tf
+index 585f35f..662fd6b 100644
+--- a/deploy/terraform/modules/vsphere_vm/main.tf
++++ b/deploy/terraform/modules/vsphere_vm/main.tf
+@@ -62,6 +62,16 @@ resource "vsphere_virtual_machine" "vm" {
+     thin_provisioned = true
+   }
+ 
++  dynamic "disk" {
++    for_each = var.extra_disk_size_gb > 0 ? [1] : []
++    content {
++      label            = "disk1"
++      size             = var.extra_disk_size_gb
++      unit_number      = 1
++      thin_provisioned = true
++    }
++  }
++
+   num_cpus = var.cpus
+   memory   = var.memory_mb
+   guest_id = "otherGuest64"
+diff --git a/deploy/terraform/modules/vsphere_vm/variables.tf b/deploy/terraform/modules/vsphere_vm/variables.tf
+index b65e208..399752d 100644
+--- a/deploy/terraform/modules/vsphere_vm/variables.tf
++++ b/deploy/terraform/modules/vsphere_vm/variables.tf
+@@ -62,3 +62,9 @@ variable "vm_folder" {
+   description = "vSphere folder path (relative to datacenter) to place the VMs in"
+   type        = string
+ }
++
++variable "extra_disk_size_gb" {
++  description = "Optional size (GB) of a 2nd raw disk per VM. 0 = no extra disk."
++  type        = number
++  default     = 0
++}
+diff --git a/deploy/terraform/variables.tf b/deploy/terraform/variables.tf
+index cc9954c..d673a8b 100644
+--- a/deploy/terraform/variables.tf
++++ b/deploy/terraform/variables.tf
+@@ -157,3 +157,9 @@ variable "flux_target_path" {
+   description = "Path in repo where Flux configs live"
+   type        = string
+ }
++
++variable "worker_ceph_disk_gb" {
++  description = "Size (GB) of dedicated Ceph OSD disk per worker (0 = none). Workers only — CPs do not get this disk."
++  type        = number
++  default     = 50
++}
+-- 
+2.52.0
+
