@@ -1,9 +1,10 @@
-# Rook-Ceph Phase 1 — Add 2nd virtual disk per worker (READY TO PR)
+# Rook-Ceph Phase 1 — Add 2nd virtual disk per worker (PR OPEN)
 
 **Target repo:** variant-inc/iaac-talos
 **Base branch:** `feature/op-usxpress-dev` (NOT master — master is stale per [[feedback_iaac_talos_branch_base]])
-**Proposed branch:** `feature/INFRA-XXXX-worker-ceph-disk`
-**Status:** Draft verified against actual module structure. Ready to push from WSL.
+**Branch:** `feature/INFRA-XXXX-worker-ceph-disk`
+**PR:** https://github.com/variant-inc/iaac-talos/pull/37
+**Status:** PR open 2026-06-18 PM. Awaiting review, pre-flight, plan-only diff review, then apply.
 
 ## Why
 
