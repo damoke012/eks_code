@@ -1,7 +1,7 @@
 From 5550bce00ce1aff648a13a19ea4d83b596421104 Mon Sep 17 00:00:00 2001
 From: damoke012 <103553692+damoke012@users.noreply.github.com>
 Date: Thu, 18 Jun 2026 22:30:55 +0000
-Subject: [PATCH] feat(cilium): node-reconciler CronJob to auto-remediate 3
+Subject: [PATCH 1/2] feat(cilium): node-reconciler CronJob to auto-remediate 3
  divergence modes
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

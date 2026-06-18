@@ -1,34 +1,41 @@
 # CronJob: detect and remediate Cilium ↔ kubectl Node divergence.
 #
-# Drop into: iaac-talos-flux-platform/infrastructure/cilium/hygiene/
-# (new folder; reference from cilium Kustomization)
+# Drop into: iaac-talos-flux-platform/infrastructure/cilium-hygiene/
+# (new folder; referenced from clusters/bm-dev/flux-system/infra.yaml
+#  Kustomization "cilium-hygiene")
 #
-# Why: every time we touch CP machine config (talosctl patch, TF apply that
-# pushes talos_machine_configuration_apply), the kubelet identity for a CP
-# can re-register at a new IP without the matching CiliumNode CRD getting
-# updated. The Cilium WireGuard mesh then carries an inconsistent identity
-# for that CP, which cascades into:
-#   - ambient/ztunnel/istio-cni-node failing to route to/from that CP
+# Why: every time we touch Talos machine config (talosctl patch, TF apply
+# that pushes talos_machine_configuration_apply, hostname re-render,
+# kubelet rename), the kubelet identity for a node can change without the
+# matching CRDs getting updated. The Cilium WireGuard mesh + kubectl Node
+# objects carry stale identity, which cascades into:
+#   - ambient/ztunnel/istio-cni-node failing to route to/from that node
 #   - cert-manager → istio-csr → workload cert renewal chain failures
 #   - Octopus post-apply health check timing out
 #
-# We've seen this twice in 48 hours (2026-06-17 + 2026-06-18). The detection
-# layer (CiliumNodeCountDivergence PromRule, PR #41) alerts but doesn't fix.
-# This CronJob fixes — it runs every 15 minutes and reconciles 3 failure modes:
+# Seen 3× in 48 hours (2026-06-17, 2026-06-18 AM, 2026-06-18 PM).
+# The detection PromRule (PR #41) alerts but doesn't fix. This CronJob fixes —
+# runs every 15 minutes, reconciles 4 failure modes:
 #
 #   1. ORPHAN CiliumNode  — CN exists, no matching kubectl Node → delete CN
-#   2. STALE CiliumNode IP — CN exists, Node exists, but INTERNALIP differs → delete CN
-#   3. GHOST kubectl Node — Node exists but NotReady with duplicate IP of a Ready node → delete Node
+#   2. STALE CiliumNode IP — CN exists, Node exists, INTERNALIP differs
+#                           → delete CN + bounce agent
+#   3. GHOST kubectl Node — Node NotReady + duplicate IP of a Ready peer
+#                           → delete Node + its CN
+#   4. STALE kubectl Node — Node NotReady for > NOTREADY_GRACE_SECONDS
+#                           → delete Node + its CN (catches the
+#                            "kubelet renamed and old hostname stopped
+#                            checking in" pattern from 2026-06-18 PM)
 #
-# In all cases the underlying Cilium agent DaemonSet pod will recreate the
-# CiliumNode correctly within ~30 seconds (it polls the local kubelet for
-# identity).
+# CASE 4 covers the post-TF-apply pattern observed today: machine at .181
+# had OLD kubelet hostname registration that stopped checking in after the
+# config-apply restart. The Node object lingered NotReady; without GC it
+# would persist indefinitely and confuse downstream consumers.
 #
-# AUTO_REMEDIATE=true by default. We've verified the 3-case logic against
-# the 2026-06-17 + 2026-06-18 incident states. The window where the
-# CronJob could mis-delete is narrow (a node that just registered and
-# CN sync hasn't caught up). Conservative-tilted: skip remediation if
-# the Node OR CiliumNode is younger than 5 minutes.
+# AUTO_REMEDIATE=true by default. Conservative tilt: skip remediation if
+# resource is younger than MIN_AGE_SECONDS (5 min default). Stale-Node
+# threshold (case 4): NOTREADY_GRACE_SECONDS (default 1800 = 30 min — long
+# enough to ride out reboots, short enough to clean up before drift cascades).
 
 apiVersion: batch/v1
 kind: CronJob
@@ -66,13 +73,15 @@ spec:
                   value: "true"
                 - name: MIN_AGE_SECONDS
                   value: "300"      # skip resources younger than 5 min
+                - name: NOTREADY_GRACE_SECONDS
+                  value: "1800"     # delete Node after 30 min NotReady (case 4)
               command:
                 - /bin/sh
                 - -c
                 - |
                   set -euo pipefail
                   echo "=== Cilium node reconciler $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-                  echo "AUTO_REMEDIATE=${AUTO_REMEDIATE} MIN_AGE_SECONDS=${MIN_AGE_SECONDS}"
+                  echo "AUTO_REMEDIATE=${AUTO_REMEDIATE} MIN_AGE_SECONDS=${MIN_AGE_SECONDS} NOTREADY_GRACE_SECONDS=${NOTREADY_GRACE_SECONDS}"
 
                   NOW=$(date -u +%s)
                   ACTIONS=0
@@ -183,6 +192,45 @@ spec:
                       fi
                     done < /tmp/ghosts.tsv
                   fi
+
+                  # CASE 4: STALE kubectl Node (NotReady > NOTREADY_GRACE_SECONDS)
+                  # Catches the "kubelet renamed itself + old hostname stopped checking
+                  # in" pattern from 2026-06-18 PM. Different from CASE 3 (which needs
+                  # a duplicate-IP peer): CASE 4 fires even when the stale Node sits
+                  # alone (no peer at same IP).
+                  echo ""
+                  echo "--- CASE 4: stale NotReady Nodes (NotReady > ${NOTREADY_GRACE_SECONDS}s) ---"
+                  # Re-read nodes to get last-transition time per Ready condition
+                  jq -r --arg now "$NOW" '.items[] |
+                    [.metadata.name,
+                     (.status.conditions[] | select(.type=="Ready") | .status),
+                     (.status.conditions[] | select(.type=="Ready") | .lastTransitionTime),
+                     (($now | tonumber) - (.metadata.creationTimestamp | fromdateiso8601))
+                    ] | @tsv' /tmp/nodes.json > /tmp/nodes-ready.tsv
+
+                  while IFS=$'\t' read -r n_name n_ready n_last n_age; do
+                    n_age=${n_age%.*}
+                    if [ "$n_ready" = "True" ]; then continue; fi
+                    if [ "$n_age" -lt "$MIN_AGE_SECONDS" ]; then continue; fi
+                    # Seconds since last Ready transition
+                    last_ts=$(date -u -d "$n_last" +%s 2>/dev/null || echo 0)
+                    if [ "$last_ts" = "0" ]; then continue; fi
+                    not_ready_for=$((NOW - last_ts))
+                    if [ "$not_ready_for" -lt "$NOTREADY_GRACE_SECONDS" ]; then
+                      echo "  skip $n_name — NotReady for ${not_ready_for}s < ${NOTREADY_GRACE_SECONDS}s"
+                      continue
+                    fi
+                    echo "  STALE: $n_name (NotReady for ${not_ready_for}s)"
+                    ANY_DIVERGENCE=1
+                    if [ "$AUTO_REMEDIATE" = "true" ]; then
+                      kubectl delete node "$n_name" --wait=false
+                      ACTIONS=$((ACTIONS+1))
+                      if kubectl get ciliumnode "$n_name" >/dev/null 2>&1; then
+                        kubectl delete ciliumnode "$n_name" --wait=false
+                        ACTIONS=$((ACTIONS+1))
+                      fi
+                    fi
+                  done < /tmp/nodes-ready.tsv
 
                   echo ""
                   echo "=== summary: divergence=$ANY_DIVERGENCE actions=$ACTIONS auto_remediate=$AUTO_REMEDIATE ==="
