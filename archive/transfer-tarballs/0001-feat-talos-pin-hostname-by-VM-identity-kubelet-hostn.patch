@@ -1,0 +1,173 @@
+From 02dcfc46ee8942add0a392e8520841a4c68de179 Mon Sep 17 00:00:00 2001
+From: damoke012 <103553692+damoke012@users.noreply.github.com>
+Date: Thu, 18 Jun 2026 23:11:02 +0000
+Subject: [PATCH] feat(talos): pin hostname by VM identity + kubelet
+ hostname-override
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Eliminates the class of bug that caused 2026-06-17 + 2026-06-18 cascades:
+list-index-driven hostname assignment that drifts when out-of-band
+talosctl patches or DHCP refreshes shift IP ordering.
+
+Changes:
+  1. modules/vsphere_vm/outputs.tf — emit vm_names output
+     (vsphere_virtual_machine.vm[*].name; same count.index ordering
+     as ip_addresses in steady state)
+
+  2. modules/talos/variables.tf — accept control_plane_vm_names +
+     worker_vm_names; both are required and must be count.index-aligned
+     with their respective IP lists
+
+  3. modules/talos/main.tf — replace 3 hardcoded hostname template strings
+     with var.{cp,worker}_vm_names[N]:
+       - init                → control_plane_vm_names[0]
+       - join_cp[N]          → control_plane_vm_names[N+1]
+       - join_workers[N]     → worker_vm_names[N]
+     Also adds machine.kubelet.extraArgs.hostname-override pinning kubelet's
+     identity to the VM-name (forces consistent reporting independent of
+     OS-derived hostname or DNS).
+
+  4. deploy/terraform/main.tf — wire module.vsphere_cp.vm_names +
+     module.vsphere_worker.vm_names into module.talos.
+
+Net string-produced behavior is identical (VM names follow the same
+${prefix}-${N+1} pattern they already had), so apply should be a
+no-op for hostname STRINGS — but the new kubelet hostname-override
+WILL push a config delta + restart kubelet on each node. That restart
+is the intended fix: forces stuck/divergent kubelets to re-register
+under their declared hostname. The cilium-node-reconciler CronJob
+(merged 2026-06-18 PM) handles any CN drift that surfaces during the
+rolling kubelet restart.
+
+INFRA-XXXX  # (replace with real ticket on PR open)
+---
+ deploy/terraform/main.tf                      |  2 ++
+ deploy/terraform/modules/talos/main.tf        | 27 +++++++++++++++----
+ deploy/terraform/modules/talos/variables.tf   | 10 +++++++
+ .../terraform/modules/vsphere_vm/outputs.tf   |  5 ++++
+ 4 files changed, 39 insertions(+), 5 deletions(-)
+
+diff --git a/deploy/terraform/main.tf b/deploy/terraform/main.tf
+index 39e0e6a..4222875 100644
+--- a/deploy/terraform/main.tf
++++ b/deploy/terraform/main.tf
+@@ -101,6 +101,8 @@ module "talos" {
+   talos_version             = var.talos_version
+   control_plane_ips         = module.vsphere_cp.ip_addresses
+   worker_ips                = module.vsphere_worker.ip_addresses
++  control_plane_vm_names    = module.vsphere_cp.vm_names
++  worker_vm_names           = module.vsphere_worker.vm_names
+   control_plane_count       = var.control_plane_count
+   worker_count              = var.worker_count
+   control_plane_name_prefix = var.control_plane_name_prefix
+diff --git a/deploy/terraform/modules/talos/main.tf b/deploy/terraform/modules/talos/main.tf
+index 9becf7b..23569e5 100644
+--- a/deploy/terraform/modules/talos/main.tf
++++ b/deploy/terraform/modules/talos/main.tf
+@@ -54,7 +54,7 @@ resource "talos_machine_configuration_apply" "init" {
+     yamlencode({
+       machine = {
+         network = {
+-          hostname = "${var.control_plane_name_prefix}-1"
++          hostname = var.control_plane_vm_names[0]
+           interfaces = [
+             {
+               interface = "eth0"
+@@ -65,6 +65,11 @@ resource "talos_machine_configuration_apply" "init" {
+             }
+           ]
+         }
++        kubelet = {
++          extraArgs = {
++            hostname-override = var.control_plane_vm_names[0]
++          }
++        }
+       }
+     })
+   ]
+@@ -87,7 +92,7 @@ resource "talos_machine_configuration_apply" "join_cp" {
+     yamlencode({
+       machine = {
+         network = {
+-          hostname = "${var.control_plane_name_prefix}-${count.index + 2}"
++          hostname = var.control_plane_vm_names[count.index + 1]
+           interfaces = [
+             {
+               interface = "eth0"
+@@ -97,7 +102,13 @@ resource "talos_machine_configuration_apply" "join_cp" {
+               }
+             }
+           ]
+-      } }
++        }
++        kubelet = {
++          extraArgs = {
++            hostname-override = var.control_plane_vm_names[count.index + 1]
++          }
++        }
++      }
+     })
+   ]
+ 
+@@ -116,14 +127,20 @@ resource "talos_machine_configuration_apply" "join_workers" {
+     yamlencode({
+       machine = {
+         network = {
+-          hostname = "${var.worker_name_prefix}-${count.index + 1}"
++          hostname = var.worker_vm_names[count.index]
+           interfaces = [
+             {
+               interface = "eth0"
+               dhcp      = true
+             }
+           ]
+-      } }
++        }
++        kubelet = {
++          extraArgs = {
++            hostname-override = var.worker_vm_names[count.index]
++          }
++        }
++      }
+     })
+   ]
+ 
+diff --git a/deploy/terraform/modules/talos/variables.tf b/deploy/terraform/modules/talos/variables.tf
+index fbdd750..67480e9 100644
+--- a/deploy/terraform/modules/talos/variables.tf
++++ b/deploy/terraform/modules/talos/variables.tf
+@@ -38,6 +38,16 @@ variable "worker_ips" {
+   type        = list(string)
+ }
+ 
++variable "control_plane_vm_names" {
++  description = "vSphere VM names for control plane VMs, count.index-aligned with control_plane_ips. Drives Talos hostname pinning by VM identity (not list index) — prevents hostname drift when out-of-band Talos config patches or DHCP refreshes shift IP ordering."
++  type        = list(string)
++}
++
++variable "worker_vm_names" {
++  description = "vSphere VM names for worker VMs, count.index-aligned with worker_ips. Drives Talos hostname pinning by VM identity (not list index)."
++  type        = list(string)
++}
++
+ variable "control_plane_count" {
+   description = "Number of control-plane nodes"
+   type        = number
+diff --git a/deploy/terraform/modules/vsphere_vm/outputs.tf b/deploy/terraform/modules/vsphere_vm/outputs.tf
+index bd3ebc5..07f1a6a 100644
+--- a/deploy/terraform/modules/vsphere_vm/outputs.tf
++++ b/deploy/terraform/modules/vsphere_vm/outputs.tf
+@@ -2,3 +2,8 @@ output "ip_addresses" {
+   description = "IP addresses of the created VMs"
+   value       = compact([for vm in data.vsphere_virtual_machine.vm_info : try(vm.default_ip_address, "")])
+ }
++
++output "vm_names" {
++  description = "vSphere VM names (count.index aligned with the resource list — same ordering as ip_addresses in steady state)"
++  value       = vsphere_virtual_machine.vm[*].name
++}
+-- 
+2.52.0
+
