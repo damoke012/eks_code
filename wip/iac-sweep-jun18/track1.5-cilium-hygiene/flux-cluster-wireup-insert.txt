@@ -1,0 +1,23 @@
+# iaac-talos-flux-cluster wire-up snippet
+# Target file:  clusters/bm-dev/flux-system/infra.yaml
+# Target branch: master (per memory: bm-dev is legacy dir name, not a branch)
+#
+# Insert this block IMMEDIATELY AFTER the existing `cilium-lb` Kustomization.
+# Total addition: 15 lines (including the leading `---` separator).
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cilium-hygiene
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/cilium-hygiene
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 5m0s

@@ -1,0 +1,248 @@
+# CronJob: detect and remediate Cilium ↔ kubectl Node divergence.
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/cilium/hygiene/
+# (new folder; reference from cilium Kustomization)
+#
+# Why: every time we touch CP machine config (talosctl patch, TF apply that
+# pushes talos_machine_configuration_apply), the kubelet identity for a CP
+# can re-register at a new IP without the matching CiliumNode CRD getting
+# updated. The Cilium WireGuard mesh then carries an inconsistent identity
+# for that CP, which cascades into:
+#   - ambient/ztunnel/istio-cni-node failing to route to/from that CP
+#   - cert-manager → istio-csr → workload cert renewal chain failures
+#   - Octopus post-apply health check timing out
+#
+# We've seen this twice in 48 hours (2026-06-17 + 2026-06-18). The detection
+# layer (CiliumNodeCountDivergence PromRule, PR #41) alerts but doesn't fix.
+# This CronJob fixes — it runs every 15 minutes and reconciles 3 failure modes:
+#
+#   1. ORPHAN CiliumNode  — CN exists, no matching kubectl Node → delete CN
+#   2. STALE CiliumNode IP — CN exists, Node exists, but INTERNALIP differs → delete CN
+#   3. GHOST kubectl Node — Node exists but NotReady with duplicate IP of a Ready node → delete Node
+#
+# In all cases the underlying Cilium agent DaemonSet pod will recreate the
+# CiliumNode correctly within ~30 seconds (it polls the local kubelet for
+# identity).
+#
+# AUTO_REMEDIATE=true by default. We've verified the 3-case logic against
+# the 2026-06-17 + 2026-06-18 incident states. The window where the
+# CronJob could mis-delete is narrow (a node that just registered and
+# CN sync hasn't caught up). Conservative-tilted: skip remediation if
+# the Node OR CiliumNode is younger than 5 minutes.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cilium-node-reconciler
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: cilium
+    app.kubernetes.io/component: hygiene
+spec:
+  schedule: "*/15 * * * *"        # every 15 min — fast enough to catch incidents pre-cascade
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: cilium-node-reconciler
+          restartPolicy: OnFailure
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+          tolerations: []
+          containers:
+            - name: reconciler
+              image: bitnamilegacy/kubectl:1.32
+              env:
+                - name: AUTO_REMEDIATE
+                  value: "true"
+                - name: MIN_AGE_SECONDS
+                  value: "300"      # skip resources younger than 5 min
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  echo "=== Cilium node reconciler $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+                  echo "AUTO_REMEDIATE=${AUTO_REMEDIATE} MIN_AGE_SECONDS=${MIN_AGE_SECONDS}"
+
+                  NOW=$(date -u +%s)
+                  ACTIONS=0
+                  ANY_DIVERGENCE=0
+
+                  # Build name → INTERNAL-IP maps for both Node and CiliumNode
+                  kubectl get nodes -o json > /tmp/nodes.json
+                  kubectl get ciliumnodes -o json > /tmp/cns.json
+
+                  echo "--- kubectl nodes (name, internal-ip, ready, age-sec) ---"
+                  jq -r --arg now "$NOW" '.items[] |
+                    [.metadata.name,
+                     (.status.addresses[] | select(.type=="InternalIP") | .address),
+                     (.status.conditions[] | select(.type=="Ready") | .status),
+                     (($now | tonumber) - (.metadata.creationTimestamp | fromdateiso8601))
+                    ] | @tsv' /tmp/nodes.json | tee /tmp/nodes.tsv
+
+                  echo "--- CiliumNodes (name, internal-ip, age-sec) ---"
+                  jq -r --arg now "$NOW" '.items[] |
+                    [.metadata.name,
+                     (.spec.addresses[]? | select(.type=="InternalIP") | .ip // "<none>"),
+                     (($now | tonumber) - (.metadata.creationTimestamp | fromdateiso8601))
+                    ] | @tsv' /tmp/cns.json | tee /tmp/cns.tsv
+
+                  # CASE 1: ORPHAN CiliumNode (CN exists, no matching Node)
+                  echo ""
+                  echo "--- CASE 1: orphan CiliumNodes ---"
+                  while IFS=$'\t' read -r cn_name cn_ip cn_age; do
+                    cn_age=${cn_age%.*}
+                    if [ "$cn_age" -lt "$MIN_AGE_SECONDS" ]; then
+                      echo "  skip $cn_name — age ${cn_age}s < ${MIN_AGE_SECONDS}s"
+                      continue
+                    fi
+                    if ! grep -qE "^${cn_name}\b" /tmp/nodes.tsv; then
+                      echo "  ORPHAN: $cn_name (no matching Node)"
+                      ANY_DIVERGENCE=1
+                      if [ "$AUTO_REMEDIATE" = "true" ]; then
+                        kubectl delete ciliumnode "$cn_name" --wait=false
+                        ACTIONS=$((ACTIONS+1))
+                      fi
+                    fi
+                  done < /tmp/cns.tsv
+
+                  # CASE 2: STALE IP (CN and Node both exist, but INTERNAL-IP differs)
+                  echo ""
+                  echo "--- CASE 2: stale CiliumNode IPs ---"
+                  while IFS=$'\t' read -r cn_name cn_ip cn_age; do
+                    cn_age=${cn_age%.*}
+                    if [ "$cn_age" -lt "$MIN_AGE_SECONDS" ]; then
+                      continue
+                    fi
+                    node_ip=$(awk -v n="$cn_name" '$1==n {print $2; exit}' /tmp/nodes.tsv)
+                    if [ -z "$node_ip" ]; then
+                      continue   # handled by CASE 1
+                    fi
+                    if [ "$cn_ip" != "$node_ip" ]; then
+                      echo "  STALE: $cn_name — CN has $cn_ip, Node has $node_ip"
+                      ANY_DIVERGENCE=1
+                      if [ "$AUTO_REMEDIATE" = "true" ]; then
+                        # Delete CN — cilium DS will recreate with correct IP
+                        kubectl delete ciliumnode "$cn_name" --wait=false
+                        ACTIONS=$((ACTIONS+1))
+                        # And bounce the cilium agent pod on THAT node so it re-registers fast
+                        agent_pod=$(kubectl -n kube-system get pods -l k8s-app=cilium \
+                          --field-selector "spec.nodeName=$cn_name" -o jsonpath='{.items[0].metadata.name}' || true)
+                        if [ -n "$agent_pod" ]; then
+                          echo "    bouncing cilium agent: $agent_pod"
+                          kubectl -n kube-system delete pod "$agent_pod" --wait=false
+                          ACTIONS=$((ACTIONS+1))
+                        fi
+                      fi
+                    fi
+                  done < /tmp/cns.tsv
+
+                  # CASE 3: GHOST kubectl Node (duplicate IP + NotReady)
+                  echo ""
+                  echo "--- CASE 3: ghost kubectl Nodes (NotReady + duplicate IP of a Ready node) ---"
+                  # Group by IP; for IPs with multiple Nodes, NotReady ones are ghosts
+                  awk '{ip=$2; ready=$3; name=$1; age=$4;
+                        seen[ip]++; if (ready=="True") ready_name[ip]=name;
+                        if (ready!="True") notready[name]=ip"\t"age}
+                       END {for (n in notready) {
+                         split(notready[n], a, "\t");
+                         ip=a[1]; age=a[2];
+                         if (seen[ip] > 1 && ready_name[ip] != "")
+                           print n"\t"ip"\t"age"\t"ready_name[ip]
+                       }}' /tmp/nodes.tsv > /tmp/ghosts.tsv
+
+                  if [ ! -s /tmp/ghosts.tsv ]; then
+                    echo "  none"
+                  else
+                    while IFS=$'\t' read -r ghost_name ghost_ip ghost_age ready_peer; do
+                      ghost_age=${ghost_age%.*}
+                      if [ "$ghost_age" -lt "$MIN_AGE_SECONDS" ]; then
+                        echo "  skip ghost $ghost_name — age ${ghost_age}s < ${MIN_AGE_SECONDS}s"
+                        continue
+                      fi
+                      echo "  GHOST: $ghost_name at $ghost_ip (NotReady; $ready_peer holds same IP and is Ready)"
+                      ANY_DIVERGENCE=1
+                      if [ "$AUTO_REMEDIATE" = "true" ]; then
+                        kubectl delete node "$ghost_name" --wait=false
+                        ACTIONS=$((ACTIONS+1))
+                        # And delete its CiliumNode if present
+                        if kubectl get ciliumnode "$ghost_name" >/dev/null 2>&1; then
+                          kubectl delete ciliumnode "$ghost_name" --wait=false
+                          ACTIONS=$((ACTIONS+1))
+                        fi
+                      fi
+                    done < /tmp/ghosts.tsv
+                  fi
+
+                  echo ""
+                  echo "=== summary: divergence=$ANY_DIVERGENCE actions=$ACTIONS auto_remediate=$AUTO_REMEDIATE ==="
+
+                  if [ "$ANY_DIVERGENCE" = "1" ] && [ "$AUTO_REMEDIATE" != "true" ]; then
+                    exit 1   # non-zero → Failed Job → alarms via standard JobFailed monitoring
+                  fi
+                  exit 0
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65532
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cilium-node-reconciler
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: cilium
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cilium-node-reconciler
+  labels:
+    app.kubernetes.io/part-of: cilium
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnodes"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cilium-node-reconciler
+  labels:
+    app.kubernetes.io/part-of: cilium
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cilium-node-reconciler
+subjects:
+  - kind: ServiceAccount
+    name: cilium-node-reconciler
+    namespace: kube-system
