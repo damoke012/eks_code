@@ -1,122 +1,113 @@
 # iac-sweep-jun18 — STATE
 
-**STATUS:** ACTIVE (Track 1.5 LIVE, Track 2 + 3 partial)
-**Last updated:** 2026-06-19 ~12:50 AM (end of marathon session)
+**STATUS:** ACTIVE (Track 1.5 LIVE but image bug; Tracks 2/3 partial; Tracks 4/5 NEW)
+**Last updated:** 2026-06-19 ~02:30 AM (end of extended marathon — RW recovery + DNS fix + full IaC coverage doc)
 **Owner:** Doke
 
-## Session 2026-06-18 PM → 2026-06-19 ~01:00 final additions
+## Session 2026-06-19 AM additions (THIS SESSION)
 
-- **PR #38 iaac-talos hostname-pin** — MERGED + APPLIED via Octopus 1.166. Talos hostname now bound to vSphere VM identity + kubelet hostname-override. CP-2 fixed; CP-3 needed manual reset.
-- **Codified runbook for kubelet CN-mismatch recovery** — `wip/iac-sweep-jun18/track1.5-cilium-hygiene/runbook-kubelet-cn-mismatch-recovery.md` + matching PromRule. Used successfully to fix CP-3 (.179). Ready to PR.
-- **PR #44 iaac-talos-flux-platform Phase 2** — MERGED + Flux APPLIED. Live CephCluster CR now has `deviceFilter: ^sdb$`. OSDs not yet spawning — blocked on pre-existing mon crash loop.
-- **PR #39 iaac-talos worker RAM bump 4→8 GB** — MERGED + APPLIED via Octopus 1.168. vSphere hot-add SUCCESS on all 7 workers (verified 7921 MB each post-apply). TF post-step errored on `compact()` race — needs re-run next session.
+### IaC + cluster work landed
+
+- **PR #40 (iaac-talos)** — worker RAM 8→12 GB + drop `compact()` race in vsphere_vm/outputs.tf — MERGED + APPLIED via Octopus 1.171 (which retried after precondition caught the hot-add race cleanly — exact behavior we designed)
+- **All 7 workers now at 11941 MB (12 GB)** — verified post-apply via `talosctl memory`
+- **Compact race FIX LIVE in state** — `worker_ips` output now 7 stable elements (was 3-element residue from 1.168 race)
+- **State drift reconciled** — `talos_machine_configuration_apply.join_workers[1]/[2]` updated to correct target IPs
+
+### Manual cluster recoveries during session (now codified for next session)
+
+- **.27 (wk-5) + .21 (wk-7) CN-mismatch recovery** — hostname patch back to original CN identity (no etcd remove, no reset needed — case B-2 of the runbook). PROVEN twice tonight.
+- **CiliumNode drift on CPs** — manual reconciler-equivalent (delete stale CN talos-cp-op-dev-2 at wrong IP + bounce cilium agents on cp-1 and cp-2). This is EXACTLY what the (broken-image) cilium-node-reconciler CronJob would have done — but the image entrypoint bug made it no-op.
+- **DNS broken cluster-wide** — caused by CN drift on CoreDNS-hosting CPs. Restored after Cilium fix.
+- **istio-cni + ztunnel stale on 4 workers** (wk-2/wk-3/wk-5/wk-7) — bounced DS pods on touched nodes; needed second bounce on wk-5 after DNS fix because original bounce happened before DNS was healthy.
+- **ExternalSecrets force-sync** — all 7 RW ExternalSecrets stuck in SecretSyncedError after the DNS-broken hour; manual force-sync annotation brought them back. Critical secrets like `rw-service-account-credentials` re-synced.
+- **RW full recovery** — all 14 RW namespace pods now Running. IRSA chain verified end-to-end (projected SA token → STS AssumeRoleWithWebIdentity → S3 hummock state store).
+- **Dead ghostunnel pods cleaned** — 8d/35h CrashLoopBackOff stragglers manually deleted.
+
+### IaC coverage docs WRITTEN (THIS SESSION)
+
+- **`INCIDENT-COVERAGE-MATRIX-2026-06-19.md`** — 17 failure-mode matrix with IaC artifact assigned to each gap. Categorized by track 1.5 / 4 (NEW) / 5 (NEW) / 3.
+- **`ROOK-CEPH-IMPLEMENTATION-2026-06-19.md`** — full Rook-Ceph architecture doc: phases 1+2 deployed, phase 3 monitoring drafted, phase 4 production-readiness mapped. Includes recovery commands for mon finalizer stuck pending-deletion.
 
 ## Status as of session end
 
-- **Cluster control plane**: 3/3 CPs Ready, etcd aligned (first time today)
-- **Workers**: 7/7 Ready, ALL at 8 GB RAM
-- **istiod**: 1/1, 33h, 0 restarts
-- **Rook**: still degraded — mons crash-looping 10h (pre-existing), operator Pending until memory eased, mon-endpoints ConfigMap stuck with finalizer
-- **RW**: degraded (postgres-postgresql-0 was Pending due to memory; should now schedule)
-- **Reconciler CronJob**: deployed but image entrypoint bug means it's not actually executing the script
+### Cluster — fully healthy
 
-## First-thing-next-session work
+- 3 CPs Ready @ aligned hostnames + etcd
+- 7 workers Ready @ 12 GB RAM
+- istiod 1/1 Ready (35h uptime, 0 restarts through everything)
+- DNS resolves both in-cluster and external (cluster-wide CNs aligned)
+- RW namespace: 14 pods all Running, IRSA proven working
+- Prometheus + Grafana + Postgres + ghostunnel: all Running
 
-1. Re-run iaac-talos 1.168 apply (TfApply=true) to finish the talos_machine_configuration_apply step that erred on compact()
-2. Watch postgres + RW pods schedule and recover (worker memory now 8 GB)
-3. Rook mon recovery: diagnose why mons crash, force-remove finalizer on stuck mon-endpoints CM, kick operator
-4. Fix compact() race in vsphere_vm/outputs.tf (small TF PR)
-5. Fix reconciler image (small flux-platform PR)
-6. Ship the PromRule + Runbook (small PR pair)
+### Pending blockers (next session)
 
-## What this is
+#### 1. Rook OSDs not spawning
 
-Post-incident codification of the 2026-06-17 CP OOM cascade + 2026-06-18 Cilium-orphan cert cascade incidents. Turns manual learnings + manual fixes into IaC that ships with QA bring-up and survives cluster restores.
+- Phase 2 CephCluster CR applied with `deviceFilter: ^sdb$` ✓
+- BUT mons crash-looping 10h+ pre-existing
+- ConfigMap `rook-ceph-mon-endpoints` stuck `deletionTimestamp:2026-06-17T16:22:04Z` + finalizer `ceph.rook.io/disaster-protection`
+- Operator was Pending earlier; may now schedule with 12 GB workers freed
+- **Recovery path:** see `ROOK-CEPH-IMPLEMENTATION-2026-06-19.md` § "Known blockers"
+
+#### 2. cilium-node-reconciler image entrypoint bug — URGENT
+
+- CronJob deployed (PR #43 merged + Flux applied)
+- Image `bitnamilegacy/kubectl:1.32` has `ENTRYPOINT=kubectl`
+- Our `command: ["/bin/sh", "-c", ...]` not overriding; args passed as kubectl args → instant error
+- **THIS IS WHY** today's CN drift on CPs cascaded into DNS death — the safety net was deployed but no-op
+- **Fix:** swap to `alpine/k8s:1.32.6` or `rancher/kubectl:v1.32.0`, or add explicit `command: []` + proper args separation
+- **URGENT** — every cluster reboot/IP-change will hit the same cascade without this fix
+
+### IaC gaps captured (next session work)
+
+See `INCIDENT-COVERAGE-MATRIX-2026-06-19.md` for the 17-row matrix. High-priority IaC PRs:
+
+| Priority | Track | PR |
+|---|---|---|
+| URGENT | 1.5 | cilium-node-reconciler image fix |
+| HIGH | 1.5 | Runbook Case B-2 (hostname patch-back) |
+| HIGH | 4 (NEW) | PromRule `ClusterDNSUnreachable` |
+| HIGH | 5 (NEW) | Deploy stakater/Reloader for Secret-change pod restart |
+| MEDIUM | 4 (NEW) | PromRule `IRSAFailureCascade` |
+| MEDIUM | 5 (NEW) | ExternalSecret refresh interval 1h→5m on critical paths |
+| MEDIUM | 1.5 | New `istio-ambient-recovery` CronJob OR CASE 5 in reconciler |
+| MEDIUM | 4 (NEW) | DS config-hash auto-restart pattern |
+| LOW | 3 | Kyverno pod-GC for chronic CrashLoopBackOff |
+| LOW | 5 (NEW) | pod-identity-webhook priority barrier |
 
 ## Track status
 
 | Track | Theme | Detection | Auto-heal | Status |
 |---|---|---|---|---|
-| 1 | istio cert chain + xDS resilience | ✓ (PR #40 merged) | partial | PromRule LIVE; pinned ClusterIP + weekly gateway restart DRAFTED |
-| 1.5 | Cilium ↔ kubectl Node hygiene | ✓ (PR #41 merged) | ✓ (PR #43 + PR #17 merged 2026-06-18 PM) | **FULLY LIVE** |
-| 2 | Rook-Ceph observability | drafted | n/a | gated on Phase 2 (deviceFilter) cephcluster CR landing |
-| 3 | CP memory + etcd peer hardening | ✓ (PR #42 merged) | partial | PromRule LIVE; talosconfig backup CronJob + worker RAM bump DRAFTED |
+| 1 | istio cert chain + xDS resilience | ✓ (PR #40 merged previously) | partial | PromRule LIVE; weekly gateway restart + pinned ClusterIP DRAFTED |
+| 1.5 | Cilium ↔ kubectl Node hygiene | ✓ (PR #41 merged) | ⚠ (PR #43 merged but image broken) | LIVE but image bug = no-op |
+| 2 | Rook-Ceph observability | drafted | n/a | Gated on mon recovery |
+| 3 | CP memory + etcd peer hardening | ✓ (PR #42 merged) | partial | PromRule LIVE; talosconfig backup CronJob DRAFTED; **Phase 1 + worker RAM 12 GB APPLIED** |
+| 4 (NEW) | DNS + ambient hygiene | needs PRs | needs PRs | NEW track, fully scoped tonight |
+| 5 (NEW) | RW resilience (secret-change reload, refresh tightening) | needs PRs | needs PRs | NEW track, fully scoped tonight |
 
-## What landed 2026-06-18 PM (this session)
+## First-thing-next-session work
 
-### Phase 1 Rook (worker disk add) — DONE
+1. **Diagnose + recover Rook mons** — see ROOK-CEPH-IMPLEMENTATION-2026-06-19.md
+2. **URGENT PR — cilium-node-reconciler image fix** (one YAML edit in flux-platform op-dev)
+3. **Ship runbook Case B-2** (hostname patch-back, no reset) — proven twice tonight
+4. **Flip TfApply back to false** in Octopus (currently `true`)
+5. **Ship Tracks 4 + 5 PRs** (DNS health + RW resilience)
 
-- iaac-talos PR [#37](https://github.com/variant-inc/iaac-talos/pull/37) — MERGED
-- Octopus release `0.1.0-feature-op-usxpress-dev.1.163` applied to DEV with `TfApply=true`
-- `/dev/sdb` (50 GB) confirmed on all 7 workers via `talosctl get disks`
-- See `wip/iac-sweep-jun18/rook-ceph-phase1-vsphere-disk-add.md` for the change details
-- **Unblocks Phase 2** (cephcluster.yaml `deviceFilter: ^sdb$` switch)
+## What this is
 
-### Track 1.5 Cilium hygiene — FULLY LIVE
-
-- iaac-talos-flux-platform PR [#43](https://github.com/variant-inc/iaac-talos-flux-platform/pull/43) — MERGED
-  - CronJob `kube-system/cilium-node-reconciler` runs every 15 min
-  - 4 failure modes auto-remediated:
-    1. ORPHAN CiliumNode (no matching Node)
-    2. STALE CiliumNode IP (CN INTERNALIP ≠ Node INTERNALIP) — deletes CN + bounces agent
-    3. GHOST kubectl Node (NotReady + duplicate IP of Ready peer)
-    4. STALE kubectl Node (NotReady > 30 min, sits alone) — catches the today's pattern
-- iaac-talos-flux-cluster PR [#17](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/17) — MERGED
-  - Wires `cilium-hygiene` Kustomization into bm-dev Flux chain
-- Flux will reconcile within ~10 min; first CronJob run at next :15 boundary
-- **Permanent IaC fix**: reboots, IP changes, kubelet renames now auto-heal within 15-30 min
-
-### Today's incident — RESOLVED
-
-- During the 1.163 apply, Cilium IP divergence cascade triggered AGAIN (CP-1 kubelet re-registered at .29 but CN stayed at .181)
-- Manual cleanup: deleted ghost cp-3 Node + stale CP-1 CiliumNode + bounced cilium agent
-- istiod 1/1 Ready, cluster healthy
-- Track 1.5 PRs above ensure this is the LAST time this needs manual intervention
-
-## Known remaining issues
-
-### Deep iaac-talos hostname pinning refactor — PENDING
-
-Today's session-handoff surfaced that:
-- 2 CP machines (at .29 and .181) had both registered as `talos-cp-op-dev-1` over time
-- 2 CP machines (at .179 and the etcd cp-3) disagree on hostname between kubelet vs etcd
-- Today's apply pushed new machine configs that SHOULD have fixed this but kubelet at .181 stopped registering as a Node entirely
-
-Full refactor proposal: `jira/drafts/INFRA-XXXX-cp-hostname-etcd-divergence.md`
-- Pin Talos hostname by `vsphere_virtual_machine.vm[count.index].name` (VM identity) instead of `var.control_plane_name_prefix` (list-index)
-- Outputs `vm_names` from vsphere_vm module, threads through talos module
-- Eliminates the class of bug entirely
-
-Out-of-scope today; surgical work needs its own session. The cilium-node-reconciler CronJob (case 4) is the safety net underneath.
-
-## Open per-track items
-
-### Track 1 — istio resilience (still partial)
-- `cronjob-weekly-gateway-restart.yaml` — DRAFTED, not PRed (small, low blast radius)
-- `istiod-service-pinned-clusterip-patch.yaml` — DRAFTED, not PRed
-
-### Track 2 — Rook observability (gated)
-- Everything DRAFTED
-- Gated on Phase 2 cephcluster.yaml deviceFilter PR
-
-### Track 3 — incident hardening (still partial)
-- `cronjob-talosconfig-backup.yaml` — DRAFTED, needs IRSA role first
-- `worker-ram-bump.tf.patch` — DRAFTED, coordinate with Tim before applying
-
-## Next session
-
-1. **Verify track 1.5 CronJob ran cleanly** at next :15 / :30 boundary
-2. **Phase 2 PR** — cephcluster.yaml deviceFilter switch (file already drafted in `wip/iac-sweep-jun18/rook-ceph-phase2-deviceFilter.md`)
-3. Track 1 + Track 3 remaining items (low priority — detection already live)
-4. Schedule the iaac-talos hostname-pin refactor as a planned-window surgical change
+Post-incident codification of the 2026-06-17 CP OOM cascade + 2026-06-18 Cilium-orphan cert cascade + 2026-06-18→19 DNS+IRSA+RW cascade. Turns manual learnings + manual fixes into IaC that ships with QA bring-up and survives cluster restores.
 
 ## Files
 
 - `STATE.md` — this file
+- `CHANGELOG.md` — chronological session-by-session record
 - `DEPLOY-README.md` — original sweep plan
-- `rook-ceph-phase1-vsphere-disk-add.md` — Phase 1 draft (APPLIED)
-- `rook-ceph-phase2-deviceFilter.md` — Phase 2 draft (NEXT)
+- `INCIDENT-COVERAGE-MATRIX-2026-06-19.md` — **THIS SESSION** — 17 failure-mode IaC gap matrix
+- `ROOK-CEPH-IMPLEMENTATION-2026-06-19.md` — **THIS SESSION** — full Rook-Ceph architecture + phases doc
+- `rook-ceph-phase1-vsphere-disk-add.md` — Phase 1 details (APPLIED)
+- `rook-ceph-phase2-deviceFilter.md` — Phase 2 details (APPLIED)
 - `track1-istio-resilience/` — istio resilience drafts
-- `track1.5-cilium-hygiene/` — Cilium hygiene drafts (PRs MERGED)
-- `track2-rook-ceph-observability/` — Rook observability drafts
+- `track1.5-cilium-hygiene/` — Cilium hygiene drafts (LIVE but image bug)
+- `track2-rook-ceph-observability/` — Rook observability drafts (gated)
 - `track3-incident-hardening/` — incident hardening drafts
