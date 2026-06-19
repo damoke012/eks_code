@@ -1,0 +1,26 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: risingwave-dashboard-usxpress-io
+  namespace: istio-ingress
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/component: cert
+    team: risingwave
+spec:
+  secretName: risingwave-dashboard-usxpress-io-tls
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - risingwave-dashboard.usxpress.io

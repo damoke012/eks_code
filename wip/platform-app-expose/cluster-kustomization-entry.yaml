@@ -1,0 +1,24 @@
+# Append this block to:
+#   iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml
+# Branch: master
+# It wires Flux to reconcile the risingwave-exposure dir from
+# iaac-talos-flux-platform op-dev branch (the `infra` GitRepository).
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: risingwave-exposure
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: istiod
+    - name: cert-manager-issuers
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/risingwave-exposure
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 5m0s

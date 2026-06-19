@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw-postgres-passthrough
+  namespace: istio-ingress
+  labels:
+    app.kubernetes.io/managed-by: flux
+    team: risingwave
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: rw-postgres.op-dev.usxpress.io
+    external-dns.alpha.kubernetes.io/target: "10.10.82.21,10.10.82.22,10.10.82.26,10.10.82.27,10.10.82.28,10.10.82.178,10.10.82.180"
+spec:
+  hosts:
+    - rw-postgres.op-dev.usxpress.io
+  gateways:
+    - tcp-passthrough
+  tls:
+    - match:
+        - port: 5432
+          sniHosts:
+            - rw-postgres.op-dev.usxpress.io
+      route:
+        - destination:
+            host: ghostunnel-rw-postgres.risingwave.svc.cluster.local
+            port:
+              number: 5432

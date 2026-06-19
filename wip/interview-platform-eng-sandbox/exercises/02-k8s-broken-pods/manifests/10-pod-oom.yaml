@@ -1,0 +1,24 @@
+# Pod A — OOM scenario.
+# The container actually allocates ~80Mi but the memory limit is 32Mi.
+# Expected state: OOMKilled, restarting.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-a-memory
+  namespace: broken
+  labels:
+    purpose: oom-demo
+spec:
+  restartPolicy: Always
+  containers:
+    - name: memhog
+      image: polinux/stress:latest
+      command: ["stress"]
+      args: ["--vm", "1", "--vm-bytes", "80M", "--vm-hang", "0"]
+      resources:
+        requests:
+          memory: "16Mi"
+          cpu: "10m"
+        limits:
+          memory: "32Mi"
+          cpu: "100m"

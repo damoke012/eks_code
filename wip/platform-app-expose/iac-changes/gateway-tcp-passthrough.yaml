@@ -1,0 +1,37 @@
+# Target: iaac-talos-flux-platform op-dev branch
+#   infrastructure/istio-ingress/tcp-passthrough-gateway.yaml (or wherever the
+#   tcp-passthrough Gateway is defined — search for `name: tcp-passthrough`).
+#
+# Changes vs current:
+# - Adds `*.usxpress.io` to the hosts list on the 4567 (rwsql-passthrough)
+#   and 5432 (postgres-passthrough) server blocks.
+# - Existing `*.op-dev.usxpress.io` hosts remain — depth-1 wildcard cert
+#   still works for the old names. Both naming schemes coexist.
+
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: tcp-passthrough
+  namespace: istio-ingress
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 4567
+        name: rwsql-passthrough
+        protocol: TLS
+      tls:
+        mode: PASSTHROUGH
+      hosts:
+        - "*.op-dev.usxpress.io"
+        - "*.usxpress.io"           # NEW — covers risingwave-sql.usxpress.io etc.
+    - port:
+        number: 5432
+        name: postgres-passthrough
+        protocol: TLS
+      tls:
+        mode: PASSTHROUGH
+      hosts:
+        - "*.op-dev.usxpress.io"
+        - "*.usxpress.io"           # NEW — covers risingwave-meta.usxpress.io etc.

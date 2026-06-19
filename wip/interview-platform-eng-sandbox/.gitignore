@@ -1,0 +1,17 @@
+# Local Go builds + module cache
+exercises/*/bin/
+exercises/*/.terraform/
+exercises/*/terraform.tfstate
+exercises/*/terraform.tfstate.backup
+exercises/*/.terraform.lock.hcl
+
+# IDE artifacts
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Codespace runtime
+*.log

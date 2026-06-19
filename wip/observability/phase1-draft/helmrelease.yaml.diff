@@ -1,0 +1,11 @@
+--- a/infrastructure/prometheus/helmrelease.yaml
++++ b/infrastructure/prometheus/helmrelease.yaml
+@@ -32,6 +32,8 @@ spec:
+       enabled: true
+     prometheus:
+       prometheusSpec:
++        externalLabels:
++          cluster: op-usxpress-dev
+         retention: 7d
+         resources:
+           requests:

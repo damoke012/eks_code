@@ -1,0 +1,26 @@
+# Kustomize patch: enable monitoring on CephCluster CR
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/rook-ceph-cluster/
+# Reference as a patch in the existing kustomization.yaml.
+#
+# This MERGES into the CephCluster spec from PR #37 — only adds dashboard +
+# monitoring sub-blocks, doesn't touch placement / resources / OSDs.
+#
+# After this is in place, the rook-ceph-mgr Pod exposes Prometheus metrics
+# on port 9283, scraped by the ServiceMonitor.
+
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: rook-ceph
+spec:
+  dashboard:
+    enabled: true
+    # Internal-only; surfaced via Istio VS if needed (separate PR)
+    ssl: false
+  monitoring:
+    enabled: true
+    # Skip ServiceMonitor creation by Rook itself — we manage it as IaC
+    # via the sibling ServiceMonitor file (no race with the operator).
+    metricsDisabled: false

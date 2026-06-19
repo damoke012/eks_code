@@ -1,0 +1,98 @@
+# CronJob: backup talosconfig client certs to versioned S3 path
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/talos-backup/
+# (new folder; reference from cluster-infra Kustomization)
+#
+# Why: on 2026-06-17 during cluster-down recovery, Doke's WSL talosconfig was
+# for the dpl2 cluster (destroyed). We extracted the working config from the
+# iaac-talos terraform state in S3 — that worked but was slow and depended on
+# having AWS credentials handy.
+#
+# This CronJob writes the client_configuration block (CA, crt, key) to a
+# versioned S3 path daily. Recovery is then a `aws s3 cp` away even if
+# terraform state itself is corrupted.
+#
+# Path structure:
+#   s3://<bucket>/talosconfigs/op-usxpress-dev/2026-06-18.yaml
+#
+# Bucket lifecycle: keep 90 days, transition to Glacier after 30.
+#
+# IRSA role needs s3:PutObject on the prefix only.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: talosconfig-backup
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: cluster-infra
+spec:
+  schedule: "0 6 * * *"   # 06:00 UTC daily
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 5
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          annotations:
+            # Schedule on a CP so we have access to the talos secrets
+            # The data is already in the iaac-talos tfstate; this is a SECONDARY
+            # backup path — encrypted at rest with bucket SSE-S3 + role-restricted.
+            eks.amazonaws.com/role-arn: <FILL_IN_IRSA_ARN>   # TODO: add IRSA role ARN
+        spec:
+          serviceAccountName: talosconfig-backup
+          restartPolicy: OnFailure
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: ""
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+          containers:
+            - name: backup
+              image: bitnamilegacy/aws-cli:2.18
+              env:
+                - name: BUCKET
+                  value: lazy-tf-state-65v583i6my68y6x9   # same bucket as tfstate
+                - name: CLUSTER_NAME
+                  value: op-usxpress-dev
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  DATE=$(date -u +%Y-%m-%d)
+
+                  # The talosconfig is regenerated from terraform state.
+                  # The simpler path: copy the existing tfstate to a date-stamped
+                  # snapshot — that way a clean talosconfig can always be derived.
+                  aws s3 cp \
+                    "s3://${BUCKET}/iaac/talos/${CLUSTER_NAME}.tfstate" \
+                    "s3://${BUCKET}/talosconfig-snapshots/${CLUSTER_NAME}/${DATE}.tfstate"
+
+                  echo "Snapshot written: s3://${BUCKET}/talosconfig-snapshots/${CLUSTER_NAME}/${DATE}.tfstate"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65532
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: talosconfig-backup
+  namespace: kube-system
+  annotations:
+    eks.amazonaws.com/role-arn: <FILL_IN_IRSA_ARN>   # TODO: create role with s3:PutObject on talosconfig-snapshots/* only

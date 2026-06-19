@@ -1,0 +1,32 @@
+# APPEND to: clusters/bm-dev/flux-system/infra.yaml
+# (after existing Kustomization entries)
+#
+# Two-phase wait gates:
+#  1. cephcluster Ready=True (mons + osds healthy)
+#  2. StorageClasses present + provisioner Ready=True
+#
+# Flux Kustomization can't easily wait on CephCluster.status.phase — for
+# bring-up we set wait:false and run validation manually. Once the cluster
+# is stable, flip wait:true so dependent Kustomizations (grafana switching
+# to ceph-block, mimir, loki) gate on it.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  # First reconcile: don't block downstream on Ceph readiness — we want the
+  # CRDs + operator + CephCluster + StorageClasses to land even if the
+  # cluster takes 10+ minutes to come up.
+  wait: false
+  timeout: 20m0s

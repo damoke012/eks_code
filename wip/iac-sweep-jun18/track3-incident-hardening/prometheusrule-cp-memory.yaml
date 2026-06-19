@@ -1,0 +1,70 @@
+# PrometheusRule: control-plane memory pressure detection
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/prometheus-rules/
+#
+# Why: on 2026-06-17 the CPs ran out of memory due to a misplaced CSI plugin
+# DaemonSet. There was no alert — the cluster died before we noticed.
+# These rules would have alarmed 30+ minutes BEFORE the OOM cascade hit.
+#
+# Thresholds match /onprem-safety Rule 2 (CP < 1 GB available = STOP).
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: control-plane-memory
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: cluster-infra
+    release: prometheus-stack
+spec:
+  groups:
+    - name: control-plane.memory
+      interval: 30s
+      rules:
+
+        - alert: CPMemoryAvailableLow
+          expr: |
+            (node_memory_MemAvailable_bytes{
+              instance=~"talos-cp-.*"})
+            / 1024 / 1024 < 1024
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CP {{ $labels.instance }} has < 1 GB available memory"
+            description: |
+              Hit the /onprem-safety Rule 2 threshold. Investigate what's consuming
+              memory on this CP before scheduling anything new cluster-wide.
+
+        - alert: CPMemoryAvailableCritical
+          expr: |
+            (node_memory_MemAvailable_bytes{
+              instance=~"talos-cp-.*"})
+            / 1024 / 1024 < 500
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+            page: true
+          annotations:
+            summary: "CP {{ $labels.instance }} has < 500 MB available — OOM imminent"
+            description: |
+              Etcd quorum is at risk. SUSPEND Flux Kustomization for any recently-deployed
+              workload that could be on CPs. See docs/incidents/2026-06-17_cp-oom-cascade.md
+              for the worst-case pattern.
+
+        - alert: WorkerMemoryAvailableLow
+          expr: |
+            (node_memory_MemAvailable_bytes{
+              instance=~"talos-wk-.*"})
+            / 1024 / 1024 < 300
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Worker {{ $labels.instance }} has < 300 MB available"
+            description: |
+              Tight on memory. Rook OSDs or other tight-fit workloads may OOM.
+              Consider bumping worker RAM (Track 3 worker RAM TF bump).

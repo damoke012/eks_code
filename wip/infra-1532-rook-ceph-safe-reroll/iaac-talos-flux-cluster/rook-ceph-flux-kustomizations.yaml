@@ -1,0 +1,40 @@
+# APPEND to: clusters/bm-dev/flux-system/infra.yaml
+# Same two-Kustomization split as the previous attempt, but the values
+# inside the operator (worker-only CSI placement) prevent the OOM cascade
+# that took down the cluster on 2026-06-17.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-operator
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph-operator
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 15m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-cluster
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: rook-ceph-operator
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph-cluster
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: false
+  timeout: 20m0s

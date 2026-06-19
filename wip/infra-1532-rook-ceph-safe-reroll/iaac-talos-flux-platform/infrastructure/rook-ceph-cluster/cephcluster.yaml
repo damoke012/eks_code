@@ -1,0 +1,140 @@
+# ─────────────────────────────────────────────────────────────────────────
+# CephCluster — PVC-backed OSDs on local-path, WORKER-ONLY placement.
+#
+# Trimmed mon/mgr/osd resource sizing (per the post-incident retro):
+#   - mon: 100m/256Mi req, 500m/512Mi limit
+#   - mgr: 100m/256Mi req, 500m/512Mi limit
+#   - osd: 250m/1Gi req, 1000m/2Gi limit
+#
+# All daemons explicitly excluded from CP nodes via nodeAffinity.
+# OSD pods spread across workers via podAntiAffinity (one per worker).
+# ─────────────────────────────────────────────────────────────────────────
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: rook-ceph
+spec:
+  cephVersion:
+    image: quay.io/ceph/ceph:v18.2.4
+    allowUnsupported: false
+  dataDirHostPath: /var/lib/rook
+  skipUpgradeChecks: false
+  continueUpgradeAfterChecksEvenIfNotHealthy: false
+  mon:
+    count: 3
+    allowMultiplePerNode: false
+    volumeClaimTemplate:
+      spec:
+        storageClassName: local-path
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi
+  mgr:
+    count: 2
+    allowMultiplePerNode: false
+    modules:
+      - name: pg_autoscaler
+        enabled: true
+      - name: rook
+        enabled: true
+  dashboard:
+    enabled: true
+    ssl: false
+  crashCollector:
+    disable: false
+  logCollector:
+    enabled: true
+    periodicity: daily
+    maxLogSize: 500M
+  resources:
+    mon:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    mgr:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    osd:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits:   { cpu: 1000m, memory: 2Gi }
+  placement:
+    all:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+      tolerations: []
+  storage:
+    storageClassDeviceSets:
+      - name: set1
+        count: 3
+        portable: false
+        tuneDeviceClass: true
+        tuneFastDeviceClass: false
+        encrypted: false
+        placement:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - rook-ceph-osd
+                topologyKey: kubernetes.io/hostname
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: DoesNotExist
+        preparePlacement:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app
+                        operator: In
+                        values:
+                          - rook-ceph-osd-prepare
+                  topologyKey: kubernetes.io/hostname
+        resources:
+          requests: { cpu: 250m, memory: 1Gi }
+          limits:   { cpu: 1000m, memory: 2Gi }
+        volumeClaimTemplates:
+          - metadata:
+              name: data
+            spec:
+              resources:
+                requests:
+                  storage: 50Gi
+              storageClassName: local-path
+              # local-path-provisioner does not support Block mode. OSDs
+              # use file-based blueprints on Filesystem mode — same approach
+              # Tim's RW PVCs use. If we need true block (perf), deploy
+              # topolvm/openebs-lvm as a separate storage class first.
+              # See 2026-06-18 INFRA-1532 PR #?? for context.
+              volumeMode: Filesystem
+              accessModes: [ReadWriteOnce]
+    useAllNodes: false
+    useAllDevices: false
+  disruptionManagement:
+    managePodBudgets: true
+    osdMaintenanceTimeout: 30
+    pgHealthCheckTimeout: 0
+  healthCheck:
+    daemonHealth:
+      mon:
+        disabled: false
+        interval: 45s
+      osd:
+        disabled: false
+        interval: 60s
+      status:
+        disabled: false
+        interval: 60s

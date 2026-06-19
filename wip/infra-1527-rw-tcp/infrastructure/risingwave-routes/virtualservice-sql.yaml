@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw-sql-passthrough
+  namespace: istio-ingress
+  labels:
+    app.kubernetes.io/managed-by: flux
+    team: risingwave
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: rw-sql.op-dev.usxpress.io
+    external-dns.alpha.kubernetes.io/target: "10.10.82.21,10.10.82.22,10.10.82.26,10.10.82.27,10.10.82.28,10.10.82.178,10.10.82.180"
+spec:
+  hosts:
+    - rw-sql.op-dev.usxpress.io
+  gateways:
+    - tcp-passthrough
+  tls:
+    - match:
+        - port: 4567
+          sniHosts:
+            - rw-sql.op-dev.usxpress.io
+      route:
+        - destination:
+            host: ghostunnel-rw-sql.risingwave.svc.cluster.local
+            port:
+              number: 4567

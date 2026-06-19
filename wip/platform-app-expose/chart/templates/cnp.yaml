@@ -1,0 +1,33 @@
+{{- if .Values.cnp.enabled }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-ingress
+  namespace: {{ include "platform-app-expose.serviceNamespace" . }}
+  labels:
+    {{- include "platform-app-expose.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      "k8s:io.kubernetes.pod.namespace": {{ include "platform-app-expose.serviceNamespace" . }}
+  ingress:
+    # intra-namespace traffic
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": {{ include "platform-app-expose.serviceNamespace" . }}
+    # allow from configured namespaces
+    {{- range .Values.cnp.allowedNamespaces }}
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": {{ . }}
+    {{- end }}
+    # allow from configured CIDR ranges (corp VPN, worker subnet, etc.)
+    - fromCIDR:
+        {{- range .Values.cnp.allowedCIDRs }}
+        - {{ . }}
+        {{- end }}
+    # health + node-level
+    - fromEntities:
+        - host
+        - remote-node
+{{- end }}

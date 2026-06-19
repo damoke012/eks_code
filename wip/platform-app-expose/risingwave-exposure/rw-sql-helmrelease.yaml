@@ -1,0 +1,36 @@
+# Tim's RW SQL exposure — root-zone naming.
+# TLS-passthrough via ghostunnel sibling Deployment in risingwave ns.
+# Suspend: true until ghostunnel-rw-sql Deployment is live.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rw-sql-expose
+  namespace: risingwave
+spec:
+  suspend: true
+  interval: 10m
+  chart:
+    spec:
+      chart: ./infrastructure/platform-app-expose/chart
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+      reconcileStrategy: Revision
+  values:
+    hostname: risingwave-sql.usxpress.io
+    service:
+      name: ghostunnel-rw-sql
+      namespace: risingwave
+      port: 4567
+    protocol: tls-passthrough
+    tls:
+      backend: true
+    certificate:
+      create: false
+    cnp:
+      enabled: false
+    externalDNS:
+      enabled: true
+      target: rw-ingress.op-dev.usxpress.io

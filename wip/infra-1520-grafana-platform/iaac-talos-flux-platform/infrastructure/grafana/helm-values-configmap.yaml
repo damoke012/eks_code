@@ -1,0 +1,221 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-values
+  namespace: grafana
+data:
+  values.yaml: |
+    # ─────────────────────────────────────────────────────────────────────
+    # Grafana platform values for op-usxpress-dev
+    # Mirrors cloud iaac-monitoring values where it makes sense, on-prem
+    # trim where appropriate. Cluster-mode in values.global.cluster makes
+    # this template portable to QA/PROD with one var change.
+    # ─────────────────────────────────────────────────────────────────────
+
+    # Single replica + StatefulSet — local-path PVC is RWO so we can't
+    # scale horizontally. dashboards live in ConfigMaps (Bento → git),
+    # so worker-disk loss is acceptable: only UI prefs + alert state lost.
+    replicas: 1
+    deploymentStrategy:
+      type: Recreate
+    # Use StatefulSet so PVC binds + stays pinned to the worker node.
+    # Once Rook-Ceph is in, switch persistence.storageClassName to ceph-block
+    # for replicated storage. No other values change required.
+    statefulSet:
+      enabled: true
+
+    image:
+      repository: grafana/grafana
+      # Pin tag explicitly — avoid surprise upgrades.
+      tag: "11.4.0"
+      pullPolicy: IfNotPresent
+
+    podLabels:
+      app: grafana
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+    persistence:
+      enabled: true
+      type: pvc
+      storageClassName: local-path
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+      # finalizers preserved by default so a stuck delete doesn't lose data
+
+    # No Service annotations — we route via VirtualService not LB.
+    service:
+      type: ClusterIP
+      port: 80
+      targetPort: 3000
+
+    # Ingress disabled — istio Gateway + VirtualService handle ingress.
+    ingress:
+      enabled: false
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Sidecars — the namespace=folder pattern is here.
+    #
+    # sc-dashboards watches the WHOLE cluster for ConfigMaps with label
+    # `grafana_dashboard=1`. The `folderAnnotation`+`folder*Annotation`
+    # values tell the sidecar to create Grafana folders named after the
+    # `grafana_folder` annotation/label value.
+    #
+    # Combined with the Kyverno mutation policy (auto-add
+    # grafana_folder=<namespace>), every namespace gets its own folder
+    # automatically, and apps' dashboards land in their team's folder
+    # without per-app config.
+    # ─────────────────────────────────────────────────────────────────────
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+        folder: /tmp/dashboards
+        # Folder mapping — sidecar will create a folder per unique value of
+        # this label on the dashboard ConfigMap.
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: true
+          allowUiUpdates: false
+          disableDelete: false
+        resource: configmap
+      datasources:
+        enabled: true
+        label: grafana_datasource
+        labelValue: "1"
+        searchNamespace: ALL
+        resource: configmap
+
+    # ─────────────────────────────────────────────────────────────────────
+    # grafana.ini — config overrides
+    # ─────────────────────────────────────────────────────────────────────
+    grafana.ini:
+      server:
+        domain: grafana.op-dev.usxpress.io
+        root_url: https://grafana.op-dev.usxpress.io/
+      analytics:
+        check_for_updates: false
+        reporting_enabled: false
+      log:
+        mode: console
+        level: info
+      # Local SQLite — durable enough for dev. Migrate to external Postgres
+      # when QA/PROD propagation happens.
+      database:
+        type: sqlite3
+        path: grafana.db
+      # Anonymous OFF; admin via ExternalSecret. Azure AD SSO config will
+      # be added in a follow-up PR once IT delivers the app reg + reply URL.
+      auth.anonymous:
+        enabled: false
+      auth:
+        disable_login_form: false
+        oauth_allow_insecure_email_lookup: false
+      security:
+        admin_user: ${GF_SECURITY_ADMIN_USER}
+        admin_password: ${GF_SECURITY_ADMIN_PASSWORD}
+        cookie_secure: true
+        strict_transport_security: true
+        content_security_policy: true
+      # Unified alerting (Grafana-managed alerts, parallel to Alertmanager
+      # for dashboard-derived alerts). Receiver wire-up lands with the
+      # Alertmanager PR.
+      unified_alerting:
+        enabled: true
+      alerting:
+        enabled: false  # legacy off; unified is on
+
+    env:
+      GF_SECURITY_ADMIN_USER__FILE: /etc/secrets/admin-user
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /etc/secrets/admin-password
+
+    extraSecretMounts:
+      - name: admin-secret
+        secretName: grafana-admin
+        defaultMode: 0440
+        mountPath: /etc/secrets
+        readOnly: true
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Datasources provisioning — ship with local Prometheus only.
+    # Mimir + Loki are added in a follow-up PR after Rook-Ceph + LGTM
+    # stack ships. Any new datasource can also be added by dropping a
+    # ConfigMap with `grafana_datasource: "1"` label into any namespace
+    # (Bento-portable, same as dashboards).
+    # ─────────────────────────────────────────────────────────────────────
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Prometheus
+            type: prometheus
+            access: proxy
+            # The kube-prometheus-stack Prometheus Service name. If chart
+            # values rename it, update here.
+            url: http://prometheus-stack-kube-prom-prometheus.prometheus.svc.cluster.local:9090
+            isDefault: true
+            jsonData:
+              httpMethod: POST
+              timeInterval: 30s
+            editable: false
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Service account — Grafana itself needs no IRSA in this phase. When
+    # we add CloudWatch/Athena datasources later, attach a role here.
+    # ─────────────────────────────────────────────────────────────────────
+    serviceAccount:
+      create: true
+      name: grafana
+      automountServiceAccountToken: true
+
+    rbac:
+      create: true
+      pspEnabled: false
+      namespaced: true
+
+    podSecurityContext:
+      fsGroup: 472
+      runAsUser: 472
+      runAsGroup: 472
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: false  # Grafana writes plugins to /var/lib/grafana
+
+    # Probes
+    livenessProbe:
+      httpGet:
+        path: /api/health
+        port: 3000
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      timeoutSeconds: 30
+      failureThreshold: 10
+    readinessProbe:
+      httpGet:
+        path: /api/health
+        port: 3000
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Plugins — keep minimal for now. Cloud installs Athena + GitHub +
+    # AWS plugins; we don't need them yet. Add ClickHouse plugin when we
+    # set up cross-cluster log queries.
+    # ─────────────────────────────────────────────────────────────────────
+    plugins: []
+
+    # No initContainers, no extraInitContainers — vanilla startup.
+    extraInitContainers: []

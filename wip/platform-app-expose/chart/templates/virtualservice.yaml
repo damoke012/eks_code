@@ -1,0 +1,54 @@
+{{- if eq .Values.protocol "http" }}
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ .Release.Name }}-http
+  namespace: istio-ingress
+  labels:
+    {{- include "platform-app-expose.labels" . | nindent 4 }}
+  {{- if .Values.externalDNS.enabled }}
+  annotations:
+    external-dns.alpha.kubernetes.io/target: {{ .Values.externalDNS.target }}
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.hostname }}
+  {{- end }}
+spec:
+  gateways:
+    - istio-ingress/shared-http
+  hosts:
+    - {{ .Values.hostname }}
+  http:
+    - route:
+        - destination:
+            host: {{ .Values.service.name }}.{{ include "platform-app-expose.serviceNamespace" . }}.svc.cluster.local
+            port:
+              number: {{ .Values.service.port }}
+{{- end }}
+{{- if or (eq .Values.protocol "tcp-passthrough") (eq .Values.protocol "tls-passthrough") }}
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ .Release.Name }}-tcp
+  namespace: istio-ingress
+  labels:
+    {{- include "platform-app-expose.labels" . | nindent 4 }}
+  {{- if .Values.externalDNS.enabled }}
+  annotations:
+    external-dns.alpha.kubernetes.io/target: {{ .Values.externalDNS.target }}
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.hostname }}
+  {{- end }}
+spec:
+  gateways:
+    - istio-ingress/tcp-passthrough
+  hosts:
+    - {{ .Values.hostname }}
+  tls:
+    - match:
+        - port: {{ .Values.service.port }}
+          sniHosts:
+            - {{ .Values.hostname }}
+      route:
+        - destination:
+            host: {{ .Values.service.name }}.{{ include "platform-app-expose.serviceNamespace" . }}.svc.cluster.local
+            port:
+              number: {{ .Values.service.port }}
+{{- end }}

@@ -1,0 +1,102 @@
+# PrometheusRule: istio cert chain health
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/prometheus-rules/
+# Picked up by Prometheus via Flux (existing PrometheusRule sweep).
+#
+# Codifies the 2026-06-18 grafana 503 detection gap:
+#   - ConnectedEndpoints=0 means istiod can't push config to gateways
+#   - cert-manager-istio-csr Pod not Ready means the cert chain is broken
+#   - Gateway cert TTL < 24h means renewal is failing somewhere upstream
+#
+# Severity ramps to "critical" only when the failure has persisted long enough
+# that next-hour cert expiries are imminent (mTLS workload certs are 24h TTL).
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: istio-cert-chain
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: istio
+    release: prometheus-stack
+spec:
+  groups:
+    - name: istio.cert-chain
+      interval: 30s
+      rules:
+
+        # ──────────────────────────────────────────────────────────────
+        # ConnectedEndpoints=0 — gateway can't reach istiod xDS
+        # ──────────────────────────────────────────────────────────────
+        - alert: IstiodNoConnectedEndpoints
+          expr: |
+            sum(pilot_xds) by (cluster) == 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            runbook: docs/runbooks/istio-cert-chain.md#no-connected-endpoints
+          annotations:
+            summary: "istiod has zero connected envoy clients for 5m"
+            description: |
+              istiod is healthy but no envoys are connected. This usually means:
+                - Gateway pods' workload certs expired and they can't re-handshake
+                - Upstream cert provider (cert-manager-istio-csr) is failing
+                - Pod-to-Service routing to istiod is broken on all workers
+              Investigate cert-manager-istio-csr readiness + Cilium CiliumNode count.
+
+        - alert: IstiodNoConnectedEndpointsCritical
+          expr: |
+            sum(pilot_xds) by (cluster) == 0
+          for: 30m
+          labels:
+            severity: critical
+            team: platform
+            runbook: docs/runbooks/istio-cert-chain.md#no-connected-endpoints
+          annotations:
+            summary: "istiod has zero connected envoys for 30m — mTLS will cascade-fail within ~24h"
+            description: |
+              Workload certs are 24h TTL. With xDS dead, gateways can't refresh
+              the cert chain. All HTTP through shared-http will 503 once they expire.
+
+        # ──────────────────────────────────────────────────────────────
+        # cert-manager-istio-csr broken
+        # ──────────────────────────────────────────────────────────────
+        - alert: IstioCSRNotReady
+          expr: |
+            kube_pod_status_ready{namespace="cert-manager",
+              pod=~"cert-manager-istio-csr-.*",condition="true"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+            runbook: docs/runbooks/istio-cert-chain.md#istio-csr-not-ready
+          annotations:
+            summary: "cert-manager-istio-csr Pod not Ready for 10m"
+            description: |
+              The signer for istio workload certs is down. Once existing certs
+              expire (1h for istio-csr's own serving cert, 24h for workload certs)
+              everything mesh-related will start to fail.
+              Check: Pod logs, cert-manager-webhook reachability, CiliumNode count.
+
+        # ──────────────────────────────────────────────────────────────
+        # Gateway pod workload cert TTL
+        # ──────────────────────────────────────────────────────────────
+        # NOTE: requires the istio sidecar/proxy to expose cert TTL via
+        # `pilot_xds_pushes` adjacent metrics. If not surfaced today,
+        # this can be approximated by re-using `citadel_server_csr_count_total`
+        # rate-of-failure metric instead. Mark this as TODO if so.
+        - alert: IstioGatewayCertExpiringSoon
+          expr: |
+            min by (pod) (istio_agent_cert_expiry_seconds{
+              namespace="istio-ingress"}) < 3600 * 24
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "istio-ingressgateway workload cert TTL < 24h on {{ $labels.pod }}"
+            description: |
+              Cert renewal is failing or slow. Check cert-manager-istio-csr,
+              cert-manager-webhook reachability, and CiliumNode consistency
+              (Rule 7 in /onprem-safety).

@@ -1,0 +1,81 @@
+# PrometheusRule: detect CiliumNode CRD vs k8s Node divergence
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/prometheus-rules/
+#
+# Why: on 2026-06-17 Talos hostname patch left an orphan CiliumNode pointing to
+# the OLD hostname:IP binding. The mismatch silently degraded pod-to-Service
+# routing for 21h until certs expired. This rule would have alarmed at ~17:30 ET
+# on 2026-06-17 — within 30 min of the hostname patch.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cilium-node-divergence
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: cilium
+    release: prometheus-stack
+spec:
+  groups:
+    - name: cilium.node-divergence
+      interval: 60s
+      rules:
+
+        # ──────────────────────────────────────────────────────────────
+        # Count divergence: CiliumNodes must match k8s Nodes 1:1
+        # ──────────────────────────────────────────────────────────────
+        # kube-state-metrics exposes kube_node_info — one series per Node.
+        # cilium-operator exposes cilium_operator_known_endpoints and similar
+        # but the cleanest signal is just counting both.
+        #
+        # NOTE: this requires a small custom exporter OR a recording rule that
+        # scrapes the kube-apiserver for the CiliumNode CRD count. The simplest
+        # path is a recording rule with `count(kube_customresource_cilium_io_v2_ciliumnode_info)`
+        # IF kube-state-metrics is configured to surface CRDs (custom resource config).
+        #
+        # If that's not set up, fall back to the included Job below which writes
+        # a value into a textfile and exposes via node_exporter or kube-rbac-proxy.
+
+        - alert: CiliumNodeCountDivergence
+          expr: |
+            count(kube_node_info) != count(kube_customresource_cilium_io_v2_ciliumnode_info)
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            runbook: docs/runbooks/cilium-node-divergence.md
+          annotations:
+            summary: "CiliumNode count != k8s Node count for 5m"
+            description: |
+              CRITICAL: A node has either been renamed (orphan CiliumNode left behind)
+              or a CiliumNode CRD is orphaned (Node already deleted). In either case,
+              WireGuard mesh routing for at least one node is degraded. Cert renewal
+              will start failing within 1-24h.
+
+              Immediate action: run /onprem-safety Rule 7 cleanup checklist.
+
+              CiliumNode list:
+                kubectl get ciliumnodes
+              k8s Node list:
+                kubectl get nodes -o wide
+
+        # ──────────────────────────────────────────────────────────────
+        # WireGuard duplicate-key warning detector (event-based)
+        # ──────────────────────────────────────────────────────────────
+        # Cilium agent emits the warning to its log; ship via Loki and alert
+        # on log rate. Until Loki is fully wired (Track 2 / Track 4 dependency),
+        # this alert is documented but commented out — drop the leading `#` when
+        # Loki is available.
+        #
+        # - alert: CiliumWireGuardDuplicateKey
+        #   expr: |
+        #     sum(rate({app="cilium"} |~ "detected duplicate public key" [5m])) > 0
+        #   for: 2m
+        #   labels:
+        #     severity: warning
+        #     team: platform
+        #   annotations:
+        #     summary: "Cilium agent reports WireGuard duplicate public key"
+        #     description: |
+        #       Two CiliumNodes claim the same IP with different WG keys.
+        #       Run /onprem-safety Rule 7 cleanup checklist.

@@ -1,0 +1,127 @@
+# PrometheusRule: Rook-Ceph cluster health
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/rook-ceph-cluster/
+# Reference from the rook-ceph-cluster Kustomization.
+#
+# Rook exposes Ceph metrics via the rook-ceph-mgr Service when the CephCluster
+# spec has `dashboard.enabled: true` AND `monitoring.enabled: true`. The
+# ServiceMonitor in the sibling file `servicemonitor-ceph.yaml` scrapes them.
+#
+# Severity ladder:
+#   - WARN: HEALTH_WARN, single OSD down, slow ops
+#   - CRIT: HEALTH_ERR, mon quorum loss, multiple OSDs down, near-full
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rook-ceph-cluster
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: rook-ceph
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: rook-ceph.cluster
+      interval: 30s
+      rules:
+
+        # ──────────────────────────────────────────────────────────────
+        # Overall cluster health
+        # ──────────────────────────────────────────────────────────────
+        - alert: CephHealthWarn
+          expr: ceph_health_status == 1
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Ceph cluster reports HEALTH_WARN for 10m"
+            description: "Run `kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status` to see the warning details."
+
+        - alert: CephHealthErr
+          expr: ceph_health_status == 2
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Ceph cluster reports HEALTH_ERR"
+            description: "Run `kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph status`. See docs/runbooks/rook-ceph-restore.md."
+
+        # ──────────────────────────────────────────────────────────────
+        # Mon quorum
+        # ──────────────────────────────────────────────────────────────
+        - alert: CephMonQuorumLost
+          expr: ceph_mon_quorum_status == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Ceph monitor lost quorum"
+            description: "Less than half of mons are reachable. PVCs will not bind. RW data path unaffected (not on Ceph yet)."
+
+        - alert: CephMonDown
+          expr: ceph_mon_quorum_status != 0 and ceph_mon_metadata > 0 and absent(up{job=~".*ceph.*"} == 1) == 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "One Ceph mon pod is down (quorum still held)"
+
+        # ──────────────────────────────────────────────────────────────
+        # OSDs
+        # ──────────────────────────────────────────────────────────────
+        - alert: CephOSDDown
+          expr: ceph_osd_up == 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Ceph OSD {{ $labels.ceph_daemon }} is down"
+
+        - alert: CephOSDMultipleDown
+          expr: count(ceph_osd_up == 0) > 1
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Multiple Ceph OSDs down — data at risk"
+
+        # ──────────────────────────────────────────────────────────────
+        # Capacity
+        # ──────────────────────────────────────────────────────────────
+        - alert: CephClusterNearFull
+          expr: (ceph_cluster_total_used_bytes / ceph_cluster_total_bytes) > 0.80
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Ceph cluster over 80% full"
+
+        - alert: CephClusterFull
+          expr: (ceph_cluster_total_used_bytes / ceph_cluster_total_bytes) > 0.90
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Ceph cluster over 90% full — writes will be blocked"
+
+        # ──────────────────────────────────────────────────────────────
+        # PG state
+        # ──────────────────────────────────────────────────────────────
+        - alert: CephPGNotActive
+          expr: |
+            sum(ceph_pg_total) -
+            sum(ceph_pg_active) > 0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Some Ceph PGs are not active"

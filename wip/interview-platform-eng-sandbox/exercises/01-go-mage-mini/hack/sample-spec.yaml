@@ -1,0 +1,21 @@
+# Sample spec to test against. Currently exercises the existing fields.
+# Update this file with a `kafka:` block once you've added it to the Spec struct.
+
+name: demo-service
+octopus:
+  space: USXpress
+  group: platform
+infrastructure:
+  buckets:
+    - reference: logs
+      prefix: app-logs
+    - reference: events
+
+# TODO (interview): add a `kafka:` block here. Use it to manually verify your
+# new struct + validator behavior:
+#
+# kafka:
+#   topic_name: demo-events
+#   partition_count: 3
+#   replication_factor: 3
+#   retention_hours: 168

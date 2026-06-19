@@ -1,0 +1,29 @@
+# Example consumer: Tim's RW SQL frontend via the platform-app-expose chart.
+# TLS-passthrough requires a ghostunnel sidecar on the upstream pod —
+# pattern proven on risingwave-2 (Phase 2 closed 2026-06-01).
+# Sidecar deployment is the consumer's responsibility, NOT this chart.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rw-sql-expose
+  namespace: risingwave
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: platform-app-expose
+      sourceRef:
+        kind: HelmRepository
+        name: platform-charts
+        namespace: flux-system
+  values:
+    hostname: rw-sql.op-dev.usxpress.io
+    service:
+      name: risingwave-frontend
+      namespace: risingwave
+      port: 4567
+    protocol: tls-passthrough
+    tls:
+      backend: true
+    cnp:
+      enabled: false   # OFF until Tim inventories consumers

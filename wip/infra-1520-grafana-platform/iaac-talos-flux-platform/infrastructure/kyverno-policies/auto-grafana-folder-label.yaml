@@ -1,0 +1,60 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: auto-grafana-folder-label
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/component: platform-observability
+  annotations:
+    policies.kyverno.io/title: Auto-add grafana_folder=<namespace> annotation
+    policies.kyverno.io/category: Observability platform
+    policies.kyverno.io/description: |
+      Any ConfigMap labeled grafana_dashboard=1 gets a grafana_folder=<ns>
+      annotation added automatically. Grafana sidecar reads this annotation
+      and places the dashboard in a folder matching the namespace.
+
+      This is the platform-level enforcement of the "namespace = app =
+      Grafana folder" contract. Apps don't have to know about it; any team
+      that ships a dashboard ConfigMap with the standard grafana_dashboard
+      label automatically gets their own folder.
+
+      DR-portable: a dashboard CM from a cloud app moved into on-prem
+      gets the right folder without modification.
+spec:
+  # Mutation is in-place — does not modify the underlying source manifest.
+  # Idris's risingwave-onprem Flux Kustomization continues to own the
+  # original CM; this policy adds the annotation on admission.
+  mutateExistingOnPolicyUpdate: true
+  rules:
+    - name: add-folder-annotation-on-create
+      match:
+        any:
+          - resources:
+              kinds:
+                - ConfigMap
+              selector:
+                matchLabels:
+                  grafana_dashboard: "1"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              grafana_folder: "{{ request.object.metadata.namespace }}"
+
+    - name: add-folder-annotation-to-existing
+      match:
+        any:
+          - resources:
+              kinds:
+                - ConfigMap
+              selector:
+                matchLabels:
+                  grafana_dashboard: "1"
+      mutate:
+        targets:
+          - apiVersion: v1
+            kind: ConfigMap
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              grafana_folder: "{{ request.object.metadata.namespace }}"

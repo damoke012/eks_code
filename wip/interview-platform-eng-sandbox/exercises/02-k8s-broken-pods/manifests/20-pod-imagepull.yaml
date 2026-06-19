@@ -1,0 +1,18 @@
+# Pod B — ImagePullBackOff scenario.
+# Two distinct image errors are common: (1) no such image (typo), (2) auth.
+# This one is (1) — a typo in the image tag.
+# Expected state: ErrImagePull → ImagePullBackOff.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-b-imagepull
+  namespace: broken
+  labels:
+    purpose: imagepull-demo
+spec:
+  restartPolicy: Always
+  containers:
+    - name: ngninx   # also note the typo here — not the cause but a hint
+      image: nginx:1.99-this-tag-does-not-exist
+      ports:
+        - containerPort: 80

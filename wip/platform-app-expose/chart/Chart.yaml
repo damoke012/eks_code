@@ -1,0 +1,18 @@
+apiVersion: v2
+name: platform-app-expose
+description: |
+  Expose a Kubernetes Service via the shared istio-ingress Gateway with
+  cert-manager-issued TLS and (optionally) a default-deny CiliumNetworkPolicy.
+  Reusable across all on-prem namespaces. First consumer: Tim's risingwave ns;
+  pattern proven on risingwave-2 (Phase 1 + Phase 2 closed 2026-06-01).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - ingress
+  - istio
+  - cert-manager
+  - cilium
+maintainers:
+  - name: Doke
+    email: doke@usxpress.com

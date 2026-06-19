@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rook-ceph-operator-values
+  namespace: rook-ceph
+data:
+  values.yaml: |
+    # ─────────────────────────────────────────────────────────────────────
+    # Rook-Ceph operator values for op-usxpress-dev
+    # Single chart releases the operator; the CephCluster CR (cephcluster.yaml)
+    # is owned by Flux directly, not the chart, so we can tune topology
+    # independently of operator upgrades.
+    # ─────────────────────────────────────────────────────────────────────
+
+    image:
+      repository: docker.io/rook/ceph
+      tag: v1.15.5
+      pullPolicy: IfNotPresent
+
+    crds:
+      enabled: true
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    # Operator runs with cluster-wide watch (default). Single CephCluster in
+    # rook-ceph namespace; one operator manages it.
+    currentNamespaceOnly: false
+
+    # Allow Rook to set up CSI drivers + provisioners across the cluster.
+    enableDiscoveryDaemon: false  # We use PVC-based OSDs — no raw disk discovery needed
+    csi:
+      enableRbdDriver: true
+      enableCephfsDriver: true
+      # CSI driver tolerations — match our control-plane taint pattern so
+      # provisioners can run anywhere if needed; OSDs themselves are gated by
+      # CephCluster placement (workers only).
+      provisionerTolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+      pluginTolerations:
+        - effect: NoSchedule
+          operator: Exists
+      # Ceph CSI v3 driver default — pinned in the chart.
+
+    # Log level: info for prod default; bump to DEBUG only during bring-up.
+    logLevel: INFO
+
+    # Allow operator to manage CephCluster, BlockPool, ObjectStore, etc CRs.
+    # These are created via the cephcluster.yaml/storageclass.yaml manifests
+    # in this same Flux Kustomization.
+    monitoring:
+      enabled: false  # Wire kube-prometheus-stack later via ServiceMonitor
+
+    # Talos requires privileged containers for Ceph mon/osd/mgr.
+    # PSS enforcement was handled by labeling rook-ceph namespace privileged.
+    # No additional security overrides needed here.
+
+    # Do NOT let the chart create the CephCluster CR — we own it as a separate
+    # manifest so we can tune topology without re-rolling the operator.
+    # (chart only creates if values.cephClusterSpec is set; we leave it unset.)

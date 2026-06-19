@@ -1,0 +1,100 @@
+# CronJob: weekly defensive rolling restart of istio-ingressgateway
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/istio/cronjobs/
+# (create the folder if needed; reference from the istio Kustomization)
+#
+# Why: on 2026-06-18 the gateway pods had stale workload certs because their
+# upstream cert chain was broken for 21h. A weekly forced roll guarantees:
+#   - Pods get fresh certs (24h TTL is comfortable cushion past 7d window)
+#   - Config drift (stale xDS state) gets reset
+#   - Bumps any gateway pod stuck on an unhealthy worker to a healthier one
+#
+# Runs Sundays at 04:00 UTC = 00:00 ET — outside Tim's RW workload window.
+# RW awareness: each pod restart briefly interrupts hostPort 4567/5432 on its
+# worker (~30s). Rolling, so only one worker affected at a time.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: istio-ingressgateway-weekly-restart
+  namespace: istio-ingress
+  labels:
+    app.kubernetes.io/part-of: istio
+spec:
+  schedule: "0 4 * * 0"   # 04:00 UTC Sundays
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: istio-ingressgateway-restarter
+          restartPolicy: OnFailure
+          containers:
+            - name: kubectl
+              image: bitnamilegacy/kubectl:1.32
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  echo "Pre-restart state:"
+                  kubectl -n istio-ingress get pods -l app=istio-ingressgateway -o wide
+                  echo "Triggering rollout restart..."
+                  kubectl -n istio-ingress rollout restart ds istio-ingressgateway
+                  kubectl -n istio-ingress rollout status ds istio-ingressgateway --timeout=10m
+                  echo "Post-restart state:"
+                  kubectl -n istio-ingress get pods -l app=istio-ingressgateway -o wide
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65532
+                capabilities:
+                  drop: [ALL]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: istio-ingressgateway-restarter
+  namespace: istio-ingress
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: istio-ingressgateway-restarter
+  namespace: istio-ingress
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: istio-ingressgateway-restarter
+  namespace: istio-ingress
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: istio-ingressgateway-restarter
+subjects:
+  - kind: ServiceAccount
+    name: istio-ingressgateway-restarter
+    namespace: istio-ingress

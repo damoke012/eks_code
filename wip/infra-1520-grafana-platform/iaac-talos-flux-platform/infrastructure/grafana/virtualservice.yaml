@@ -1,0 +1,24 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: grafana
+  namespace: grafana
+  labels:
+    app.kubernetes.io/managed-by: flux
+    team: platform
+  annotations:
+    # Phase 1 cleanup gotcha — external-dns v0.20.0 produces ZERO endpoints
+    # for istio-virtualservice source when bound Gateway Service is ClusterIP
+    # without per-VS target annotation. All 7 worker IPs.
+    external-dns.alpha.kubernetes.io/target: "10.10.82.21,10.10.82.22,10.10.82.26,10.10.82.27,10.10.82.28,10.10.82.178,10.10.82.180"
+spec:
+  gateways:
+    - istio-ingress/shared-http
+  hosts:
+    - grafana.op-dev.usxpress.io
+  http:
+    - route:
+        - destination:
+            host: grafana.grafana.svc.cluster.local
+            port:
+              number: 80

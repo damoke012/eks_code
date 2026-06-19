@@ -1,0 +1,81 @@
+# Target: iaac-talos-flux-platform op-dev branch
+#   infrastructure/istio-ingress/<wherever shared-http is defined>
+#
+# Changes vs current (from live `kubectl -n istio-ingress get gateways.networking.istio.io shared-http`):
+# - Adds a NEW HTTPS server block on port 443 with hosts ["*.usxpress.io"]
+#   and credentialName risingwave-usxpress-io-tls (or wildcard).
+# - Existing op-dev + brands server blocks UNCHANGED.
+# - HTTP 80 server unchanged (covers redirect on existing names).
+#
+# Cert binding: the new server uses `risingwave-usxpress-io-tls` Secret,
+# which platform-app-expose chart creates per HelmRelease (with
+# certificate.create=true). Alternative: create a Certificate for
+# `*.usxpress.io` wildcard once and bind it here as the credentialName.
+#
+# Wildcard cert option (recommended for simplicity):
+# - Single Cert "wildcard-usxpress-io" with dnsNames ["*.usxpress.io", "usxpress.io"]
+# - Bound here as credentialName
+# - All risingwave-* / future-root-zone hosts use it
+# - Chart consumers set certificate.create=false (cert is Gateway-bound, not per-host)
+
+# OPTION A — Wildcard binding (RECOMMENDED, simpler ops, fewer LE cert calls)
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: shared-http
+  namespace: istio-ingress
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*.op-dev.usxpress.io"
+        - "*.usxpress.io"           # NEW — http-to-https redirect target
+    - port:
+        number: 443
+        name: https-op-dev
+        protocol: HTTPS
+      hosts:
+        - "*.op-dev.usxpress.io"
+      tls:
+        mode: SIMPLE
+        credentialName: wildcard-op-dev-tls
+    - port:
+        number: 443
+        name: https-brands
+        protocol: HTTPS
+      hosts:
+        - "*.brands.op-dev.usxpress.io"
+        - "brands.op-dev.usxpress.io"
+      tls:
+        mode: SIMPLE
+        credentialName: brands-op-dev-tls
+    - port:
+        number: 443
+        name: https-usxpress-io       # NEW server block for root-zone hosts
+        protocol: HTTPS
+      hosts:
+        - "*.usxpress.io"
+      tls:
+        mode: SIMPLE
+        credentialName: wildcard-usxpress-io-tls
+---
+# Companion: wildcard cert for *.usxpress.io
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-usxpress-io
+  namespace: istio-ingress
+spec:
+  secretName: wildcard-usxpress-io-tls
+  dnsNames:
+    - "*.usxpress.io"
+    - "usxpress.io"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io

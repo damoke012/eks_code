@@ -1,0 +1,26 @@
+# Example consumer: Tim's RW dashboard via the platform-app-expose chart.
+# Lands in Tim's `risingwave` namespace. Replaces hand-authored VS + Cert + CNP.
+# DNS name and service-name TBD with Tim; placeholder values below.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rw-dashboard-expose
+  namespace: risingwave
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: platform-app-expose
+      sourceRef:
+        kind: HelmRepository
+        name: platform-charts
+        namespace: flux-system
+  values:
+    hostname: rw-dashboard.op-dev.usxpress.io
+    service:
+      name: risingwave-dashboard-ext   # confirm with Tim
+      namespace: risingwave
+      port: 5691                        # confirm with Tim
+    protocol: http
+    cnp:
+      enabled: false   # OFF until Tim inventories consumers

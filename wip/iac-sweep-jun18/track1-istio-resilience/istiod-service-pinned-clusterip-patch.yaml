@@ -1,0 +1,24 @@
+# Kustomize patch: pin istiod Service ClusterIP
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/istio/istiod/
+# Apply via the existing Kustomization's `patches` field.
+#
+# Why: on 2026-06-17 the istiod Service was recreated during incident recovery,
+# changing its ClusterIP. We didn't see immediate impact because xDS uses DNS,
+# but it caused cached-IP debugging confusion for hours. Pinning the ClusterIP
+# guarantees that any future Service recreate (Flux replace, controller restart,
+# accidental delete) restores the same IP.
+#
+# CURRENT ClusterIP on op-usxpress-dev: 10.101.33.234
+# This patch makes the existing IP authoritative. Same patch applies for QA
+# when we build that cluster — pick the desired-state IP at bring-up time.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: istiod
+  namespace: istio-system
+spec:
+  # Pin the ClusterIP — if the Service is ever deleted+recreated, Kubernetes
+  # will honor this specific IP (provided it's not in use elsewhere).
+  clusterIP: 10.101.33.234

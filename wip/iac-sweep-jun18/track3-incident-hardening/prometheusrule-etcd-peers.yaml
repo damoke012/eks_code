@@ -1,0 +1,83 @@
+# PrometheusRule: etcd peer health
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/prometheus-rules/
+#
+# Why: on 2026-06-17 etcd quorum was lost as CPs OOM'd. There was no specific
+# alert on peer health — kube-state-metrics doesn't expose it directly. These
+# rules use the etcd metrics endpoint exposed by Talos.
+#
+# Coverage:
+#   - Peer unreachable
+#   - Leader changes (election storm = symptom of network instability)
+#   - DB size (would catch the OOM cascade earlier than memory pressure)
+#   - Compaction failure
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: etcd-cluster-health
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: cluster-infra
+    release: prometheus-stack
+spec:
+  groups:
+    - name: etcd.cluster
+      interval: 30s
+      rules:
+
+        - alert: EtcdPeerUnreachable
+          expr: etcd_network_peer_round_trip_time_seconds_count == 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+            page: true
+          annotations:
+            summary: "etcd peer {{ $labels.To }} unreachable from {{ $labels.instance }}"
+            description: |
+              Quorum at risk. Check `talosctl etcd members` from each CP.
+              Common cause: CP memory pressure + kubelet+containerd flap (2026-06-17 pattern).
+
+        - alert: EtcdNoLeader
+          expr: etcd_server_has_leader == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+            page: true
+          annotations:
+            summary: "etcd has no leader"
+            description: "kube-apiserver will be read-only or fully unavailable."
+
+        - alert: EtcdLeaderElectionsHigh
+          expr: rate(etcd_server_leader_changes_seen_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "etcd is changing leaders frequently"
+            description: |
+              Network instability between CPs. Check Cilium WireGuard health
+              (/onprem-safety Rule 7). Often the first signal of the 2026-06-18 pattern.
+
+        - alert: EtcdDBSizeGrowing
+          expr: etcd_mvcc_db_total_size_in_bytes / 1024 / 1024 > 2048
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "etcd DB size > 2 GB on {{ $labels.instance }}"
+            description: "May indicate runaway watches or compaction issues. Run `etcdctl compact` and `defrag` during maintenance window."
+
+        - alert: EtcdFsyncSlow
+          expr: histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "etcd fsync p99 > 500ms on {{ $labels.instance }}"
+            description: "Disk pressure or vSphere I/O contention. Performance will degrade."

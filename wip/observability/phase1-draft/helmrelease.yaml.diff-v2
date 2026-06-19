@@ -1,0 +1,36 @@
+# Phase 1 PR 4 — flip serviceMonitorSelector + podMonitorSelector to prometheus_ingest=true.
+# Run AFTER backfill-existing-sm.sh confirms zero un-labeled monitors.
+
+--- a/infrastructure/prometheus/helmrelease.yaml
++++ b/infrastructure/prometheus/helmrelease.yaml
+@@ -32,11 +32,17 @@ spec:
+       enabled: true
+     prometheus:
+       prometheusSpec:
+         externalLabels:
+           cluster: op-usxpress-dev
+         retention: 7d
+         resources:
+           requests:
+             cpu: 100m
+             memory: 256Mi
+           limits:
+             cpu: 500m
+             memory: 1Gi
+         storageSpec: {}
+-        serviceMonitorSelectorNilUsesHelmValues: false
+-        podMonitorSelectorNilUsesHelmValues: false
++        serviceMonitorSelector:
++          matchLabels:
++            prometheus_ingest: "true"
++        podMonitorSelector:
++          matchLabels:
++            prometheus_ingest: "true"
++        ruleSelector: {}
+
+# Notes:
+# - Removed serviceMonitorSelectorNilUsesHelmValues + podMonitorSelectorNilUsesHelmValues —
+#   they were forcing "match everything" when the selector was nil. Now selector is explicit.
+# - Added ruleSelector: {} explicitly so all PrometheusRules still match (this WAS the
+#   default behavior, but making it explicit avoids surprise if upstream chart changes its mind).
+# - Cloud iaac-monitoring uses this exact selector pattern.

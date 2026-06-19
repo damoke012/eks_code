@@ -1,0 +1,180 @@
+---
+# ─────────────────────────────────────────────────────────────────────────
+# CephCluster — PVC-backed OSDs on local-path
+#
+# Why PVC-backed instead of raw disks?
+# - Workers are vSphere VMs with a single root disk (no spare disks)
+# - Rook-Ceph 1.13+ deprecated directory-based OSDs
+# - PVC-backed OSDs let us run on existing local-path StorageClass:
+#   the local-path provisioner carves out a dir in /opt/local-path-provisioner
+#   on the worker, hands it to Rook as a block-like PVC, Rook builds an OSD
+#   on top of that path using BlueStore on a file.
+#
+# Performance tradeoff for dev: ~30-50% of raw-disk perf, single failure
+# domain = node (lose the worker, lose the OSD), no separate WAL/DB device.
+# Acceptable for dev observability; QA/PROD will get a 2nd vSphere disk
+# via iaac-talos vsphere_worker module + ceph-block raw.
+#
+# Replication = 3, failure domain = host. With 7 workers (kn-7) we can lose
+# one worker and stay HEALTHY_OK.
+# ─────────────────────────────────────────────────────────────────────────
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: rook-ceph
+spec:
+  cephVersion:
+    # Reef LTS — pinned. Bump in a separate PR with mon-version + osd-rolling.
+    image: quay.io/ceph/ceph:v18.2.4
+    allowUnsupported: false
+
+  dataDirHostPath: /var/lib/rook
+
+  # Skip upgrade pre-flight checks during the very first install only.
+  skipUpgradeChecks: false
+  continueUpgradeAfterChecksEvenIfNotHealthy: false
+
+  mon:
+    count: 3
+    allowMultiplePerNode: false
+    # Mon DB is small (~2Gi) — also on local-path PVC.
+    volumeClaimTemplate:
+      spec:
+        storageClassName: local-path
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+
+  mgr:
+    count: 2
+    allowMultiplePerNode: false
+    modules:
+      - name: pg_autoscaler
+        enabled: true
+      - name: rook
+        enabled: true
+
+  dashboard:
+    enabled: true
+    ssl: false
+    # Expose via VirtualService (separate PR) on a follow-up — for bring-up,
+    # port-forward `service/rook-ceph-mgr-dashboard 7000:7000`.
+
+  crashCollector:
+    disable: false
+
+  logCollector:
+    enabled: true
+    periodicity: daily
+    maxLogSize: 500M
+
+  resources:
+    mon:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+    mgr:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+    osd:
+      requests: { cpu: 500m, memory: 2Gi }
+      limits:   { cpu: 2000m, memory: 4Gi }
+
+  # All daemons on workers — Talos control-plane is tainted and we keep it
+  # that way (no scheduling on CP).
+  placement:
+    all:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+      tolerations: []
+
+  storage:
+    # PVC-based OSDs — no useAllNodes / useAllDevices block.
+    storageClassDeviceSets:
+      - name: set1
+        # 3 OSDs total = replication factor. Add more later when more workers
+        # come online or when we promote to multi-disk topology.
+        count: 3
+        portable: false
+        tuneDeviceClass: true
+        tuneFastDeviceClass: false
+        encrypted: false
+        placement:
+          # One OSD per worker (anti-affinity by hostname). 7 workers = up
+          # to 7 OSDs maximum on this StorageClassDeviceSet pattern.
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - rook-ceph-osd
+                    - key: app
+                      operator: In
+                      values:
+                        - rook-ceph-osd-prepare
+                topologyKey: kubernetes.io/hostname
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/control-plane
+                      operator: DoesNotExist
+        preparePlacement:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app
+                        operator: In
+                        values:
+                          - rook-ceph-osd-prepare
+                  topologyKey: kubernetes.io/hostname
+        resources:
+          requests: { cpu: 500m, memory: 2Gi }
+          limits:   { cpu: 2000m, memory: 4Gi }
+        volumeClaimTemplates:
+          - metadata:
+              name: data
+            spec:
+              # Each OSD is 50Gi backed by local-path. That maps to a directory
+              # under /opt/local-path-provisioner/<pvc-uid> on the worker root
+              # disk. Sum across replicas: 3 OSDs × 50Gi raw = 150Gi raw =
+              # ~50Gi usable at replication 3.
+              resources:
+                requests:
+                  storage: 50Gi
+              storageClassName: local-path
+              volumeMode: Block
+              accessModes:
+                - ReadWriteOnce
+    # Don't let Rook find raw disks on the nodes — we want strict PVC mode.
+    useAllNodes: false
+    useAllDevices: false
+
+  disruptionManagement:
+    managePodBudgets: true
+    osdMaintenanceTimeout: 30
+    pgHealthCheckTimeout: 0
+
+  # Health checks — be permissive while we're bringing it up.
+  healthCheck:
+    daemonHealth:
+      mon:
+        disabled: false
+        interval: 45s
+      osd:
+        disabled: false
+        interval: 60s
+      status:
+        disabled: false
+        interval: 60s

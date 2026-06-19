@@ -1,0 +1,63 @@
+# platform-app-expose default values.
+# Override per consumer. See README for example HelmReleases.
+
+# hostname — FQDN this exposure binds to.
+# Must resolve under an on-prem managed zone (e.g. *.op-dev.usxpress.io).
+hostname: ""
+
+# service — the upstream Service this exposure routes to.
+service:
+  name: ""
+  namespace: ""   # defaults to release namespace (handled in template)
+  port: 0
+
+# protocol — how the gateway treats incoming traffic.
+#   http             → HTTP VirtualService on the istio-ingress/shared-http Gateway
+#   tcp-passthrough  → raw TCP via istio-ingress/tcp-passthrough Gateway
+#   tls-passthrough  → SNI-routed TLS via tcp-passthrough Gateway (gateway does NOT terminate)
+protocol: http
+
+tls:
+  # backend: true informs documentation; the actual sidecar deployment is
+  # the consumer's responsibility (this chart does NOT inject ghostunnel).
+  # See README for the sidecar pattern + RW-2 reference.
+  backend: false
+
+# certificate — cert-manager Certificate for this hostname.
+# Default OFF — existing depth-1 wildcard *.op-dev.usxpress.io covers most hosts
+# (cert lives in istio-ingress ns, bound to the Gateway). Only opt-in when:
+#   - hostname is nested beyond depth-1 (e.g. x.team.op-dev.usxpress.io) AND
+#     a per-team wildcard cert doesn't exist yet, OR
+#   - hostname is in a separate root zone not covered by the existing chain.
+certificate:
+  create: false
+  # Issuer ClusterIssuer (only used when create=true).
+  issuerName: letsencrypt-prod
+  # Cert resource name (default: derived from hostname).
+  name: ""
+
+# cnp — optional CiliumNetworkPolicy for default-deny ingress on the target ns.
+# Default OFF — turn on AFTER inventorying existing consumers; turning on with
+# the wrong allow-list will break traffic.
+cnp:
+  enabled: false
+  allowedNamespaces:
+    - istio-ingress
+    - prometheus
+    - flux-system
+    - cert-manager
+    - reloader
+  allowedCIDRs:
+    - 10.11.0.0/19    # corp VPN (op-usxpress-dev specific)
+    - 10.10.82.0/24   # op-usxpress-dev worker subnet
+    - 10.244.0.0/16   # op-usxpress-dev pod CIDR
+    - 10.96.0.0/12    # op-usxpress-dev service CIDR
+
+# externalDNS — annotation on the VirtualService.
+# Per external-dns v0.20.0 quirk: istio-virtualservice source produces zero
+# endpoints when bound Gateway Service is ClusterIP without per-VS target.
+# So `target` is REQUIRED (default below matches the live RW-2 setup;
+# verify against your cluster's existing VS targets before changing).
+externalDNS:
+  enabled: true
+  target: rw-ingress.op-dev.usxpress.io

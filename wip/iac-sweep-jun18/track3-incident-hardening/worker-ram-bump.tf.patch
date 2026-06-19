@@ -1,0 +1,36 @@
+# Terraform patch: bump worker RAM 4 GB → 8 GB
+#
+# Target: iaac-talos repo, deploy/terraform/variables.tf
+#
+# Why: on 2026-06-17/18 worker .26 was consistently at < 400 MB free with no
+# headroom for Rook OSDs. After CP bump to 8 GB (PR #36), workers are the
+# obvious next bottleneck. Same vSphere in-place memory modification flow
+# as the CP bump.
+#
+# This is a PATCH — the actual variable + module wiring already exists.
+# Apply as a unified diff or just edit the file directly.
+
+--- a/deploy/terraform/variables.tf
++++ b/deploy/terraform/variables.tf
+@@ -X,7 +X,7 @@
+ variable "worker_memory_mb" {
+   description = "Memory (MB) for worker VMs"
+   type        = number
+-  default     = 4096
++  default     = 8192
+ }
+
+ variable "cp_memory_mb" {
+
+# PR sequence after merging this:
+#   1. Octopus iaac-talos: flip TfApply=true
+#   2. Run plan-only first, verify only the 7 worker VMs get a memory change
+#   3. Apply
+#   4. Workers power-cycle one at a time — Tim's RW + Idris's grafana / others
+#      experience brief disruption per worker reboot
+#   5. Flip TfApply=false
+#
+# RW awareness: each worker reboot interrupts hostPort 4567/5432 on that worker
+# for ~5 min (full Talos reboot). Coordinate with Tim before triggering.
+#
+# Pre-flight: run /onprem-safety before triggering Octopus apply.

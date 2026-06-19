@@ -1,0 +1,34 @@
+# ServiceMonitor: scrape rook-ceph-mgr metrics
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/rook-ceph-cluster/
+#
+# Requires the CephCluster CR to have:
+#   spec:
+#     dashboard:
+#       enabled: true
+#     monitoring:
+#       enabled: true
+#
+# Rook's mgr exposes Prometheus metrics on port 9283 of the rook-ceph-mgr Service.
+# The CephCluster file in PR #37 should already enable monitoring — if not, the
+# patch in `cephcluster-monitoring-patch.yaml` enables it.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rook-ceph-mgr
+  namespace: rook-ceph
+  labels:
+    app.kubernetes.io/part-of: rook-ceph
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: rook-ceph-mgr
+      rook_cluster: rook-ceph
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      path: /metrics
+      scheme: http
+      honorLabels: true

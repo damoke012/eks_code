@@ -1,0 +1,31 @@
+# Target: iaac-talos-flux-platform op-dev branch
+#   infrastructure/cert-manager-issuers/letsencrypt-staging.yaml (or equivalent)
+#
+# Same two-solver change for the staging issuer (kept in parity with prod so
+# staging tests for root-zone certs work too).
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: doke@usxpress.com
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - op-dev.usxpress.io
+        dns01:
+          route53:
+            region: us-east-1
+            role: arn:aws:iam::155768531003:role/iaac-route53-zone
+      - selector:
+          dnsZones:
+            - usxpress.io
+        dns01:
+          route53:
+            region: us-east-1
+            role: arn:aws:iam::155768531003:role/iaac-route53-zone

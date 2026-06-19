@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rook-ceph-operator-values
+  namespace: rook-ceph
+data:
+  values.yaml: |
+    # ─────────────────────────────────────────────────────────────────────
+    # Rook-Ceph operator values for op-usxpress-dev
+    # POST-INCIDENT (2026-06-17): strict worker-only CSI placement.
+    # Previous version had `pluginTolerations: operator: Exists` which
+    # let CSI plugin DaemonSets land on CP nodes, pushing 4GB CPs into
+    # memory pressure that crashed containerd → etcd quorum loss.
+    # See: docs/incidents/2026-06-17_cp-oom-cascade.md
+    # ─────────────────────────────────────────────────────────────────────
+
+    image:
+      repository: docker.io/rook/ceph
+      tag: v1.15.5
+      pullPolicy: IfNotPresent
+
+    crds:
+      enabled: true
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    currentNamespaceOnly: false
+    enableDiscoveryDaemon: false
+
+    # ─────────────────────────────────────────────────────────────────────
+    # CSI configuration — STRICT worker-only placement.
+    #
+    # FIX 1: pluginTolerations is empty. Without explicit toleration for the
+    # CP NoSchedule taint, plugin pods CANNOT schedule on CPs.
+    #
+    # FIX 2: provisionerTolerations is empty. Same reason — provisioner pods
+    # stay on workers.
+    #
+    # FIX 3 (removed 2026-06-18 — see PR #38): Rook's CSI_PLUGIN_NODE_AFFINITY
+    # string syntax does NOT support the DoesNotExist operator. The string
+    # "node-role.kubernetes.io/control-plane=DoesNotExist" is parsed as
+    # `key=val` with operator `In` and value `"DoesNotExist"`, matching no
+    # nodes. DESIRED=0 was the result on 2026-06-18.
+    #
+    # The CP NoSchedule taint + empty pluginTolerations is sufficient.
+    # If you need extra defense, use a worker-positive label (e.g. label
+    # workers `cluster-role: worker` and use that) — not control-plane-negative.
+    #
+    # FIX 4: provisionerReplicas reduced to 1. CSI provisioner doesn't
+    # need HA in a dev cluster.
+    # ─────────────────────────────────────────────────────────────────────
+    csi:
+      enableRbdDriver: true
+      enableCephfsDriver: true
+
+      # CRITICAL: empty tolerations = won't tolerate CP NoSchedule taint
+      # → CSI plugins land on workers only (no CSI on CPs).
+      # DO NOT add pluginNodeAffinity strings here — Rook's parser doesn't
+      # support the DoesNotExist operator. See FIX 3 comment above.
+      provisionerTolerations: []
+      pluginTolerations: []
+
+      # Single provisioner replica (dev sizing)
+      provisionerReplicas: 1
+
+      # Trim CSI plugin resource requests
+      csiRbdPluginResource: |
+        - name: csi-rbdplugin
+          resource:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 200m
+        - name: driver-registrar
+          resource:
+            requests:
+              memory: 64Mi
+              cpu: 25m
+            limits:
+              memory: 128Mi
+              cpu: 100m
+        - name: csi-omap-generator
+          resource:
+            requests:
+              memory: 64Mi
+              cpu: 25m
+            limits:
+              memory: 128Mi
+              cpu: 100m
+
+      csiCephFSPluginResource: |
+        - name: csi-cephfsplugin
+          resource:
+            requests:
+              memory: 128Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 200m
+        - name: driver-registrar
+          resource:
+            requests:
+              memory: 64Mi
+              cpu: 25m
+            limits:
+              memory: 128Mi
+              cpu: 100m
+
+    logLevel: INFO
+
+    monitoring:
+      enabled: false

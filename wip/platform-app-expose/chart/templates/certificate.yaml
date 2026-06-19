@@ -1,0 +1,17 @@
+{{- if .Values.certificate.create }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "platform-app-expose.certName" . }}
+  namespace: istio-ingress
+  labels:
+    {{- include "platform-app-expose.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "platform-app-expose.certName" . }}-tls
+  dnsNames:
+    - {{ .Values.hostname }}
+  issuerRef:
+    name: {{ .Values.certificate.issuerName }}
+    kind: ClusterIssuer
+    group: cert-manager.io
+{{- end }}

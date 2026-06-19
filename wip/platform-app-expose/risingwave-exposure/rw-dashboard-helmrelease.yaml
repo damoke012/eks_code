@@ -1,0 +1,37 @@
+# Tim's RW dashboard exposure — root-zone naming.
+# Fully additive — Tim's NodePort stays live until cutover confirmed.
+# CNP OFF until Tim's consumer inventory is captured.
+#
+# DNS path proven 2026-06-03: ClusterIssuer two-solver fix + IAM was already
+# unconstrained. Wildcard cert *.usxpress.io created at Gateway level,
+# so this HelmRelease doesn't need a per-host Cert.
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rw-dashboard-expose
+  namespace: risingwave
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: ./infrastructure/platform-app-expose/chart
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+      reconcileStrategy: Revision
+  values:
+    hostname: risingwave-dashboard.usxpress.io
+    service:
+      name: risingwave-dashboard-ext
+      namespace: risingwave
+      port: 5691
+    protocol: http
+    certificate:
+      create: false   # Gateway-bound *.usxpress.io wildcard covers this
+    cnp:
+      enabled: false
+    externalDNS:
+      enabled: true
+      target: rw-ingress.op-dev.usxpress.io  # mirror rw2-dashboard target; verify on WSL2

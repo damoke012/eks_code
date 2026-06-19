@@ -1,0 +1,27 @@
+# APPEND to: clusters/bm-dev/flux-system/infra.yaml
+# (one new Flux Kustomization CR after the existing ones)
+#
+# dependsOn: external-secrets-config (so the ExternalSecret store is reconciling
+# before Grafana's ESO needs it) + prometheus (so the Prometheus Service exists
+# for the default datasource) + istio-ingress (so the Gateway is ready for the
+# VirtualService binding).
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets-config
+    - name: prometheus
+    - name: istio-ingress
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/grafana
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s

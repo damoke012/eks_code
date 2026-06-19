@@ -1,0 +1,56 @@
+# Phase 1 PR 2 — auto-label ServiceMonitor + PodMonitor with prometheus_ingest=true
+#
+# Mirrors cloud iaac-monitoring convention. Additive on admission; opt-out by setting
+# prometheus_ingest=false explicitly on the resource.
+#
+# Target path: iaac-talos-flux-platform/infrastructure/kyverno-policies/prometheus-ingest-label.yaml
+# Don't forget to add this file to the kustomization.yaml resources list in that dir
+# (the dir uses explicit resources list per the Round 2 gotcha).
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-prometheus-ingest-label
+  annotations:
+    policies.kyverno.io/title: Auto-label ServiceMonitor + PodMonitor for prometheus_ingest
+    policies.kyverno.io/category: Observability
+    policies.kyverno.io/subject: ServiceMonitor, PodMonitor
+    policies.kyverno.io/description: >-
+      Ensures every ServiceMonitor and PodMonitor carries the cloud-convention
+      `prometheus_ingest=true` label so the Prometheus selector picks it up.
+      Resources can opt out by setting `prometheus_ingest=false` explicitly.
+spec:
+  background: false
+  rules:
+    - name: add-label-servicemonitor
+      match:
+        any:
+          - resources:
+              kinds:
+                - ServiceMonitor
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.labels.prometheus_ingest || 'missing' }}"
+            operator: Equals
+            value: "missing"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              prometheus_ingest: "true"
+    - name: add-label-podmonitor
+      match:
+        any:
+          - resources:
+              kinds:
+                - PodMonitor
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.labels.prometheus_ingest || 'missing' }}"
+            operator: Equals
+            value: "missing"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              prometheus_ingest: "true"

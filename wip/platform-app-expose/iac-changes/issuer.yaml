@@ -1,0 +1,44 @@
+# Target: iaac-talos-flux-platform op-dev branch
+#   infrastructure/cert-manager-issuers/issuer.yaml
+#
+# Changes:
+# - Adds second solver matching usxpress.io (parent zone) so root-zone
+#   hostnames can issue certs.
+# - Existing op-dev.usxpress.io solver retained — cert-manager picks
+#   most-specific selector, so op-dev hosts go through the op-dev solver.
+# - Validated live 2026-06-03: test cert for zone-test-rwexpose.usxpress.io
+#   became Ready=True within ~60s after this change applied.
+#
+# IAM verification: iaac-route53-zone role has unconstrained
+# route53:ChangeResourceRecordSets on arn:aws:route53:::hostedzone/* —
+# no IAM policy change needed.
+#
+# Rate-limit note: LE PROD = 50 certs/registered-domain/week. usxpress.io
+# is shared with cloud (grafana.usxpress.io etc.). Tim's RW needs 3 certs;
+# trivial usage of the budget but worth tracking.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: doke@usxpress.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - op-dev.usxpress.io
+        dns01:
+          route53:
+            region: us-east-1
+            role: arn:aws:iam::155768531003:role/iaac-route53-zone
+      - selector:
+          dnsZones:
+            - usxpress.io
+        dns01:
+          route53:
+            region: us-east-1
+            role: arn:aws:iam::155768531003:role/iaac-route53-zone

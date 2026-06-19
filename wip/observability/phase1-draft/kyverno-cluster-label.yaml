@@ -1,0 +1,41 @@
+# Phase 1 PR 3 — auto-label Pods with cluster=op-usxpress-dev
+#
+# Belt-and-suspenders for workload metrics. The Prometheus-side externalLabels (from PR 1)
+# adds `cluster=op-usxpress-dev` to series Prom EMITS (its own time-series). Pod-emitted
+# metrics (anything an exporter exposes via /metrics) don't automatically get that label.
+# This policy adds it at the Pod level so workload metrics carry the cluster identifier
+# even before remote_write rewrites it.
+#
+# Target path: iaac-talos-flux-platform/infrastructure/kyverno-policies/cluster-label.yaml
+# Add to kustomization.yaml resources list in that dir.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-cluster-label
+  annotations:
+    policies.kyverno.io/title: Auto-label Pods with cluster=op-usxpress-dev
+    policies.kyverno.io/category: Observability
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Ensures every Pod carries cluster=op-usxpress-dev. Composes with Phase 5 remote_write
+      to give the central VM cluster-aware queries.
+spec:
+  background: false
+  rules:
+    - name: add-cluster-label-pod
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.labels.cluster || 'missing' }}"
+            operator: Equals
+            value: "missing"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              cluster: op-usxpress-dev
