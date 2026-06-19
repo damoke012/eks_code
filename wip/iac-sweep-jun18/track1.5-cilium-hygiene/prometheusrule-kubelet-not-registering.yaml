@@ -1,0 +1,91 @@
+# PrometheusRule: detect kubelet running but no matching kubectl Node
+#
+# Drop into: iaac-talos-flux-platform/infrastructure/prometheus/
+# (alongside the existing PromRule files: istio-cert-chain, cilium-node-divergence, etc.)
+#
+# Why: 2026-06-18 PM apply (hostname-pin refactor) surfaced that machines
+# with stale kubelet client TLS certs (CN from a previous hostname) cannot
+# rotate their cert via CSR — the Node Authorizer enforces
+# `CN must equal target node name`. Symptom: kubelet status Running OK
+# but no matching Node in kubectl, kubelet logs full of
+# "csr-: can only create a node CSR with CN=system:node:OLD".
+#
+# This alert fires when the count of running kubelets exceeds the count of
+# kubectl Node objects for > 30 min — the signature of one or more stuck
+# kubelets that can't register.
+#
+# RECOVERY: see deploy/docs/runbooks/kubelet-cn-mismatch-recovery.md
+# (will be added in iaac-talos repo). TL;DR — talosctl etcd remove-member +
+# talosctl reset --system-labels-to-wipe=EPHEMERAL --reboot. Don't auto-execute.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubelet-not-registering
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: cluster-infra
+    release: prometheus-stack
+spec:
+  groups:
+    - name: kubelet.registration
+      interval: 30s
+      rules:
+
+        - alert: KubeletNotRegistering
+          # Compare kubelet `up` metric (via kubelet ServiceMonitor) to actual Node count.
+          # If running kubelets > known Nodes for 30 min, one is stuck.
+          expr: |
+            (count(up{job="kubelet"} == 1)) > (count(kube_node_info))
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Kubelet running but not registered as a Node"
+            description: |
+              {{ $value }} kubelet(s) are Up but no matching Node exists.
+              Common cause: kubelet TLS client cert has CN from a previous
+              hostname after a Talos machine config hostname change.
+              Recovery: see deploy/docs/runbooks/kubelet-cn-mismatch-recovery.md
+              in iaac-talos repo. Manual one-time fix per stuck node.
+
+        - alert: KubeletCertExpiringSoon
+          # Kubelet cert TTL < 7d — if rotation is broken, this catches it
+          # before the cert expires entirely.
+          expr: |
+            min(kubernetes_kubelet_certificate_manager_client_ttl_seconds) / 86400 < 7
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "A kubelet client cert is < 7 days from expiring"
+            description: |
+              Kubelet auto-rotates client certs at ~80% lifetime. If TTL drops
+              below 7d and stays there, rotation is broken — usually
+              same root cause as KubeletNotRegistering (CN mismatch
+              prevents CSR creation).
+              See deploy/docs/runbooks/kubelet-cn-mismatch-recovery.md.
+
+        - alert: KubeletCSRForbidden
+          # If apiserver audit metric exposes denied CSR creations by
+          # node CN mismatch, alert immediately. This is the smoking gun.
+          # NOTE: requires kube-apiserver to expose audit metrics; if not,
+          # the KubeletNotRegistering above is the fallback signal.
+          expr: |
+            sum(rate(apiserver_request_total{
+              code="403",
+              resource="certificatesigningrequests",
+              verb="create"
+            }[5m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Kubelet CSR creation forbidden — likely stale cert CN"
+            description: |
+              A kubelet is trying to create a CSR but apiserver is denying
+              with 403. Common cause: cert CN mismatch.
+              Same recovery as KubeletNotRegistering.
