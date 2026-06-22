@@ -1,0 +1,93 @@
+# PrometheusRule: IRSA + ExternalSecrets health
+#
+# IRSA token injection failures + AWS SM auth errors cascade silently:
+#   pod-identity-webhook fails to mutate -> token missing -> STS AssumeRoleWithWebIdentity
+#   fails -> AWS SDK falls back to IMDS (which doesn't exist on Talos) -> all AWS calls fail.
+#
+# Catalog: wip/onprem-troubleshooting/04-secrets-credentials/irsa-imds-fallback.md.
+# Refs: INFRA-1538 (parent restore-readiness).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: irsa-health
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: secrets
+    release: prometheus-stack
+spec:
+  groups:
+    - name: irsa-eso.health
+      interval: 30s
+      rules:
+        - alert: ExternalSecretSyncError
+          expr: |
+            sum by (namespace, name) (
+              external_secrets_sync_calls_error{} > 0
+            )
+          for: 10m
+          labels:
+            severity: warning
+            track: secrets
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} sync errors"
+            description: |
+              ExternalSecret has been failing to sync for 10 minutes. Common causes:
+              1. AWS SM secret missing / wrong key
+              2. IRSA token injection failure (pod-identity-webhook)
+              3. cloud-eks CSS not ready (needs INFRA-1535 runbook)
+              Catalog: 04-secrets-credentials/.
+
+        - alert: ClusterSecretStoreNotReady
+          expr: |
+            external_secrets_cluster_secret_store_status_condition{condition="Ready",status="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+            track: secrets
+          annotations:
+            summary: "ClusterSecretStore {{ $labels.name }} not Ready"
+            description: |
+              CSS in NotReady state for 15m. If 'cloud-eks' CSS: this is expected until
+              INFRA-1535 Octopus runbook seeds cloud-eks-reader-token. If 'default' CSS:
+              investigate IRSA + AWS SM connectivity.
+
+        - alert: PodIdentityWebhookDown
+          expr: kube_deployment_status_replicas_available{deployment="pod-identity-webhook",namespace="pod-identity-webhook"} < 1
+          for: 2m
+          labels:
+            severity: critical
+            track: secrets
+          annotations:
+            summary: "pod-identity-webhook has zero available replicas"
+            description: |
+              Pods requesting IRSA tokens will fail to get them injected. AWS SDK calls will
+              fall back to IMDS (which doesn't exist on Talos) and ALL AWS calls will fail.
+              Restore-readiness depends on this.
+
+        - alert: PodIdentityWebhookCAInvalid
+          expr: |
+            kube_mutatingwebhookconfiguration_info{name="pod-identity-webhook"}
+            unless on()
+            kube_mutatingwebhookconfiguration_info{name="pod-identity-webhook",service_name="pod-identity-webhook"}
+          for: 5m
+          labels:
+            severity: warning
+            track: secrets
+          annotations:
+            summary: "pod-identity-webhook MutatingWebhookConfiguration may be misconfigured"
+            description: |
+              Could indicate caBundle drift after CP rebuild. See INFRA-1537 fix
+              (cert-manager-managed Certificate auto-rotates the caBundle).
+
+        - alert: IRSATokenInjectionFailure
+          expr: |
+            sum(rate(apiserver_admission_webhook_admission_duration_seconds_count{name="iam-for-pods.amazonaws.com",rejected="true"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+            track: secrets
+          annotations:
+            summary: "IRSA token injection admission webhook rejecting pods"
+            description: |
+              pod-identity-webhook is actively rejecting pod create. Inspect webhook logs:
+              kubectl -n pod-identity-webhook logs deploy/pod-identity-webhook --tail=50

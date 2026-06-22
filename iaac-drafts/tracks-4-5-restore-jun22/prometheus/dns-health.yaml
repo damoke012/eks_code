@@ -1,0 +1,91 @@
+# PrometheusRule: cluster DNS health
+#
+# Codifies the 2026-06-19 cluster-wide DNS failure mode (CiliumNode IP drift
+# on CoreDNS-hosting CPs broke kube-dns Service VIP routing). Detection-only;
+# remediation is in track 1.5 (cilium-node-reconciler CronJob, PR #45 fix
+# made image alpine/k8s:1.32.6).
+#
+# kube-prometheus-stack selects via ruleSelector.matchLabels: {release: prometheus-stack}.
+#
+# Refs: docs/incidents/2026-06-19_cluster-dns-failure.md (if exists),
+#       wip/onprem-troubleshooting/03-networking/cluster-dns-failure.md,
+#       INFRA-1538 (parent restore-readiness).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dns-health
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: networking
+    release: prometheus-stack
+spec:
+  groups:
+    - name: cluster-dns.health
+      interval: 30s
+      rules:
+        - alert: CoreDNSPodDown
+          expr: kube_deployment_status_replicas_available{deployment="coredns",namespace="kube-system"} < 2
+          for: 5m
+          labels:
+            severity: critical
+            track: networking
+          annotations:
+            summary: "CoreDNS has fewer than 2 available replicas"
+            description: |
+              CoreDNS Deployment has {{ $value }} available replicas (target: 2).
+              Cluster-wide DNS depends on this. Check pod state, node placement, and CiliumNode
+              identity drift (see catalog 03-networking/cluster-dns-failure.md).
+
+        - alert: CoreDNSPanicCount
+          expr: sum(rate(coredns_panics_total[5m])) by (instance) > 0
+          for: 2m
+          labels:
+            severity: critical
+            track: networking
+          annotations:
+            summary: "CoreDNS instance {{ $labels.instance }} is panicking"
+            description: "CoreDNS panic rate non-zero. Inspect pod logs immediately."
+
+        - alert: CoreDNSHighErrorRate
+          expr: |
+            sum(rate(coredns_dns_responses_total{rcode=~"SERVFAIL|REFUSED"}[5m])) by (instance)
+            /
+            sum(rate(coredns_dns_responses_total[5m])) by (instance)
+            > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            track: networking
+          annotations:
+            summary: "CoreDNS {{ $labels.instance }} >5% SERVFAIL/REFUSED rate for 10m"
+            description: |
+              Likely upstream DNS misconfig or NetworkPolicy block. Check forward plugin config
+              in CoreDNS Corefile.
+
+        - alert: ClusterDNSUnreachable
+          expr: |
+            probe_success{job="blackbox-dns"} == 0
+            or
+            absent(probe_success{job="blackbox-dns"})
+          for: 5m
+          labels:
+            severity: critical
+            track: networking
+          annotations:
+            summary: "Cluster DNS probe failing — pods may be unable to resolve"
+            description: |
+              kube-dns Service VIP is unreachable from blackbox-exporter. Most common cause is
+              CiliumNode CRD IP drift on a CoreDNS-hosting node. See catalog
+              03-networking/cluster-dns-failure.md.
+
+        - alert: KubeDNSServiceEndpointMissing
+          expr: kube_endpoint_address_available{namespace="kube-system",endpoint="kube-dns"} < 2
+          for: 5m
+          labels:
+            severity: critical
+            track: networking
+          annotations:
+            summary: "kube-dns Service has <2 available endpoints"
+            description: |
+              kube-dns Service is missing endpoint addresses. CoreDNS pods may be NotReady or
+              the EndpointSlice controller may be lagging.

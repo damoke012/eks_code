@@ -1,0 +1,11 @@
+# Strategic merge patch — adds cert-manager.io/inject-ca-from annotation to the
+# existing MutatingWebhookConfiguration so cert-manager auto-injects the CA
+# bundle from secret pod-identity-webhook/pod-identity-webhook-ca-tls on rotation.
+#
+# Also clears the caBundle field on each webhook entry so cert-manager owns it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: pod-identity-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: pod-identity-webhook/pod-identity-webhook-ca

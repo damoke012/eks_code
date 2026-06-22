@@ -1,0 +1,27 @@
+# Edit existing infrastructure/pod-identity-webhook/kustomization.yaml — APPEND these to the
+# resources list and add the patches block:
+#
+# resources:
+#   - <existing files>
+#   - certificate.yaml                      # NEW
+#
+# patches:                                  # NEW block
+#   - target:
+#       kind: MutatingWebhookConfiguration
+#       name: pod-identity-webhook
+#     path: mutatingwebhookconfiguration-patch.yaml
+#
+# Doke: see overlay script in apply-block.
+
+# Reference complete kustomization.yaml:
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # KEEP EXISTING ENTRIES (helmrelease.yaml, namespace.yaml, etc.) AT TOP
+  # Then append:
+  - certificate.yaml
+patches:
+  - target:
+      kind: MutatingWebhookConfiguration
+      name: pod-identity-webhook
+    path: mutatingwebhookconfiguration-patch.yaml

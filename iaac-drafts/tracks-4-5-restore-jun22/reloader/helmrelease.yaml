@@ -1,0 +1,57 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: reloader
+  namespace: reloader
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: reloader
+      version: "v1.x"   # pinned in values via valuesFrom or floating minor; track stakater latest
+      sourceRef:
+        kind: HelmRepository
+        name: stakater
+        namespace: reloader
+      interval: 24h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    reloader:
+      # Auto-discover everything by default; per-namespace opt-in via annotation:
+      #   reloader.stakater.com/auto: "true"
+      # Set on Deployments/StatefulSets that should restart on Secret/ConfigMap change.
+      watchGlobally: true
+      readOnlyRootFileSystem: true
+      autoReloadAll: false   # Opt-in only; avoids surprise restarts cluster-wide
+      enableHA: false        # Single replica adequate; for HA cluster: set true + 2 replicas
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 256Mi
+      # Exclude system + flux namespaces (these manage their own restart lifecycle)
+      ignoredNamespaces: "kube-system,kube-public,flux-system,rook-ceph,istio-system,istio-ingress,cilium-secrets"
+      podMonitor:
+        enabled: true
+        labels:
+          release: prometheus-stack
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: prometheus-stack
+      nodeSelector: {}
+      tolerations: []
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist

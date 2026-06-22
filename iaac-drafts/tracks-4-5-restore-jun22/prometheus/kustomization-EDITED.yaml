@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- namespace.yaml
+- helmrelease.yaml
+- platform-alerts.yaml
+- istio-cert-chain.yaml
+- cilium-node-divergence.yaml
+- control-plane-memory.yaml
+- etcd-cluster-health.yaml
+- rook-ceph-health.yaml
+- dns-health.yaml
+- irsa-health.yaml

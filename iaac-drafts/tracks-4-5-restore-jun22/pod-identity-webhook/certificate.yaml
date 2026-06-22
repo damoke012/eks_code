@@ -1,0 +1,72 @@
+# Auto-rotating TLS cert for the pod-identity-webhook MutatingWebhookConfiguration.
+#
+# Problem (INFRA-1537): on CP rebuild, kube-apiserver cert changes. The webhook's
+# caBundle (passed via flag or ConfigMap) goes stale. Cluster goes IRSA-broken
+# until someone manually re-derives the caBundle and patches the
+# MutatingWebhookConfiguration.
+#
+# Solution: have cert-manager mint the webhook's serving cert, and add the
+# `cert-manager.io/inject-ca-from` annotation on the MutatingWebhookConfiguration
+# so cert-manager auto-injects the matching CA bundle on rotation.
+#
+# Companion patch: `mutatingwebhookconfiguration-patch.yaml` adds the annotation
+# (apply as a strategic merge patch via Kustomize).
+
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: pod-identity-webhook-selfsigned
+  namespace: pod-identity-webhook
+spec:
+  selfSigned: {}
+---
+# Root CA for the webhook (self-signed; cert-manager auto-rotates on expiry).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pod-identity-webhook-ca
+  namespace: pod-identity-webhook
+spec:
+  isCA: true
+  commonName: pod-identity-webhook-ca
+  secretName: pod-identity-webhook-ca-tls
+  duration: 87600h    # 10 years
+  renewBefore: 720h   # 30 days
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: pod-identity-webhook-selfsigned
+    kind: Issuer
+---
+# CA-backed Issuer for the serving cert.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: pod-identity-webhook-ca
+  namespace: pod-identity-webhook
+spec:
+  ca:
+    secretName: pod-identity-webhook-ca-tls
+---
+# Serving cert presented by the webhook Service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pod-identity-webhook-tls
+  namespace: pod-identity-webhook
+spec:
+  secretName: pod-identity-webhook-tls
+  duration: 8760h     # 1 year
+  renewBefore: 720h   # 30 days
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - pod-identity-webhook
+    - pod-identity-webhook.pod-identity-webhook
+    - pod-identity-webhook.pod-identity-webhook.svc
+    - pod-identity-webhook.pod-identity-webhook.svc.cluster.local
+  issuerRef:
+    name: pod-identity-webhook-ca
+    kind: Issuer
