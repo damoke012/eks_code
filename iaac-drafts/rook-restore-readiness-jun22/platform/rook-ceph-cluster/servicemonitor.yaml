@@ -1,0 +1,27 @@
+# Prometheus ServiceMonitor for the Ceph mgr's built-in prometheus module.
+# Without this, no ceph_* metrics reach Prometheus and the rook-ceph-health
+# PromRule has nothing to fire on.
+#
+# The mgr exposes /metrics on the rook-ceph-mgr Service (default port http-metrics:9283).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rook-ceph-mgr
+  namespace: rook-ceph
+  labels:
+    team: rook
+    app: rook-ceph-mgr
+spec:
+  namespaceSelector:
+    matchNames:
+      - rook-ceph
+  selector:
+    matchLabels:
+      app: rook-ceph-mgr
+      rook_cluster: rook-ceph
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 25s
+      honorLabels: true

@@ -1,0 +1,28 @@
+---
+# Atlas X.509 user cert bridged from the cloud EKS cluster's external-secrets
+# namespace via the cloud-eks ClusterSecretStore (in cross-cluster-eso/).
+#
+# The cloud-eks CSS depends on the cloud-eks-reader-token Secret being seeded
+# by the 'Seed Cross-Cluster ESO Token' Octopus runbook (INFRA-1535). Until
+# that runbook is set up, this ES will sit in SecretSyncedError — that's
+# expected and does NOT block cluster bootstrap (the cross-cluster-app-secrets
+# Flux Kustomization is wait: false).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: geoenrichment-sync-handler-m-u
+  namespace: geoservices
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: cloud-eks
+  target:
+    name: geoenrichment-sync-handler-m-u
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: kubernetes.io/tls
+  dataFrom:
+    - extract:
+        key: geoenrichment-sync-handler-m-u

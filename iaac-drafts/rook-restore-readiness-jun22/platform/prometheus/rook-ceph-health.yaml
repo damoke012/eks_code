@@ -1,0 +1,112 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rook-ceph-health
+  namespace: rook-ceph
+  labels:
+    team: rook
+    track: storage
+spec:
+  groups:
+    - name: rook-ceph.health
+      rules:
+        - alert: CephClusterHealthWarn
+          expr: ceph_health_status == 1
+          for: 15m
+          labels:
+            severity: warning
+            track: storage
+          annotations:
+            summary: Ceph cluster is HEALTH_WARN
+            description: |
+              ceph_health_status has been WARN for 15 minutes. Investigate via toolbox:
+              kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s
+              kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph health detail
+        - alert: CephClusterHealthErr
+          expr: ceph_health_status == 2
+          for: 2m
+          labels:
+            severity: critical
+            track: storage
+          annotations:
+            summary: Ceph cluster is HEALTH_ERR
+            description: |
+              ceph_health_status has been ERR for 2 minutes. Likely PG or OSD failure.
+              See catalog: wip/onprem-troubleshooting/02-storage/.
+
+        - alert: CephOSDDown
+          expr: ceph_osd_up == 0
+          for: 5m
+          labels:
+            severity: critical
+            track: storage
+          annotations:
+            summary: "OSD {{ $labels.ceph_daemon }} is down"
+            description: |
+              OSD pod state may indicate auth mismatch (rook-osd-keyring-missing.md) or
+              PG peering crash (rook-osd-pg-peering-crash.md). Check via toolbox.
+
+        - alert: CephOSDNearFull
+          expr: ceph_osd_utilization > 80
+          for: 15m
+          labels:
+            severity: warning
+            track: storage
+          annotations:
+            summary: "OSD {{ $labels.ceph_daemon }} is {{ $value | humanize }}% full"
+
+        - alert: CephMonOutOfQuorum
+          expr: ceph_mon_quorum_status == 0
+          for: 5m
+          labels:
+            severity: critical
+            track: storage
+          annotations:
+            summary: "Mon {{ $labels.ceph_daemon }} not in quorum"
+
+        - alert: CephPGNotActiveClean
+          expr: (ceph_pg_total - ceph_pg_active_clean) > 0
+          for: 30m
+          labels:
+            severity: warning
+            track: storage
+          annotations:
+            summary: "{{ $value }} PGs not active+clean for 30m"
+            description: |
+              PGs should converge within minutes of any topology change. Stuck PGs
+              often signal OSD peering issues — see rook-osd-pg-peering-crash.md.
+
+        - alert: CephMonPVCDiskLow
+          expr: |
+            (kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"rook-ceph-mon-.*"}
+             / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"rook-ceph-mon-.*"}) < 0.30
+          for: 30m
+          labels:
+            severity: warning
+            track: storage
+          annotations:
+            summary: "Mon PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} free"
+            description: |
+              Mon disk below 30% available. Bump volumeClaimTemplate.spec.resources.requests.storage
+              in cephcluster.yaml (INFRA-1536).
+
+        - alert: CephOSDFlapping
+          expr: changes(ceph_osd_up[1h]) > 6
+          for: 5m
+          labels:
+            severity: warning
+            track: storage
+          annotations:
+            summary: "OSD {{ $labels.ceph_daemon }} flapping (>6 transitions/hr)"
+
+        - alert: CephClusterDegraded
+          expr: ceph_osd_in == 0
+          for: 10m
+          labels:
+            severity: critical
+            track: storage
+          annotations:
+            summary: "OSD {{ $labels.ceph_daemon }} marked OUT"
+            description: |
+              OSD has been administratively or automatically marked OUT. Cluster may be
+              under-replicated. Investigate via toolbox `ceph osd tree` + `ceph health detail`.
