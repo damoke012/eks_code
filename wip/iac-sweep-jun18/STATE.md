@@ -1,21 +1,30 @@
 # iac-sweep-jun18 — STATE
 
-**STATUS:** Rook + ESO recovery COMPLETE (2026-06-22). Tracks 4/5 remaining + new IaC restructure (INFRA-1538, 4 PRs).
-**Last updated:** 2026-06-22 PM — Full recovery wrap, catalog + IaC drafts staged, INFRA-1535/1536/1537/1538 filed.
+**STATUS:** Rook restore-readiness COMPLETE (2026-06-22 LATE PM). All 7 PRs landed; cluster green on op-dev@35416383. Only INFRA-1535 Octopus runbook remains as documented manual step.
+**Last updated:** 2026-06-22 LATE PM — 7 PRs merged, cluster verified green, restore-readiness GREEN.
 **Owner:** Doke
+
+## Today's landings (2026-06-22)
+
+7 PRs merged:
+- **iaac-talos #43** — Troubleshooting catalog (Rook + ESO + QA bootstrap checklist)
+- **iaac-talos-flux-platform #47** — cross-cluster-eso CSS split
+- **iaac-talos-flux-cluster #19** — cross-cluster-eso Kustomization wait:false
+- **iaac-talos-flux-platform #48** — Rook restore-readiness (toolbox + ServiceMonitor + PromRule + mon PVC 10→20Gi + geoenrichment ES split)
+- **iaac-talos-flux-cluster #20** — cross-cluster-app-secrets Kustomization + restored wait:true
+- **iaac-talos-flux-platform #49** — Fix PromRule/ServiceMonitor labels (release=prometheus-stack)
+- **iaac-talos-flux-cluster #21** — Fix dependsOn (app-namespaces → app-secrets)
+
+Cluster end-state: all 36 Flux Kustomizations Ready=True; only HEALTH_WARN is mon-disk-low (INFRA-1536 mon PVC expand pending).
 
 ## Next session priorities (2026-06-23+)
 
-1. Pull tarballs on WSL (from public eks_code `transfer/rook-ceph-safe-reroll-jun17` branch)
-2. Open 4 PRs per `iaac-drafts/cross-cluster-eso-restructure-jun22/PR-PLAN.md`:
-   - PR-A iaac-talos-flux-platform op-dev (cross-cluster-eso split + recovery-jobs templates)
-   - PR-B iaac-talos-flux-cluster master (new Kustomization with wait: false)
-   - PR-C iaac-talos-flux-platform op-dev (toolbox always-on)
-   - PR-D iaac-talos feature/op-usxpress-dev (catalog: 3 entries + QA checklist)
-3. After PR-A/B merge: verify on-prem cluster keeps all Kustomizations Ready=True
-4. Tracks 4+5 (DNS PromRule, IRSA PromRule, Reloader, ES 5m refresh)
-5. Octopus TfApply=false housekeeping flip
-6. INFRA-1535 (Octopus runbook for cloud-eks token seed) — coordination with Vibin successor
+1. **INFRA-1535** — OnPremise Octopus space + onprem-platform-bootstrap project + Seed Cross-Cluster ESO Token runbook. ONLY remaining manual step for full restore-readiness.
+2. **INFRA-1536** — Expand existing mon PVCs from 10Gi → 20Gi (IaC value already bumped; needs mon-by-mon recreate or external resize)
+3. **INFRA-1537** — pod-identity-webhook caBundle auto-refresh after CP rebuild
+4. **Tracks 4+5** — DNS PromRule, IRSA PromRule, Reloader, ES 5m refresh
+5. **Octopus TfApply=false** housekeeping flip (if still true)
+6. **argocd/argocd-admin-credentials ES SecretSyncedError** — Idris's track, investigate AWS SM path
 
 See `~/.claude/projects/-workspaces-eks-code/memory/session_state_jun22.md` for full context.
 

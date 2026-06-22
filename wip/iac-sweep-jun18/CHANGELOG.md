@@ -1,5 +1,53 @@
 # iac-sweep-jun18 — CHANGELOG
 
+## 2026-06-22 LATE PM — Rook restore-readiness COMPLETE
+
+User asked at session start: "Lets check that we all Iac are in incase dev is ever reset, crashed, restoreed or broken and we rerun, all files will work with no issues" + "also IAc all related to root ceph especially if it crashes etc or new env".
+
+Audit surfaced 5 gaps; closed via 7 PRs in 4 hours:
+
+### PRs merged in order
+
+1. **iaac-talos #43** (catalog) — MERGED yesterday but referenced today
+2. **iaac-talos-flux-platform #47** — cross-cluster-eso CSS split
+3. **iaac-talos-flux-cluster #19** — cross-cluster-eso Kustomization wait:false
+4. **iaac-talos-flux-platform #48** — comprehensive Rook IaC bundle (5 changes):
+   - Toolbox moved from rook-recovery-jobs/ → rook-ceph-cluster/ (always-on)
+   - ServiceMonitor for rook-ceph-mgr metrics
+   - PrometheusRule with 9 alerts
+   - Mon volumeClaimTemplate 10Gi → 20Gi
+   - monitoring.enabled: true on CephCluster CR
+   - Geoenrichment ES split: uncommented + moved to new `infrastructure/cross-cluster-app-secrets/`
+5. **iaac-talos-flux-cluster #20** — new cross-cluster-app-secrets Kustomization (wait:false) + flip external-secrets-config back to wait:true
+6. **iaac-talos-flux-platform #49** — Fix #48 misses:
+   - PromRule namespace rook-ceph → prometheus
+   - release=prometheus-stack label on PromRule + ServiceMonitor
+   - rook-ceph-health.yaml added to prometheus/kustomization.yaml resources list
+7. **iaac-talos-flux-cluster #21** — Fix #20 dependsOn (app-namespaces → app-secrets; the former doesn't exist on on-prem)
+
+### Cluster end-state
+
+- 36/36 Flux Kustomizations Ready=True at op-dev@sha1:35416383
+- 7/7 OSDs up + in; mon quorum (b,a,c); mgr a active+b standby; mds 1/1+1
+- Toolbox running always-on (Flux-managed)
+- Prometheus rule groups: 45 (+1 = `rook-ceph.health` active)
+- ServiceMonitor scraping ceph-mgr /metrics
+- cross-cluster-app-secrets Ready=True; geoenrichment ES in SecretSyncedError state (intentional — auto-syncs after INFRA-1535 runbook)
+- external-secrets-config restored to wait:true (standard)
+- Tim's RW: 15/15 pods Running, only pre-existing 6 restarts on compactor (3d18h old, unrelated)
+- Old crashes archived (`ceph crash archive-all`)
+- Remaining HEALTH_WARN: mon disk-low (mons a,b at 21-27% available) — INFRA-1536 follow-up
+
+### Restore-readiness state: GREEN with one documented manual step
+
+Disaster recovery: `terraform apply` → Flux bootstrap → all 36 Kustomizations reconcile → Rook auto-deploys → mons get 20Gi PVCs → Toolbox + PromRule + ServiceMonitor auto-deploy → ES applies in SecretSyncedError state → operator runs INFRA-1535 runbook ONCE → token seeded → ES auto-syncs → done.
+
+### Gotchas captured today
+
+- Source mismatch trap: `flux reconcile source git flux-system` only refreshes the cluster repo. To pull op-dev changes from iaac-talos-flux-platform, must reconcile the `infra` GitRepository separately.
+- kube-prometheus-stack discovery: PromRule + ServiceMonitor require `release: prometheus-stack` label; PromRules live in `prometheus` ns (not workload ns).
+- On-prem doesn't have `app-namespaces` Kustomization (that's a production EKS-only name).
+
 ## 2026-06-18 PM
 
 ### Phase 1 Rook (worker disk add) — APPLIED to op-usxpress-dev
