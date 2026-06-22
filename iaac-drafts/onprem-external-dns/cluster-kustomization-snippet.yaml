@@ -1,0 +1,25 @@
+# Add to iaac-talos-flux-cluster/clusters/bm-dev/flux-system/infra.yaml
+# (paste as a NEW Kustomization block; do NOT replace existing entries).
+#
+# Dependency: external-secrets / pod-identity-webhook already up (IRSA path
+# needs to be functional). No hard dep on istio-ingress — external-dns watches
+# Gateway resources but degrades gracefully if none exist yet.
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-dns
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: pod-identity-webhook
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/external-dns
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s

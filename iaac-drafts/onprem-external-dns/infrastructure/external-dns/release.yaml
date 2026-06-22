@@ -1,0 +1,75 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: extd-usxpress-io
+  namespace: flux-system
+spec:
+  interval: 2m
+  timeout: 20m
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.20.0"   # pinned to match cloud (iaac-flux-manifests/apps/iaac-eks/...)
+      sourceRef:
+        kind: HelmRepository
+        name: kubernetes-sigs-github-io-external-dns
+      interval: 12h
+  maxHistory: 10
+  values:
+    # NOTE: on-prem workers are AMD64 with no `iaac` taint — cloud's nodeSelector
+    # (iaac=true, arch=arm64) and tolerations are intentionally omitted.
+    policy: sync
+    securityContext:
+      allowPrivilegeEscalation: false
+    serviceAccount:
+      annotations:
+        # Source role lives in USX-Dev (700736442855). Name MUST start with
+        # `extd-usxpress-io-` to match the existing wildcard trust on
+        # iaac-route53-zone in 155768531003 (no separate trust patch needed).
+        eks.amazonaws.com/role-arn: arn:aws:iam::700736442855:role/extd-usxpress-io-op-usxpress-dev
+      name: extd-usxpress-io
+    serviceMonitor:
+      enabled: true
+    sources:
+      - istio-gateway
+    domainFilters:
+      - usxpress.io
+    extraArgs:
+      # Same target role cloud uses. Trust already permits any role named
+      # `extd-usxpress-io-*` in the USXpress AWS Org — no patch needed.
+      - --aws-assume-role=arn:aws:iam::155768531003:role/iaac-route53-zone
+      - --dynamodb-region=us-east-2
+    registry: dynamodb
+    # Unique txtOwnerId so on-prem and cloud registry entries do NOT collide in
+    # the shared DynamoDB table. Cloud uses `iaac-eks/us-east-2/usxpress-dev`.
+    txtOwnerId: iaac-talos/us-east-2/op-usxpress-dev
+    triggerLoopOnEvent: true
+  releaseName: extd-usxpress-io
+  targetNamespace: external-dns
+  storageNamespace: external-dns
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    disableTakeOwnership: true
+    disableWait: false
+    disableWaitForJobs: false
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+      strategy: rollback
+      remediateLastFailure: true
+    disableTakeOwnership: true
+    disableWait: false
+    disableWaitForJobs: false
+  test:
+    enable: false
+  driftDetection:
+    mode: enabled
+    ignore:
+      - paths:
+          - /spec/replicas
+        target:
+          kind: Deployment

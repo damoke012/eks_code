@@ -1,0 +1,98 @@
+# Example workflow for usxpressinc/risingwave-poc — connect to Postgres + RW
+# using credentials from AWS Secrets Manager via GHA OIDC federation.
+#
+# Save as: .github/workflows/connect-rw-postgres.yaml in risingwave-poc on master.
+#
+# Trigger: manual (workflow_dispatch) for now. Could be on: push later if Tim
+# wants it to run on every commit to master.
+
+name: Connect to RW + Postgres (SM-backed credentials)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pg_query:
+        description: 'SQL to run against Postgres metadata store (optional)'
+        required: false
+        type: string
+        default: 'SELECT version();'
+      rw_query:
+        description: 'SQL to run against RisingWave (optional)'
+        required: false
+        type: string
+        default: 'SELECT 1;'
+
+# CRITICAL: id-token: write enables OIDC. Without it, AWS auth fails silently.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Federate to AWS via GitHub OIDC. The IAM role's trust policy permits
+      # only repo:usxpressinc/risingwave-poc:ref:refs/heads/master to assume.
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::700736442855:role/gha-op-usxpress-dev-risingwave-poc-secrets
+          aws-region: us-east-2
+
+      - name: Verify caller identity (sanity)
+        run: aws sts get-caller-identity
+
+      # Pull Postgres metadata-store credentials
+      - name: Pull Postgres credentials
+        id: pg
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id op-usxpress-dev/risingwave/postgres \
+            --query SecretString --output text)
+          PG_USER=$(echo "$SECRET_JSON" | jq -r .username)
+          PG_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+          echo "::add-mask::$PG_USER"
+          echo "::add-mask::$PG_PASS"
+          echo "user=$PG_USER" >> $GITHUB_OUTPUT
+          echo "pass=$PG_PASS" >> $GITHUB_OUTPUT
+
+      # Pull RisingWave root password
+      - name: Pull RisingWave root password
+        id: rw
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id op-usxpress-dev/risingwave/root \
+            --query SecretString --output text)
+          RW_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+          echo "::add-mask::$RW_PASS"
+          echo "pass=$RW_PASS" >> $GITHUB_OUTPUT
+
+      - name: Install psql client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      # Postgres metadata store query
+      # NOTE: this requires either VPN access from the runner (won't work on
+      # github-hosted runners reaching 10.10.82.x — those IPs are corp-only) or
+      # a self-hosted runner inside the corp network. Adjust accordingly.
+      - name: Query Postgres metadata store
+        env:
+          PGPASSWORD: ${{ steps.pg.outputs.pass }}
+        run: |
+          echo "=== Postgres metadata store ==="
+          psql -h <postgres-host-or-svc> -p 32546 \
+               -U "${{ steps.pg.outputs.user }}" \
+               -d postgres \
+               -c "${{ github.event.inputs.pg_query }}"
+
+      # RisingWave SQL query
+      - name: Query RisingWave
+        env:
+          PGPASSWORD: ${{ steps.rw.outputs.pass }}
+        run: |
+          echo "=== RisingWave ==="
+          psql -h <rw-host-or-worker-ip> -p 32567 \
+               -U root \
+               -d dev \
+               -c "${{ github.event.inputs.rw_query }}"
