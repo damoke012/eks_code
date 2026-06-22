@@ -1,14 +1,25 @@
+# PrometheusRule: rook-ceph health
+#
+# Covers ceph cluster health (warn/err), OSD up/down/full/flapping,
+# mon quorum + PVC disk-low, and PG active+clean convergence.
+#
+# kube-prometheus-stack selects PrometheusRule via ruleSelector.matchLabels:
+#   { release: prometheus-stack }
+# Same convention as etcd-cluster-health.yaml, platform-alerts.yaml.
+#
+# Refs: INFRA-1532 (closed), INFRA-1538 (parent IaC restructure).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: rook-ceph-health
-  namespace: rook-ceph
+  namespace: prometheus
   labels:
-    team: rook
-    track: storage
+    app.kubernetes.io/part-of: storage
+    release: prometheus-stack
 spec:
   groups:
     - name: rook-ceph.health
+      interval: 30s
       rules:
         - alert: CephClusterHealthWarn
           expr: ceph_health_status == 1
