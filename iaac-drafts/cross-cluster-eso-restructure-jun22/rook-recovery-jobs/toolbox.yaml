@@ -1,0 +1,73 @@
+# Rook-Ceph toolbox — always-on deployment
+#
+# IaC artifact, NOT a recovery template. Should be applied as part of normal
+# cluster bootstrap (Phase 9) and left running. Provides a usable ceph CLI
+# environment for ad-hoc diagnostics.
+#
+# Catalog correction: the operator pod does NOT have ceph CLI populated with
+# /etc/ceph/ceph.conf or admin keyring, so `kubectl exec deploy/rook-ceph-operator
+# -- ceph -s` fails with "RADOS object not found". The toolbox provides the
+# proper environment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rook-ceph-tools
+  namespace: rook-ceph
+  labels:
+    app: rook-ceph-tools
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rook-ceph-tools
+  template:
+    metadata:
+      labels:
+        app: rook-ceph-tools
+    spec:
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: rook-ceph-tools
+        image: quay.io/ceph/ceph:v18.2.4
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Build /etc/ceph/ceph.conf + keyring from env vars at pod start
+          cat <<CONF > /etc/ceph/ceph.conf
+          [global]
+          mon_host = $ROOK_CEPH_MON_HOST
+          [client.admin]
+          keyring = /etc/ceph/keyring
+          CONF
+          cat <<KEY > /etc/ceph/keyring
+          [client.admin]
+          key = $ROOK_CEPH_SECRET
+          KEY
+          chmod 600 /etc/ceph/keyring
+          # Stay alive
+          while true; do sleep 30; done
+        env:
+        - name: ROOK_CEPH_MON_HOST
+          valueFrom:
+            secretKeyRef:
+              name: rook-ceph-config
+              key: mon_host
+        - name: ROOK_CEPH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: rook-ceph-mon
+              key: ceph-secret
+        volumeMounts:
+        - mountPath: /etc/ceph
+          name: ceph-config
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: ceph-config
+        emptyDir: {}

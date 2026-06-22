@@ -131,8 +131,10 @@ gh pr create --base feature/op-usxpress-dev \
 | `ClusterSecretStore "default" is not ready` | [04-secrets-credentials/clustersecretstore-dns-dependency.md](04-secrets-credentials/clustersecretstore-dns-dependency.md) |
 | `failed to inject barrier ... unconnected worker node` (RW) | [04-secrets-credentials/rw-recovery-after-secret-sync.md](04-secrets-credentials/rw-recovery-after-secret-sync.md) |
 | Rook mons CrashLoopBackOff for hours | [02-storage/rook-mon-crashloop.md](02-storage/rook-mon-crashloop.md) |
-| Rook OSDs CrashLoop `handle_auth_bad_method`, no `rook-ceph-osd-X-keyring` secrets | [02-storage/rook-osd-keyring-missing.md](02-storage/rook-osd-keyring-missing.md) |
+| Rook OSDs CrashLoop `handle_auth_bad_method` (bluestore key ≠ mon auth key) | [02-storage/rook-osd-keyring-missing.md](02-storage/rook-osd-keyring-missing.md) |
+| Rook OSD `FAILED ceph_assert(info.history.same_interval_since != 0)` (PG peering after long downtime) | [02-storage/rook-osd-pg-peering-crash.md](02-storage/rook-osd-pg-peering-crash.md) |
 | Rook operator restart → `failed to schedule canary pod(s)`, mon-endpoints CM empty | [02-storage/rook-operator-restart-state-loss.md](02-storage/rook-operator-restart-state-loss.md) |
+| `external-secrets-config` blocked → `app-secrets` + `octopus-worker` cascade (Octopus-seeded CSS chicken-and-egg) | [04-secrets-credentials/external-secrets-config-cascade.md](04-secrets-credentials/external-secrets-config-cascade.md) |
 | ConfigMap stuck with `deletionTimestamp` + finalizer | [02-storage/stuck-finalizer-removal.md](02-storage/stuck-finalizer-removal.md) |
 | Pod stays Pending: `0/N nodes ... unschedulable` | [01-cluster-control-plane/cp-capacity-exhaustion.md](01-cluster-control-plane/cp-capacity-exhaustion.md) |
 | ExternalSecret stuck SecretSyncedError after outage | [04-secrets-credentials/externalsecret-stale-sync.md](04-secrets-credentials/externalsecret-stale-sync.md) |

@@ -1,0 +1,34 @@
+---
+# Grants the on-prem Octopus worker SA (system:serviceaccount:octopus:octopusworker)
+# the minimum perms to manage the cloud-eks-reader-token Secret in the
+# external-secrets ns. Used by the 'Seed Cross-Cluster ESO Token' runbook
+# (onprem-platform-bootstrap project in OnPremise Octopus space).
+#
+# Scope: secrets in external-secrets ns only. No other resources.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: octopus-worker-eso-token-seed
+  namespace: external-secrets
+  labels:
+    part-of: onprem-cross-cluster-bridge
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: octopus-worker-eso-token-seed
+  namespace: external-secrets
+  labels:
+    part-of: onprem-cross-cluster-bridge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: octopus-worker-eso-token-seed
+subjects:
+  - kind: ServiceAccount
+    name: octopusworker
+    namespace: octopus

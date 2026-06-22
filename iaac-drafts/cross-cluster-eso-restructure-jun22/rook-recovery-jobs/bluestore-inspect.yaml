@@ -1,0 +1,44 @@
+# Rook-Ceph bluestore label inspection template (READ-ONLY)
+#
+# Use when:
+#   - Diagnosing OSD auth issues (suspecting bluestore key vs mon auth key mismatch)
+#   - Per catalog entry 02-storage/rook-osd-keyring-missing.md
+#
+# Substitute <NODE> with the target worker hostname before apply.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bluestore-inspect-<NODE>
+  namespace: rook-ceph
+  labels:
+    app: rook-recovery
+    operation: bluestore-inspect
+spec:
+  nodeName: <NODE>
+  restartPolicy: Never
+  tolerations:
+  - operator: Exists
+  containers:
+  - name: inspect
+    image: quay.io/ceph/ceph:v18.2.4
+    command: ["sleep", "120"]   # Sleep so the user can exec into it
+    securityContext:
+      privileged: true            # Required for raw block device access
+    volumeMounts:
+    - name: dev
+      mountPath: /dev
+  volumes:
+  - name: dev
+    hostPath:
+      path: /dev
+# After apply:
+#   kubectl -n rook-ceph wait pod/bluestore-inspect-<NODE> --for=condition=Ready --timeout=30s
+#   kubectl -n rook-ceph exec bluestore-inspect-<NODE> -- ceph-bluestore-tool show-label --dev /dev/sdb
+#   kubectl -n rook-ceph delete pod bluestore-inspect-<NODE>
+#
+# Output fields of interest:
+#   - whoami        — which OSD ID lives on this disk
+#   - osd_key       — the cephx key stored in the bluestore label
+#   - osd_uuid      — the bluestore UUID
+#   - ceph_fsid     — the cluster fsid (should match `ceph fsid`)
+#   - btime         — when this OSD was prepared
