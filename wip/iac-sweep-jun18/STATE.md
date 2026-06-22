@@ -1,8 +1,23 @@
 # iac-sweep-jun18 — STATE
 
-**STATUS:** ACTIVE (Track 1.5 LIVE but image bug; Tracks 2/3 partial; Tracks 4/5 NEW)
-**Last updated:** 2026-06-19 ~02:30 AM (end of extended marathon — RW recovery + DNS fix + full IaC coverage doc)
+**STATUS:** Rook + ESO recovery COMPLETE (2026-06-22). Tracks 4/5 remaining + new IaC restructure (INFRA-1538, 4 PRs).
+**Last updated:** 2026-06-22 PM — Full recovery wrap, catalog + IaC drafts staged, INFRA-1535/1536/1537/1538 filed.
 **Owner:** Doke
+
+## Next session priorities (2026-06-23+)
+
+1. Pull tarballs on WSL (from public eks_code `transfer/rook-ceph-safe-reroll-jun17` branch)
+2. Open 4 PRs per `iaac-drafts/cross-cluster-eso-restructure-jun22/PR-PLAN.md`:
+   - PR-A iaac-talos-flux-platform op-dev (cross-cluster-eso split + recovery-jobs templates)
+   - PR-B iaac-talos-flux-cluster master (new Kustomization with wait: false)
+   - PR-C iaac-talos-flux-platform op-dev (toolbox always-on)
+   - PR-D iaac-talos feature/op-usxpress-dev (catalog: 3 entries + QA checklist)
+3. After PR-A/B merge: verify on-prem cluster keeps all Kustomizations Ready=True
+4. Tracks 4+5 (DNS PromRule, IRSA PromRule, Reloader, ES 5m refresh)
+5. Octopus TfApply=false housekeeping flip
+6. INFRA-1535 (Octopus runbook for cloud-eks token seed) — coordination with Vibin successor
+
+See `~/.claude/projects/-workspaces-eks-code/memory/session_state_jun22.md` for full context.
 
 ## Session 2026-06-19 AM additions (THIS SESSION)
 

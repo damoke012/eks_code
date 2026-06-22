@@ -118,3 +118,66 @@
 4. Codify which option worked as catalog update PR
 5. Move to Octopus TfApply=false flip
 6. Tracks 4+5 NEW PRs (DNS PromRule, IRSA PromRule, Reloader, ES 5m refresh)
+
+## 2026-06-22 — Rook + ESO recovery WRAPPED
+
+### Outcome (all green)
+
+- 7/7 Rook OSDs UP (since 3 days down)
+- 169 PGs active+clean
+- PVC smoke test against ceph-block: BOUND in 15s
+- All Flux Kustomizations Ready=True (`external-secrets-config`, `app-secrets`, `octopus-worker` were stuck for 32 days)
+- Tim's RisingWave unaffected throughout
+
+### Recovery sequence (now PROVEN + codified)
+
+1. **WSL kubeconfig fix** — stale .21 worker IP → VIP .50 via sed
+2. **external-secrets-config cascade** — removed orphan `geoenrichment-sync-handler-m-u` ExternalSecret (sole consumer of broken `cloud-eks` CSS). Kept Namespace + ConfigMap as pre-staging. PR merged on `iaac-talos-flux-platform op-dev`.
+3. **Rook OSD Option A.1** — `ceph auth import` aligning mon-recorded keys to bluestore label keys (all 7 OSDs).
+4. **Rook OSD Option B (for 6 of 7)** — `ceph osd out + purge` → delete Rook deploy + prepare job → wipe `/dev/sdb` via privileged pod → operator restart + Flux reconcile → fresh osd-prepare jobs ran in parallel → 6 new OSDs joined cluster. osd.4 kept as anchor.
+5. **Validation** — `ceph -s` shows 7 osds up, 7 in, 169 PGs active+clean.
+
+### Catalog updates (wip/onprem-troubleshooting/)
+
+- **REWRITTEN** `02-storage/rook-osd-keyring-missing.md` — PROVEN sequence (toolbox pre-req → Option A.1 → Option B)
+- **NEW** `02-storage/rook-osd-pg-peering-crash.md` — sis=0 assertion entry + Option B reference
+- **NEW** `04-secrets-credentials/external-secrets-config-cascade.md` — chicken-and-egg + Flux kstatus terminal-failure gotcha + structural IaC fix
+- **NEW** `QA-CLUSTER-BOOTSTRAP-CHECKLIST.md` — Phase 1..10 bootstrap order for QA + PROD; restore-from-disaster checklist
+- **UPDATED** README symptom index (3 new rows)
+
+### IaC restructure drafts (iaac-drafts/cross-cluster-eso-restructure-jun22/)
+
+- `cross-cluster-eso/` — new Kustomization payload (CSS + RBAC, wait: false target)
+- `external-secrets-config/` — trimmed to default CSS only
+- `rook-recovery-jobs/` — osd-wipe.yaml, bluestore-inspect.yaml, toolbox.yaml (steady-state) + README
+- `PR-PLAN.md` — 4-PR merge sequence: A (flux-platform split), B (flux-cluster add new Kustomization), C (toolbox always-on), D (catalog to iaac-talos)
+
+### INFRA tickets filed
+
+- INFRA-1532 (existing) — closure comment posted with recovery details
+- INFRA-1535 — OnPremise Octopus space + bootstrap runbook for cloud-eks token seed
+- INFRA-1536 — Mon PVC size increase + MonDiskLow PromRule (mons a,b at 21-27% available)
+- INFRA-1537 — pod-identity-webhook caBundle auto-refresh after CP rebuild
+- INFRA-1538 — IaC restructure parent ticket (4 PRs above)
+
+### Memory written
+
+- `session_state_jun22.md` (full day state)
+- `feedback_flux_kstatus_terminal_settled.md`
+- `feedback_rook_toolbox_for_ad_hoc_ceph_cli.md`
+- `feedback_bluestore_label_is_source_of_truth.md`
+- `feedback_sed_range_anchor_indent.md`
+- MEMORY.md index updated
+
+### Tarballs staged
+
+- `archive/transfer-tarballs/onprem-troubleshooting-2026-06-22.tar.gz` (61 KB) — catalog for iaac-talos
+- `archive/transfer-tarballs/cross-cluster-eso-restructure-jun22.tar.gz` (6 KB) — IaC drafts for flux-platform + flux-cluster
+
+### Pending (next session)
+
+- WSL pull tarballs + open 4 PRs per PR-PLAN.md
+- After PR-A/B merge: verify cross-cluster-eso Ready, all Kustomizations Ready
+- Once INFRA-1535's runbook is set up: restore geoenrichment ExternalSecret manifests
+- Mon disk monitoring + INFRA-1536 plan
+- pod-identity-webhook caBundle review (INFRA-1537)
