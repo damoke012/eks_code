@@ -1,0 +1,137 @@
+# etcd snapshot externalization to S3 — multi-container pattern.
+#
+# Why: Talos auto-snapshots etcd to /var/lib/etcd/snapshot.db on each CP, but if
+# all 3 CPs are destroyed (not just rebuilt — disaster scenario), those snapshots
+# are gone too. We externalize them to S3 every hour.
+#
+# How: initContainer runs talosctl etcd snapshot (distroless image, /talosctl
+# binary only). Main container runs aws s3 cp using the snapshot from a shared
+# emptyDir.
+#
+# Why multi-container (not single): the talosctl image (ghcr.io/siderolabs/...)
+# is distroless — no /bin/sh, no aws CLI, no shell tools. A wrapper shell script
+# fails at container init with "exec: /bin/sh: stat: no such file". Multi-
+# container splits the snapshot (talosctl) and upload (aws CLI) into separate
+# pods that share a workdir volume.
+#
+# Recovery: see catalog 01-cluster-control-plane/etcd-restore-from-snapshot.md
+# (write a follow-up entry once first real restore is exercised).
+#
+# Refs: INFRA-1541, INFRA-1547, onprem-safety skill Rule 4.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-snapshot-to-s3
+  namespace: etcd-backup
+  labels:
+    app.kubernetes.io/part-of: backup
+spec:
+  schedule: "17 * * * *"      # hourly at :17 (offset from common cron times)
+  concurrencyPolicy: Forbid    # don't overlap if previous still running
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600   # 10 min hard timeout
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: backup
+        spec:
+          serviceAccountName: etcd-backup
+          restartPolicy: OnFailure
+          # Pod-level securityContext satisfies restricted PSA for ALL containers
+          # (no need to repeat per-container).
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000              # makes shared emptyDir owned by GID 1000
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+          initContainers:
+            # Step 1: take etcd snapshot from a healthy CP into shared workdir.
+            - name: snapshot
+              image: ghcr.io/siderolabs/talosctl:v1.10.4    # match cluster Talos version
+              command:
+                - /talosctl
+                - --talosconfig=/etc/talos/config
+                - --endpoints=10.10.82.50
+                - --nodes=10.10.82.50
+                - etcd
+                - snapshot
+                - /work/snapshot.db
+              volumeMounts:
+                - name: talosconfig
+                  mountPath: /etc/talos
+                  readOnly: true
+                - name: workdir
+                  mountPath: /work
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits:   { cpu: 500m, memory: 256Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            # Step 2: upload the snapshot to S3 with a timestamped path.
+            - name: upload
+              image: amazon/aws-cli:2.17.0    # has bash + aws; AmazonLinux 2023 base
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  KEY="op-usxpress-dev/${TS}/snapshot.db"
+                  echo "Uploading /work/snapshot.db (size: $(stat -c%s /work/snapshot.db) bytes) to s3://${S3_BUCKET}/${KEY}..."
+                  aws s3 cp /work/snapshot.db "s3://${S3_BUCKET}/${KEY}"
+                  echo "Upload OK."
+              env:
+                - name: AWS_REGION
+                  value: us-east-2
+                - name: AWS_DEFAULT_REGION
+                  value: us-east-2
+                - name: S3_BUCKET
+                  value: etcd-snapshots-op-usxpress-dev
+                - name: HOME
+                  value: /tmp            # aws CLI needs writable HOME
+              volumeMounts:
+                - name: workdir
+                  mountPath: /work
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits:   { cpu: 500m, memory: 256Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: talosconfig
+              secret:
+                secretName: talosconfig
+                items:
+                  - key: config
+                    path: config
+                    mode: 0400
+            - name: workdir
+              emptyDir:
+                medium: Memory          # fast scratch; etcd snapshots are small
+                sizeLimit: 256Mi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
