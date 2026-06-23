@@ -1,0 +1,40 @@
+# Strategic merge patch — bump pod-identity-webhook to 2 replicas for HA.
+#
+# Default is 1 replica. If the single pod is restarting/down during a pod CREATE
+# (e.g., 2026-06-17 CP OOM cascade), the admission webhook fails open
+# (failurePolicy: Ignore default) and the new pod is created WITHOUT IRSA env
+# injection. The pod then crashloops forever — only fix is delete + recreate.
+#
+# 2 replicas: at least one is always available during rolling restart.
+#
+# Refs: catalog 04-secrets-credentials/pod-identity-webhook-stale-mutation.md
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod-identity-webhook
+  namespace: pod-identity-webhook
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0     # always keep at least 1 ready during rollout
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: pod-identity-webhook
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: pod-identity-webhook

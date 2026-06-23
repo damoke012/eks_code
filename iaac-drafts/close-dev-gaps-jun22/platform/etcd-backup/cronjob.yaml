@@ -1,0 +1,99 @@
+# etcd snapshot externalization to S3.
+#
+# Why: Talos auto-snapshots etcd to /var/lib/etcd/snapshot.db on each CP, but if
+# all 3 CPs are destroyed (not just rebuilt — disaster scenario), those snapshots
+# are gone too. We externalize them to S3 every hour.
+#
+# How: talosctl etcd snapshot <file> on a CP endpoint, then aws s3 cp to S3.
+# Retention: 30 days (bucket lifecycle policy in iaac-talos terraform).
+#
+# Recovery: see catalog 01-cluster-control-plane/etcd-restore-from-snapshot.md
+# (write a follow-up entry once Velero + etcd-backup are live).
+#
+# Refs: INFRA-1541, onprem-safety skill Rule 4.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: etcd-snapshot-to-s3
+  namespace: etcd-backup
+  labels:
+    app.kubernetes.io/part-of: backup
+spec:
+  schedule: "17 * * * *"      # hourly at :17 (offset from common cron times)
+  concurrencyPolicy: Forbid    # don't overlap if previous still running
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600   # 10 min hard timeout
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: backup
+        spec:
+          serviceAccountName: etcd-backup
+          restartPolicy: OnFailure
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+          containers:
+            - name: snapshot
+              image: ghcr.io/siderolabs/talosctl:v1.10.4    # match cluster Talos version
+              env:
+                - name: AWS_REGION
+                  value: us-east-2
+                - name: TALOSCONFIG
+                  value: /etc/talos/config
+                - name: CP_ENDPOINT
+                  value: "10.10.82.50"   # API VIP — talosctl will hit healthy CPs
+                - name: S3_BUCKET
+                  value: etcd-snapshots-op-usxpress-dev
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  OUT=/tmp/etcd-snapshot-${TS}.db
+                  echo "Taking etcd snapshot at ${TS} from ${CP_ENDPOINT}..."
+                  talosctl --talosconfig=/etc/talos/config \
+                           --endpoints=${CP_ENDPOINT} \
+                           --nodes=${CP_ENDPOINT} \
+                           etcd snapshot ${OUT}
+                  ls -la ${OUT}
+
+                  echo "Uploading to s3://${S3_BUCKET}/op-usxpress-dev/${TS}/snapshot.db ..."
+                  # Install awscli (small alpine + curl)
+                  apk add --no-cache aws-cli 2>/dev/null || true
+                  aws s3 cp ${OUT} s3://${S3_BUCKET}/op-usxpress-dev/${TS}/snapshot.db
+                  echo "Upload OK. Cleaning up local file."
+                  rm -f ${OUT}
+              volumeMounts:
+                - name: talosconfig
+                  mountPath: /etc/talos
+                  readOnly: true
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits:   { cpu: 500m, memory: 256Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false   # apk add needs / writable
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: talosconfig
+              secret:
+                secretName: talosconfig
+                items:
+                  - key: config
+                    path: config
+                    mode: 0400

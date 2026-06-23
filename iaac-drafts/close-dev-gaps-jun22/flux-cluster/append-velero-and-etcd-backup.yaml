@@ -1,0 +1,37 @@
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: velero
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/velero
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+  - name: external-secrets-config
+  - name: pod-identity-webhook
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: etcd-backup
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/etcd-backup
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: external-secrets-config
+  - name: pod-identity-webhook

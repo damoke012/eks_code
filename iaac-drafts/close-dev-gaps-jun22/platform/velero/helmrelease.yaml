@@ -1,0 +1,106 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: velero
+  namespace: velero
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: velero
+      version: "8.x"   # tracks vmware-tanzu/helm-charts latest 8.x
+      sourceRef:
+        kind: HelmRepository
+        name: vmware-tanzu
+        namespace: velero
+      interval: 24h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Image kept default (velero/velero); aws plugin pinned to current stable
+    image:
+      pullPolicy: IfNotPresent
+    initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.10.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - mountPath: /target
+            name: plugins
+    serviceAccount:
+      server:
+        create: false      # we manage SA above (with IRSA annotation)
+        name: velero
+    # IRSA via ServiceAccount annotation; no static creds.
+    credentials:
+      useSecret: false
+    # Backup storage: S3 in USX-Development. Bucket created by iaac-talos terraform.
+    configuration:
+      backupStorageLocation:
+        - name: default
+          provider: aws
+          bucket: velero-op-usxpress-dev
+          default: true
+          config:
+            region: us-east-2
+      volumeSnapshotLocation:
+        - name: default
+          provider: aws
+          config:
+            region: us-east-2
+      defaultVolumesToFsBackup: true   # use Kopia (file-system) backup for PVCs without snapshot class
+    # Schedule: daily full @ 02:00 UTC, retain 14 days
+    schedules:
+      daily-full:
+        disabled: false
+        schedule: "0 2 * * *"
+        useOwnerReferencesInBackup: false
+        template:
+          ttl: 336h     # 14 days
+          includedNamespaces:
+            - "*"
+          excludedNamespaces:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - flux-system     # Flux state is in git — restored by re-apply
+          snapshotVolumes: false
+          defaultVolumesToFsBackup: true
+    # Resource limits
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        additionalLabels:
+          release: prometheus-stack
+    # No CP placement
+    nodeSelector: {}
+    tolerations: []
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+    # Node agent (for Kopia file-system backups) — DaemonSet
+    deployNodeAgent: true
+    nodeAgent:
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits:   { cpu: 500m, memory: 1Gi }
+      tolerations: []
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
