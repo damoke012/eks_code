@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: risingwave-2
+resources:
+- serviceaccount.yaml
+- pg-externalsecret.yaml
+- postgres-helmrelease.yaml
+- prometheus-helmrelease.yaml
+- operator-helmrelease.yaml
+- clusterrole-supplemental.yaml
+- risingwave-cr.yaml
+- frontend-ext.yaml
+- dashboard-ext.yaml
+- helmrepositories.yaml
+- namespace.yaml
+- rw-root-bootstrap-job.yaml
+- rw-license-key.yaml
+- rw2-sql-frontend-cert.yaml
+- ghostunnel-rw2-sql.yaml
+- cnp-only-from-gateway-or-intrans.yaml
+patches:
+- target:
+    kind: HelmRelease
+    name: risingwave-operator
+  patch: "- op: replace\n  path: /metadata/namespace\n  value: risingwave-2-operator-system\n"
