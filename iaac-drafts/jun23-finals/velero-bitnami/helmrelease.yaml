@@ -1,0 +1,107 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: velero
+  namespace: velero
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: velero
+      version: "8.x"
+      sourceRef:
+        kind: HelmRepository
+        name: vmware-tanzu
+        namespace: velero
+      interval: 24h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    image:
+      pullPolicy: IfNotPresent
+    # Fix for 2025 bitnami legacy migration — chart's CRD-upgrade Helm hook
+    # uses kubectl image from bitnami/* which 404s on versioned tags. Pin to
+    # bitnamilegacy/* per memory [feedback_bitnami_legacy_migration].
+    kubectl:
+      image:
+        repository: docker.io/bitnamilegacy/kubectl
+        tag: "1.32"
+        pullPolicy: IfNotPresent
+    initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.10.0
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - mountPath: /target
+            name: plugins
+    serviceAccount:
+      server:
+        create: false
+        name: velero
+    credentials:
+      useSecret: false
+    configuration:
+      backupStorageLocation:
+        - name: default
+          provider: aws
+          bucket: velero-op-usxpress-dev
+          default: true
+          config:
+            region: us-east-2
+      volumeSnapshotLocation:
+        - name: default
+          provider: aws
+          config:
+            region: us-east-2
+      defaultVolumesToFsBackup: true
+    schedules:
+      daily-full:
+        disabled: false
+        schedule: "0 2 * * *"
+        useOwnerReferencesInBackup: false
+        template:
+          ttl: 336h
+          includedNamespaces:
+            - "*"
+          excludedNamespaces:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - flux-system
+          snapshotVolumes: false
+          defaultVolumesToFsBackup: true
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 1000m, memory: 1Gi }
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        additionalLabels:
+          release: prometheus-stack
+    nodeSelector: {}
+    tolerations: []
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+    deployNodeAgent: true
+    nodeAgent:
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits:   { cpu: 500m, memory: 1Gi }
+      tolerations: []
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
