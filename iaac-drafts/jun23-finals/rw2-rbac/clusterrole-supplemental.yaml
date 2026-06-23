@@ -1,0 +1,54 @@
+# Supplemental ClusterRole for risingwave-operator.
+#
+# The risingwave-operator Helm chart (v0.1.35+) installs ClusterRoles
+# `risingwave-operator` + `risingwave-operator-proxy` but does NOT include
+# cluster-scoped configmaps list/watch. The operator's controller-runtime
+# uses a "meta-pod-role-labeler" controller which needs to list configmaps
+# at cluster scope. Without this permission, operator crashlooops on:
+#
+#   ERROR controller-runtime.cache.UnhandledError Failed to watch:
+#   configmaps is forbidden: User "system:serviceaccount:risingwave-2:risingwave-operator"
+#   cannot list resource "configmaps" in API group "" at the cluster scope
+#
+# We supplement the chart's ClusterRoles with a separate ClusterRole + binding
+# that grants the missing perms. The chart's RBAC stays untouched (no chart
+# patches required); the supplemental is owned by IaC for this repo.
+#
+# Refs:
+#   - Catalog: 04-secrets-credentials/risingwave-operator-configmap-rbac.md (TBD)
+#   - Upstream issue: file with risingwavelabs/risingwave-operator chart maintainers
+#   - Caught: 2026-06-22 LATE PM during rw-2 IRSA recovery investigation;
+#             only manifested as crashlooping operator AFTER the pod-identity-webhook
+#             rolled (which restarted the operator, triggering cache resync).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: risingwave-operator-supplemental
+  labels:
+    app.kubernetes.io/part-of: risingwave-operator
+    app.kubernetes.io/managed-by: flux
+rules:
+  # Cluster-scoped configmaps for meta-pod-role-labeler controller
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Cluster-scoped pods — controller-runtime caches need cluster-wide pod observation
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: risingwave-operator-supplemental
+  labels:
+    app.kubernetes.io/part-of: risingwave-operator
+    app.kubernetes.io/managed-by: flux
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: risingwave-operator-supplemental
+subjects:
+  - kind: ServiceAccount
+    name: risingwave-operator
+    namespace: risingwave-2
