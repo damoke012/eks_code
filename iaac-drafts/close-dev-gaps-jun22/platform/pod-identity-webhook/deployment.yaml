@@ -1,0 +1,68 @@
+# pod-identity-webhook Deployment — HA (2 replicas).
+#
+# Replicas bumped 1 -> 2 + RollingUpdate maxUnavailable=0 + podAntiAffinity to
+# avoid both pods on same node. Reason: webhook is a critical admission path
+# for IRSA injection. If single replica is restarting/down when a pod is
+# created, the pod is created WITHOUT IRSA env (failurePolicy: Ignore default)
+# and crashloops forever — only fix is delete+recreate the pod.
+#
+# Refs: catalog 04-secrets-credentials/pod-identity-webhook-stale-mutation.md
+#       INFRA-1537 (caBundle auto-rotation, already done)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod-identity-webhook
+  namespace: pod-identity-webhook
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: pod-identity-webhook
+  template:
+    metadata:
+      labels:
+        app: pod-identity-webhook
+    spec:
+      serviceAccountName: pod-identity-webhook
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: pod-identity-webhook
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      containers:
+        - name: pod-identity-webhook
+          image: public.ecr.aws/eks/amazon-eks-pod-identity-webhook:latest
+          imagePullPolicy: Always
+          command:
+            - /webhook
+            - --in-cluster=false
+            - --namespace=pod-identity-webhook
+            - --service-name=pod-identity-webhook
+            - --annotation-prefix=eks.amazonaws.com
+            - --token-audience=sts.amazonaws.com
+            - --tls-cert=/etc/webhook/certs/tls.crt
+            - --tls-key=/etc/webhook/certs/tls.key
+            - --logtostderr
+          volumeMounts:
+            - name: cert
+              mountPath: "/etc/webhook/certs"
+              readOnly: true
+      volumes:
+        - name: cert
+          secret:
+            secretName: pod-identity-webhook-cert
