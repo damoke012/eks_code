@@ -87,6 +87,21 @@ The legacy `bm-dev` directory stays as-is. Renaming it now would force a
 GitRepository re-bootstrap and break Flux's inventory tracking for every
 Kustomization on the live cluster. Cost > benefit.
 
+### Existing cluster directories under `clusters/`
+
+The repo currently contains four directories alongside `bm-dev`:
+
+| Directory          | Status   | Notes |
+| ------------------ | -------- | ----- |
+| `clusters/bm-dev/` | **Live** | Reconciled against the op-usxpress-dev cluster. The only directory that should receive changes. |
+| `clusters/dpl/`    | **Dead** | Historical first-iteration cluster, no longer reconciled. Kept for git history only — do not edit. |
+| `clusters/dpl2/`   | **Dead** | Predecessor of the current cluster. Destroyed. **Do NOT reference `dpl2` as a live cluster anywhere** — it is gone. Kept for git history only. |
+| `clusters/dpl2.bak/` | **Dead** | Snapshot of `dpl2` taken before destruction. Kept for git history only. |
+
+A future cleanup may delete `dpl/`, `dpl2/`, and `dpl2.bak/` once the team
+agrees the git history is sufficient and there is no need to re-read those
+manifests for reference purposes.
+
 ---
 
 ## How Flux reads this repo

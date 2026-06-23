@@ -30,32 +30,47 @@ Other AWS accounts referenced (for cross-account IAM, ECR pulls, playground expe
 
 ---
 
-## Repo layout
+## Components
 
-```
+| Component          | Description                                                                           |
+|--------------------|---------------------------------------------------------------------------------------|
+| vSphere VM         | Provisions control plane and worker nodes using a Talos OVA                           |
+| Talos              | Installs and configures Talos OS and bootstraps the Kubernetes cluster                |
+| Cilium             | CNI install via Helm; kube-proxy replacement; Hubble; L2 announcement of API VIP      |
+| Flux               | Bootstraps Flux against the two GitOps repos (cluster + platform)                     |
+| IRSA               | OIDC provider + per-workload IAM roles + S3 buckets for in-cluster workloads          |
+| Terraform Modules  | Modular design for flexible infrastructure and deployment                             |
+
+---
+
+## Project structure
+
+```text
 .
-├── modules/
-│   ├── cilium/                          # Cilium CNI (Helm release + Hubble)
-│   ├── flux/                            # Flux bootstrap into the platform repos
-│   ├── irsa/                            # OIDC provider + per-workload IAM roles + buckets
-│   ├── talos/                           # Talos machine config + bootstrap + kubeconfig
-│   └── vsphere_vm/                      # vSphere VM cloning for CP + worker pools
 ├── deploy/
 │   ├── terraform/
-│   │   ├── main.tf                      # Module composition for the active cluster
-│   │   ├── variables.tf                 # cluster_name, node IPs, Talos version, AWS accounts
-│   │   ├── providers.tf                 # aws, vsphere, talos, kubernetes, helm, flux
-│   │   ├── backend.tf                   # S3 backend (lazy-tf-state-65v583i6my68y6x9)
-│   │   ├── outputs.tf                   # kubeconfig path, role ARNs, bucket names
-│   │   ├── irsa.tf                      # Velero + etcd-backup IRSA wiring (PR #44)
-│   │   └── talosconfig-secret-import.tf # SM secret wrapper + declarative import block (PR #48/#49)
+│   │   ├── main.tf                        # Module composition for the active cluster
+│   │   ├── variables.tf                   # cluster_name, node IPs, Talos version, AWS accounts
+│   │   ├── providers.tf                   # aws, vsphere, talos, kubernetes, helm, flux
+│   │   ├── outputs.tf                     # kubeconfig path, role ARNs, bucket names, IPs
+│   │   ├── risingwave-2-imports.tf        # RW-2 S3 bucket + IAM role adoption (root-module imports)
+│   │   ├── talosconfig-secret-import.tf   # SM secret wrapper + declarative ARN-based import
+│   │   └── modules/
+│   │       ├── cilium/                    # Cilium CNI (Helm release + Hubble)
+│   │       ├── flux/                      # Flux bootstrap into the platform repos
+│   │       ├── irsa/                      # OIDC provider + per-workload IAM roles + buckets
+│   │       ├── talos/                     # Talos machine config + bootstrap + kubeconfig
+│   │       └── vsphere_vm/                # vSphere VM cloning for CP + worker pools
 │   └── docs/
-│       ├── troubleshooting/             # Catalog entries (one per incident class)
-│       │   ├── README.md                # Index
+│       ├── troubleshooting/               # Catalog entries (one per incident class)
+│       │   ├── README.md                  # Index
 │       │   └── runbooks/
 │       │       └── flux-bootstrap-from-scratch.md
-│       └── architecture/                # Topology + decision records
-└── README.md                            # this file
+│       └── architecture/                  # Topology + decision records
+├── octopus/                               # Operational Python + shell scripts (see below)
+├── .github/                               # CI workflows
+├── deploy.ps1                             # Legacy local-driver shim (kept for break-glass)
+└── README.md                              # this file
 ```
 
 ---
@@ -110,6 +125,78 @@ Clones VMs from a Talos OS image template in vSphere. Pool definitions for contr
 
 ---
 
+## Requirements
+
+* Terraform `>= 1.3`
+
+* Providers:
+
+    * `vmware/vsphere >= 2.1.1`
+
+    * `siderolabs/talos >= 0.8.0`
+
+    * `hashicorp/aws` (for IRSA, S3, Secrets Manager)
+
+    * `fluxcd/flux` (for the bootstrap module)
+
+    * `hashicorp/kubernetes`, `hashicorp/helm`
+
+* vSphere Environment Prerequisites
+
+    * A Content Library hosting a valid Talos OVA
+
+    * Configured network, datastore, and compute cluster
+
+* AWS Environment Prerequisites
+
+    * CloudFront distribution fronting the OIDC public bucket (provisioned by CDN team ahead of TF apply)
+
+    * S3 backend bucket in the per-cluster account
+
+---
+
+## Configuration
+
+Define variables in a `terraform.tfvars` file or pass them via CLI/environment variables. Under Octopus, these are populated from project + library variables — laptop tfvars are for break-glass only.
+
+### vSphere Settings
+
+| Variable                    | Description                        |
+|-----------------------------|------------------------------------|
+| `vsphere_user`              | vSphere username                   |
+| `vsphere_password`          | vSphere password                   |
+| `vsphere_server`            | vSphere server address             |
+| `datacenter`                | Name of the vSphere datacenter     |
+| `datastore`                 | Datastore for VM storage           |
+| `vm_cluster_name`           | vSphere compute cluster name       |
+| `vm_folder`                 | Folder path for VMs (within DC)    |
+| `network_name`              | Network to attach VM NICs          |
+| `content_library_name`      | Name of the content library        |
+| `content_library_item_name` | Name of the Talos OVA image        |
+
+### Cluster Configuration
+
+| Variable                      | Description                                |
+|-------------------------------|--------------------------------------------|
+| `cluster_name`                | Talos Kubernetes cluster name              |
+| `control_plane_vip`           | VIP for control-plane API endpoint         |
+| `endpoint`                    | Full Kubernetes API endpoint (e.g., `https://192.168.1.100:6443`) |
+| `talos_version`               | Talos OS version to deploy                 |
+
+### Node Settings
+
+| Variable                      | Description                                |
+|-------------------------------|--------------------------------------------|
+| `control_plane_count`         | Number of control-plane nodes              |
+| `worker_count`                | Number of worker nodes                     |
+| `control_plane_name_prefix`   | Prefix for control-plane VM names          |
+| `worker_name_prefix`          | Prefix for worker VM names                 |
+| `cp_cpus`, `cp_memory_mb`     | vCPU and RAM for control-plane VMs         |
+| `worker_cpus`, `worker_memory_mb` | vCPU and RAM for worker VMs            |
+| `disk_size_gb`                | Root disk size in GB for all VMs           |
+
+---
+
 ## Branch model
 
 - **Working branch per cluster:** `feature/op-usxpress-dev`, `feature/op-usxpress-qa`, `feature/op-usxpress-prod`. All in-flight work for that cluster is committed there.
@@ -138,11 +225,36 @@ Rules:
 
 ---
 
+## Octopus operational scripts
+
+The `octopus/` directory holds the Python + shell automation that drives the Octopus side of the contract — project setup, channel + library variable management, cross-cluster ESO wiring, and per-app onboarding. These run from an operator workstation against the Octopus API; they are not invoked by Terraform.
+
+| Script                                  | Purpose                                                                                       |
+|-----------------------------------------|-----------------------------------------------------------------------------------------------|
+| `octopus/apply.py`                      | Driver that applies a desired-state config to an Octopus space (idempotent, dry-run capable). |
+| `octopus/onboard-app.py`                | Bootstraps an app into Octopus: project, channels, deploy targets, library var sets.          |
+| `octopus/mirror-release.py`             | Copies a release from one Octopus space/env to another (cloud→on-prem mirror).                |
+| `octopus/bento-import.py`               | Imports a bento manifest (bundled config + variables) into a project.                         |
+| `octopus/create-cross-cluster-eso-runbook.py` | Generates the cross-cluster-eso bootstrap runbook for a new app from a template.        |
+| `octopus/patch-channels.py`             | Bulk-patches release channels across projects (lifecycle, version rules).                     |
+| `octopus/patch-library-vars.py`         | Bulk-patches library variable sets (e.g. rotating shared secrets references).                 |
+| `octopus/patch-package-feeds.py`        | Repoints package feeds (e.g. ECR account swap, mirror swap).                                  |
+| `octopus/patch-setup-variables.py`      | Patches per-project setup variables that drive the bootstrap steps.                           |
+| `octopus/ensure-cluster-secrets.sh`     | Idempotent seeder for the cluster-secrets pattern (k8s + SM).                                 |
+| `octopus/apply-bootstrap-perms.sh`      | Applies the bootstrap RBAC required for Octopus to deploy into a new namespace.               |
+| `octopus/onprem-development.yaml`       | Desired-state file for the OnPremise Development environment (consumed by `apply.py`).        |
+| `octopus/cross-cluster-eso/configure-tentacle.yaml` | Tentacle target config for the cross-cluster-eso bridge worker.                   |
+| `octopus/revert-*` scripts              | Inverse operations for each `patch-*` script — pin-and-revert workflow for risky changes.     |
+
+Convention: every `patch-*` script ships with a `revert-*` sibling so a wrong bulk change is reversible without database surgery. Do not write a new `patch-*` script without the matching `revert-*`.
+
+---
+
 ## Recent additions — jun23 marathon
 
 The 2026-06-23 push (INFRA-1544 umbrella) added three Terraform-side changes plus catalog content. All of it lives in `deploy/terraform/` + `deploy/docs/`.
 
-### PR #44 — IRSA roles + S3 buckets for Velero and etcd-backup
+### IRSA roles + S3 buckets for Velero and etcd-backup (PR #44)
 
 Two new in-cluster workloads gained AWS-side identity:
 
@@ -151,11 +263,11 @@ Two new in-cluster workloads gained AWS-side identity:
 
 Both roles use `AssumeRoleWithWebIdentity` against the cluster OIDC provider (`aws_iam_openid_connect_provider.irsa.arn`), with trust scoped to the workload's ServiceAccount via `var.cluster_name` substitution. Both bucket names are `<workload>-${var.cluster_name}` so QA + prod will land with distinct, non-colliding names without code changes.
 
-Wiring shape in `deploy/terraform/irsa.tf`:
+Wiring shape in `deploy/terraform/` (calls the `modules/irsa` source):
 
 ```hcl
 module "velero_irsa" {
-  source          = "../../modules/irsa"
+  source          = "./modules/irsa"
   cluster_name    = var.cluster_name
   namespace       = "velero"
   service_account = "velero"
@@ -164,7 +276,7 @@ module "velero_irsa" {
 }
 
 module "etcd_backup_irsa" {
-  source          = "../../modules/irsa"
+  source          = "./modules/irsa"
   cluster_name    = var.cluster_name
   namespace       = "etcd-backup"
   service_account = "etcd-backup"
@@ -173,7 +285,7 @@ module "etcd_backup_irsa" {
 }
 ```
 
-### PR #48 + PR #49 — Talosconfig AWS Secrets Manager wrapper
+### Talosconfig AWS Secrets Manager wrapper (PR #48 + PR #49)
 
 The talosconfig (the credential file `talosctl` uses to authenticate to the API on every node) is sensitive and must be retrievable by the platform — but it is **operator-seeded**, not Terraform-managed.
 
@@ -235,13 +347,34 @@ aws secretsmanager put-secret-value \
   --secret-string file://talosconfig
 ```
 
-### PR #45 — Troubleshooting catalog + first runbook
+### Troubleshooting catalog + first runbook (PR #45)
 
 Six catalog entries shipped to `deploy/docs/troubleshooting/` covering recurring incident classes, plus one full runbook:
 
 - `deploy/docs/troubleshooting/runbooks/flux-bootstrap-from-scratch.md` — step-by-step rebuild of the Flux bootstrap when the cluster has lost its Flux state but the cluster itself is healthy.
 
 The catalog is now the canonical home for on-prem troubleshooting (previously scattered across wip notes). Future entries go here.
+
+---
+
+## Other root-module imports
+
+Beyond the talosconfig adoption, the root module also adopts the RisingWave-2 (RW-2) AWS-side resources that were originally created by hand during the RW-2 bring-up. The adoption uses the same declarative `import` block pattern.
+
+### `deploy/terraform/risingwave-2-imports.tf`
+
+Adopts:
+
+- **S3 bucket** `risingwave-data-op-usxpress-dev` — RW-2 hummock state store + checkpoint storage (us-east-2, USX-Dev account).
+- **IAM role** `op-usxpress-dev-risingwave-2` — IRSA role for the RW-2 ServiceAccount; trust policy keyed on the same cluster OIDC provider as Velero + etcd-backup.
+
+Pattern parallel to `talosconfig-secret-import.tf`:
+
+- The resource definition lives in the root module so the `import` block can resolve.
+- `lifecycle.ignore_changes` is set on the bucket's `versioning` + tagging blocks where the RW-2 operator (not TF) is the source of truth.
+- For a new cluster, if no pre-existing RW-2 resources exist, **remove the `import` block** before first apply and let TF create the resources fresh. The downstream RW-2 HelmRelease in `iaac-risingwave-2` will pick them up by name (the names are derived from `var.cluster_name`).
+
+Adopt-only-once principle: once the resources are in TF state, the `import` block is a no-op on subsequent applies but is kept in source to document provenance.
 
 ---
 
@@ -253,18 +386,19 @@ To stand up `op-usxpress-qa` or `op-usxpress-prod` (or any future cluster) from 
 2. **Set `var.cluster_name`** in `deploy/terraform/variables.tf` (or per-environment tfvars) to the new cluster name. Every IRSA role + bucket name + SM secret name flows from this.
 3. **Point the AWS provider at the right account.** Update `providers.tf` so the `default` aws provider targets the per-cluster account (USX-QA `527101283767`, USX-Prod `937464026810`). Cross-account roles for ECR pulls + cross-cluster ESO stay on their existing aliased providers.
 4. **Set the OIDC issuer URL.** The CloudFront distribution that fronts the OIDC bucket must be provisioned ahead of TF apply (separate request to the CDN team) and the issuer URL recorded in the per-environment tfvars. The IRSA module wires this into the OIDC provider resource.
-5. **Update the S3 backend.** Point `backend.tf` at the per-account state bucket. Do not share `lazy-tf-state-65v583i6my68y6x9` across accounts.
+5. **Update the S3 backend.** Point the backend config at the per-account state bucket. Do not share `lazy-tf-state-65v583i6my68y6x9` across accounts.
 6. **REMOVE the talosconfig `import` block** in `deploy/terraform/talosconfig-secret-import.tf` — there is no existing SM secret to adopt. Let TF create the wrapper fresh. After the first apply, run `aws secretsmanager put-secret-value` to seed the value, then re-add the `import` block ONLY if you later need to re-adopt (typically you won't).
-7. **Provision vSphere prerequisites:** Talos OS template in the right vSphere folder, DHCP reservations for the planned node IPs, VLAN reachable from the worker network.
-8. **First apply via Octopus** with the `TfApply` ceremony above. The first apply will:
+7. **REMOVE the RW-2 `import` blocks** in `deploy/terraform/risingwave-2-imports.tf` if QA/prod RW-2 has not been hand-provisioned. Same logic as #6 — let TF create the bucket + role fresh.
+8. **Provision vSphere prerequisites:** Talos OS template in the right vSphere folder, DHCP reservations for the planned node IPs, VLAN reachable from the worker network.
+9. **First apply via Octopus** with the `TfApply` ceremony above. The first apply will:
    - Clone the VMs
    - Generate + apply Talos config + bootstrap the cluster
    - Install Cilium
-   - Create the OIDC provider + IRSA roles + S3 buckets
+   - Create the OIDC provider + IRSA roles + S3 buckets (Velero, etcd-backup, RW-2)
    - Create the talosconfig SM wrapper (empty)
    - Bootstrap Flux against the two GitOps repos
-9. **Seed the talosconfig SM value** out-of-band.
-10. **Re-add the `import` block** to `talosconfig-secret-import.tf` referencing the now-known ARN, if you want future re-applies to be idempotent in the event of state loss. Optional but recommended.
+10. **Seed the talosconfig SM value** out-of-band.
+11. **Re-add the `import` blocks** referencing the now-known ARNs if you want future re-applies to be idempotent in the event of state loss. Optional but recommended.
 
 ---
 
@@ -353,6 +487,21 @@ The 2026-06-17 CP OOM cascade was resolved via exactly this path: pull tfstate, 
 
 ---
 
+## Outputs
+
+| Output              | Description                                             |
+| ------------------- | ------------------------------------------------------- |
+| `control_plane_ips` | IP addresses of control-plane nodes                     |
+| `worker_ips`        | IP addresses of worker nodes                            |
+| `kubeconfig`        | Raw Kubeconfig to access the cluster (sensitive)        |
+| `oidc_issuer_url`   | Public OIDC issuer URL (CloudFront-fronted) for IRSA    |
+| `velero_role_arn`   | IAM role ARN for the Velero ServiceAccount              |
+| `etcd_backup_role_arn` | IAM role ARN for the etcd-backup ServiceAccount      |
+| `velero_bucket`     | S3 bucket name for Velero backups                       |
+| `etcd_snapshot_bucket` | S3 bucket name for etcd snapshot archive             |
+
+---
+
 ## Operational runbooks
 
 - `deploy/docs/troubleshooting/` — catalog of recurring failure modes. One entry per class, each with symptoms, RCA, and fix. Six entries shipped in PR #45 (jun23); add to it as new patterns emerge.
@@ -363,11 +512,31 @@ When adding a new troubleshooting entry: copy an existing file as a template, gi
 
 ---
 
+## Cleanup
+
+`terraform destroy` against an on-prem cluster is a **destructive, multi-system operation** — it deletes vSphere VMs, drops IAM roles + S3 buckets in AWS, and tears down the OIDC provider that all in-cluster workloads depend on. **Do not run it casually.**
+
+Rules:
+
+- Destroy is gated by the same Octopus `TfApply` ceremony as apply. There is no separate `TfDestroy` toggle; the deployment process must explicitly run `terraform destroy` and the operator must confirm.
+- **Never destroy `op-usxpress-dev` while RW-2 or any other tenant workload is live on it.** Coordinate with the workload owner (Tim for RW, Idris for Phase 1 RW) first.
+- The talosconfig SM secret has `recovery_window_in_days = 7` — a destroy will schedule it for deletion, not delete it immediately. To recover, run `aws secretsmanager restore-secret` within the window.
+- For sandbox-only clusters, the local break-glass form is:
+
+  ```bash
+  cd deploy/terraform
+  terraform destroy -var-file=<env>.tfvars
+  ```
+
+  Even this should only be done with explicit team sign-off.
+
+---
+
 ## Common gotchas
 
 ### TF import blocks must be in the root module
 
-`import` blocks only resolve from the root module. An `import` block inside `modules/irsa` will be silently ignored and TF will try to create the resource fresh, conflicting with the existing one. The talosconfig SM wrapper import lives in `deploy/terraform/talosconfig-secret-import.tf` for exactly this reason — do not move it under a module.
+`import` blocks only resolve from the root module. An `import` block inside `modules/irsa` will be silently ignored and TF will try to create the resource fresh, conflicting with the existing one. The talosconfig SM wrapper import lives in `deploy/terraform/talosconfig-secret-import.tf`, and the RW-2 imports live in `deploy/terraform/risingwave-2-imports.tf`, for exactly this reason — do not move them under a module.
 
 ### S3 bucket tag values reject characters that IAM tag values accept
 
@@ -387,7 +556,7 @@ The official `ghcr.io/siderolabs/talosctl` image has no `/bin/sh`. CronJobs that
 
 ### `aws secretsmanager` import wants the full ARN
 
-See the talosconfig section above. `describe-secret --query ARN` is the only reliable way to get the suffix.
+See the talosconfig section above. `describe-secret --query ARN` is the only reliable way to get the suffix. Same constraint applies to any future SM-secret adoption (RW-2 credentials, future ESO source secrets, etc.).
 
 ### Velero Kopia needs `AWS_REGION`
 
@@ -403,7 +572,8 @@ When recovering Rook-Ceph OSDs after a node rebuild, the bluestore label on the 
 
 - **`variant-inc/iaac-talos-flux-cluster`** — cluster-level Flux resources. Branch `master`, cluster path `clusters/bm-dev/` for `op-usxpress-dev`. This repo's `modules/flux` bootstraps the cluster against this repo.
 - **`variant-inc/iaac-talos-flux-platform`** — platform workloads (Cilium upgrades, cert-manager, ESO, Rook-Ceph, Istio gateway, Velero HelmRelease, monitoring stack, Reloader, network policies). Branch `op-dev`, infrastructure path `infrastructure/<name>/`. **PRs against this repo MUST base on `op-dev`, not `main`.**
-- **`variant-inc/iaac-risingwave-2`** — RW-2 tenant application repo. Flux-synced from branch `main`. The cluster bringup here provisions the namespace + IRSA pre-reqs; RW-2 owns its own HelmReleases.
+- **`variant-inc/iaac-risingwave-2`** — RW-2 tenant application repo. Flux-synced from branch `main`. The cluster bringup here provisions the namespace + IRSA pre-reqs (`risingwave-2-imports.tf`); RW-2 owns its own HelmReleases.
+- **`variant-inc/iaac-risingwave-onprem`** — Tim's RW deployment repo (namespace `risingwave`). Flux-synced from `main`. Shares the on-prem cluster with RW-2 but lifecycle is independent.
 - **`variant-inc/iaac-octopus-onprem`** — Octopus deploy targets, projects, and variables for the on-prem clusters. The `TfApply` variable described above is defined here. Owns the Octopus side of the contract; this repo owns the Terraform side.
 
 ---
@@ -428,3 +598,14 @@ The 2026-06-23 marathon is tracked under **INFRA-1544** (umbrella). Child tasks 
 - **INFRA-1557** — TF state cross-region replication (external blocker: cloud-ops)
 
 External blockers carried forward past jun23: **INFRA-1545** (Tim), **INFRA-1535 / INFRA-1543** (Octopus admin), **INFRA-1557** (cross-region state, cloud-ops).
+
+---
+
+## References
+
+* [Talos Docs](https://www.talos.dev/latest/)
+* [Terraform vSphere Provider](https://registry.terraform.io/providers/vmware/vsphere/latest/docs)
+* [Terraform Talos Provider](https://registry.terraform.io/providers/siderolabs/talos/latest/docs)
+* [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+* [Cilium L2 Announcements](https://docs.cilium.io/en/stable/network/l2-announcements/)
+* [Flux Bootstrap](https://fluxcd.io/flux/installation/bootstrap/)
