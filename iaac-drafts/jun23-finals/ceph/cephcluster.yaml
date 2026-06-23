@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────────────────
+# CephCluster — raw mode OSDs on /dev/sdb (per worker), WORKER-ONLY placement.
+#
+# Resource sizing (post 2026-06-23 mgr OOM incident):
+#   - mon: 100m/256Mi req, 500m/512Mi limit
+#   - mgr: 200m/1Gi req, 1000m/2Gi limit   (bumped from 256Mi/512Mi — was OOMKilling)
+#   - osd: 250m/1Gi req, 1000m/2Gi limit
+#
+# All daemons explicitly excluded from CP nodes via nodeAffinity.
+# Mon PVCs: 20Gi (bumped from 10Gi per INFRA-1536 to avoid disk-low warnings).
+#
+# monitoring.enabled INTENTIONALLY OMITTED — we deploy the ServiceMonitor for
+# rook-ceph-mgr ourselves (infrastructure/rook-ceph-cluster/servicemonitor.yaml).
+# ─────────────────────────────────────────────────────────────────────────
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: rook-ceph
+  namespace: rook-ceph
+spec:
+  cephVersion:
+    image: quay.io/ceph/ceph:v18.2.4
+    allowUnsupported: false
+  dataDirHostPath: /var/lib/rook
+  skipUpgradeChecks: false
+  continueUpgradeAfterChecksEvenIfNotHealthy: false
+  mon:
+    count: 3
+    allowMultiplePerNode: false
+    volumeClaimTemplate:
+      spec:
+        storageClassName: local-path
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi
+  mgr:
+    count: 2
+    allowMultiplePerNode: false
+    modules:
+      - name: pg_autoscaler
+        enabled: true
+      - name: rook
+        enabled: true
+  dashboard:
+    enabled: true
+    ssl: false
+  crashCollector:
+    disable: false
+  logCollector:
+    enabled: true
+    periodicity: daily
+    maxLogSize: 500M
+  resources:
+    mon:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+    mgr:
+      requests: { cpu: 200m, memory: 1Gi }
+      limits:   { cpu: 1000m, memory: 2Gi }
+    osd:
+      requests: { cpu: 250m, memory: 1Gi }
+      limits:   { cpu: 1000m, memory: 2Gi }
+  placement:
+    all:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+      tolerations: []
+  storage:
+    useAllNodes: true
+    useAllDevices: false
+    deviceFilter: "^sdb$"
+    config:
+      osdsPerDevice: "1"
+  disruptionManagement:
+    managePodBudgets: true
+    osdMaintenanceTimeout: 30
+    pgHealthCheckTimeout: 0
+  healthCheck:
+    daemonHealth:
+      mon:
+        disabled: false
+        interval: 45s
+      osd:
+        disabled: false
+        interval: 60s
+      status:
+        disabled: false
+        interval: 60s
