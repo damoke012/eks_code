@@ -129,6 +129,11 @@ data:
         apiVersion: 1
         datasources:
           - name: Prometheus
+            # Pin UID so dashboards can reference {uid: prometheus} without
+            # being tied to Grafana's auto-generated hash. Without this, the
+            # bundled dashboards show "No data" because their datasource
+            # references don't resolve.
+            uid: prometheus
             type: prometheus
             access: proxy
             url: http://prometheus-stack-kube-prom-prometheus.prometheus.svc.cluster.local:9090
