@@ -1,0 +1,80 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: prometheus-community
+  namespace: prometheus
+spec:
+  interval: 1h
+  url: https://prometheus-community.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-stack
+  namespace: prometheus
+spec:
+  upgrade:
+    remediation:
+      retries: 3
+  install:
+    remediation:
+      retries: 3
+  interval: 10m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "72.x"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: prometheus
+  values:
+    alertmanager:
+      enabled: false
+    grafana:
+      enabled: false
+    # Was: false — re-enabled for node_* / cpu / memory / fs metrics.
+    # Sub-chart values configured below under prometheus-node-exporter.
+    nodeExporter:
+      enabled: true
+    kubeStateMetrics:
+      enabled: true
+    # Per /onprem-safety Rule 1: DaemonSet must explicitly exclude CP nodes.
+    # tolerations: [] disables the default chart toleration (operator: Exists)
+    # which would otherwise schedule on CPs and risk OOM.
+    prometheus-node-exporter:
+      tolerations: []
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      resources:
+        requests:
+          cpu: 50m
+          memory: 30Mi
+        limits:
+          cpu: 200m
+          memory: 100Mi
+    prometheus:
+      prometheusSpec:
+        retention: 7d
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: ceph-block
+              accessModes: [ReadWriteOnce]
+              resources:
+                requests:
+                  storage: 20Gi
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
