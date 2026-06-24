@@ -70,13 +70,20 @@ spec:
     prometheus:
       prometheusSpec:
         retention: 7d
+        # Bumped 1Gi -> 4Gi after OOMKill during WAL replay + new scrape pool
+        # load. Drivers: 30+ ServiceMonitors across the cluster (default + KSM
+        # + kubelets x N nodes + node-exporters x 7 + 9 PrometheusRules with
+        # heavy queries). Plus serviceMonitorSelectorNilUsesHelmValues: false
+        # auto-discovers every ServiceMonitor including duplicate ones from
+        # the restore-test ns (Velero exercise leftover — schedule for cleanup).
+        # 4Gi has headroom for adding 1-2 more apps without re-bumping.
         resources:
           requests:
             cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
             memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 4Gi
         storageSpec:
           volumeClaimTemplate:
             spec:
