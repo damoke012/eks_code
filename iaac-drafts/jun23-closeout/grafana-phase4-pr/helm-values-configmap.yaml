@@ -127,6 +127,13 @@ data:
     datasources:
       datasources.yaml:
         apiVersion: 1
+        # On Grafana startup, delete the stale Prometheus datasource (which has
+        # an auto-generated UID PBFA97CFB590B2093 that doesn't match dashboard
+        # references). Then create a fresh one with uid=prometheus below.
+        # deleteDatasources is idempotent — no-op when nothing matches.
+        deleteDatasources:
+          - name: Prometheus
+            orgId: 1
         datasources:
           - name: Prometheus
             # Pin UID so dashboards can reference {uid: prometheus} without
