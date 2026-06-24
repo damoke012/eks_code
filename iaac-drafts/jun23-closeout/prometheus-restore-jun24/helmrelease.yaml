@@ -42,7 +42,16 @@ spec:
     # Per /onprem-safety Rule 1: DaemonSet must explicitly exclude CP nodes.
     # tolerations: [] disables the default chart toleration (operator: Exists)
     # which would otherwise schedule on CPs and risk OOM.
+    #
+    # hostNetwork: false avoids a hostPort 9100 collision with the existing
+    # standalone prometheus chart's node-exporter in risingwave-2 ns (and
+    # monitoring ns) which already binds 9100 on every worker. /proc /sys /
+    # host volume mounts still give host metrics regardless of network NS;
+    # only node_network_* interface metrics are scoped to the pod (acceptable
+    # for the baseline dashboard). Future cleanup: consolidate to a single
+    # node-exporter DS once the legacy prometheus charts are retired.
     prometheus-node-exporter:
+      hostNetwork: false
       tolerations: []
       affinity:
         nodeAffinity:
