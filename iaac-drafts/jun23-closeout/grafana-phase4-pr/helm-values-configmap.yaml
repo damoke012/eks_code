@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-values
+  namespace: grafana
+data:
+  values.yaml: |
+    replicas: 1
+    deploymentStrategy:
+      type: Recreate
+
+    # Disable init-chown-data initContainer — runs as root with CHOWN,
+    # violates restricted PSS. fsGroup: 472 below handles volume ownership.
+    initChownData:
+      enabled: false
+
+    # Disable testFramework — test pod also runs as root.
+    testFramework:
+      enabled: false
+
+    image:
+      repository: grafana/grafana
+      tag: "11.4.0"
+      pullPolicy: IfNotPresent
+
+    podLabels:
+      app: grafana
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+    # Rook-Ceph operational (INFRA-1532 Done) — migrated to ceph-block.
+    # Migration procedure: see PR description (Velero pre-backup + delete
+    # old local-path PVC + reconcile so the chart re-creates on ceph-block).
+    persistence:
+      enabled: true
+      type: pvc
+      storageClassName: ceph-block
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+
+    service:
+      type: ClusterIP
+      port: 80
+      targetPort: 3000
+
+    ingress:
+      enabled: false
+
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+        folder: /tmp/dashboards
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: true
+          allowUiUpdates: false
+          disableDelete: false
+        resource: configmap
+      datasources:
+        enabled: true
+        label: grafana_datasource
+        labelValue: "1"
+        searchNamespace: ALL
+        resource: configmap
+
+    grafana.ini:
+      server:
+        domain: grafana.op-dev.usxpress.io
+        root_url: https://grafana.op-dev.usxpress.io/
+      analytics:
+        check_for_updates: false
+        reporting_enabled: false
+      log:
+        mode: console
+        level: info
+      database:
+        type: sqlite3
+        path: grafana.db
+      auth.anonymous:
+        enabled: false
+      auth:
+        disable_login_form: false
+        oauth_allow_insecure_email_lookup: false
+      # Azure AD SSO config skeleton (INFRA-1520-1 follow-up — OAuth app reg
+      # needs Application Administrator role on the USXPress tenant which we
+      # don't currently have). Flip enabled=true after IT registers the app +
+      # the SM secret op-usxpress-dev/platform/grafana/azure-ad holds real
+      # client_id + client_secret values (currently placeholders).
+      auth.azuread:
+        name: Azure AD
+        enabled: false
+        allow_sign_up: true
+        # client_id + client_secret come from env via envFromSecret
+        # (Grafana auto-maps GF_AUTH_AZUREAD_CLIENT_ID / _SECRET).
+        scopes: "openid email profile"
+        auth_url: "https://login.microsoftonline.com/bbb5a66d-5c9f-482a-969a-a40304b6bc8d/oauth2/v2.0/authorize"
+        token_url: "https://login.microsoftonline.com/bbb5a66d-5c9f-482a-969a-a40304b6bc8d/oauth2/v2.0/token"
+        allowed_organizations: "bbb5a66d-5c9f-482a-969a-a40304b6bc8d"
+        role_attribute_strict: false
+        allow_assign_grafana_admin: false
+        skip_org_role_sync: false
+      security:
+        cookie_secure: true
+        strict_transport_security: true
+        content_security_policy: true
+      unified_alerting:
+        enabled: true
+      alerting:
+        enabled: false
+
+    # Inject Azure AD credentials as env vars from a Secret managed by
+    # ExternalSecret (see externalsecret-azure-ad.yaml). Grafana auto-maps:
+    #   GF_AUTH_AZUREAD_CLIENT_ID     -> [auth.azuread] client_id
+    #   GF_AUTH_AZUREAD_CLIENT_SECRET -> [auth.azuread] client_secret
+    envFromSecret: grafana-azure-ad-creds
+
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Prometheus
+            type: prometheus
+            access: proxy
+            url: http://prometheus-stack-kube-prom-prometheus.prometheus.svc.cluster.local:9090
+            isDefault: true
+            jsonData:
+              httpMethod: POST
+              timeInterval: 30s
+            editable: false
+
+    serviceAccount:
+      create: true
+      name: grafana
+      automountServiceAccountToken: true
+
+    rbac:
+      create: true
+      pspEnabled: false
+      # Cluster-wide RBAC so the dashboard/datasource sidecar can read
+      # ConfigMaps from ALL namespaces (searchNamespace: ALL). Required
+      # for the platform Bento pattern — apps in any namespace ship
+      # their dashboards as labeled CMs.
+      namespaced: false
+
+    podSecurityContext:
+      fsGroup: 472
+      runAsUser: 472
+      runAsGroup: 472
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: false
+
+    livenessProbe:
+      httpGet:
+        path: /api/health
+        port: 3000
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      timeoutSeconds: 30
+      failureThreshold: 10
+    readinessProbe:
+      httpGet:
+        path: /api/health
+        port: 3000
+
+    plugins: []
+    extraInitContainers: []

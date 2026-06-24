@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - externalsecret-azure-ad.yaml
+  - helmrepository.yaml
+  - helm-values-configmap.yaml
+  - helmrelease.yaml
+  - virtualservice.yaml
+  - dashboard-kubernetes-cluster.yaml
