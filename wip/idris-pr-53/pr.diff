@@ -1,0 +1,55 @@
+diff --git a/infrastructure/grafana/helm-values-configmap.yaml b/infrastructure/grafana/helm-values-configmap.yaml
+index 8ebdd2f..3d83552 100644
+--- a/infrastructure/grafana/helm-values-configmap.yaml
++++ b/infrastructure/grafana/helm-values-configmap.yaml
+@@ -98,6 +98,10 @@ data:
+       alerting:
+         enabled: false
+ 
++    # Datasource URL contract: the Service name is
++    #   <release>-<nameOverride>-prometheus → prometheus-stack-kube-prom-prometheus
++    # nameOverride: kube-prom lives in infrastructure/prometheus/helmrelease.yaml.
++    # Changing it there without updating the URL here breaks all panels.
+     datasources:
+       datasources.yaml:
+         apiVersion: 1
+diff --git a/infrastructure/prometheus/helmrelease.yaml b/infrastructure/prometheus/helmrelease.yaml
+index 2f8c36f..2cf7a97 100644
+--- a/infrastructure/prometheus/helmrelease.yaml
++++ b/infrastructure/prometheus/helmrelease.yaml
+@@ -28,7 +28,18 @@ spec:
+         kind: HelmRepository
+         name: prometheus-community
+         namespace: prometheus
++  # --- Grafana "No Data" triage (2026-06-22) ---
++  # If Grafana panels show "No Data", verify in this order:
++  #   1. Datasource URL: Grafana expects the Service name
++  #      prometheus-stack-kube-prom-prometheus (from nameOverride below).
++  #      Removing or changing nameOverride breaks the datasource.
++  #   2. Prometheus pod health: kubectl -n prometheus get pods — OOM or
++  #      CrashLoop means no scrapes. Check memory limit vs active targets.
++  #   3. storageSpec: without a PVC, pod restart = total metric loss.
++  #   4. Target scrape: Prometheus UI /targets — missing target means
++  #      missing ServiceMonitor or wrong label selector.
+   values:
++    nameOverride: kube-prom
+     alertmanager:
+       enabled: false
+     grafana:
+@@ -46,7 +57,14 @@ spec:
+             memory: 256Mi
+           limits:
+             cpu: 500m
+-            memory: 1Gi
+-        storageSpec: {}
++            memory: 2Gi
++        storageSpec:
++          volumeClaimTemplate:
++            spec:
++              storageClassName: local-path
++              accessModes: ["ReadWriteOnce"]
++              resources:
++                requests:
++                  storage: 20Gi
+         serviceMonitorSelectorNilUsesHelmValues: false
+         podMonitorSelectorNilUsesHelmValues: false
