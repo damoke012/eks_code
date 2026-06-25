@@ -2,6 +2,26 @@ data "aws_caller_identity" "current" {
   provider = aws.source
 }
 
+# ---- DynamoDB lock table for this module's own remote backend ----
+
+resource "aws_dynamodb_table" "tf_lock" {
+  provider     = aws.source
+  name         = "lazy-tf-state-crr-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = var.tags
+}
+
 # ---- Source bucket: read existing, enable versioning ----
 
 data "aws_s3_bucket" "source" {

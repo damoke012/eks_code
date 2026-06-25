@@ -1,0 +1,26 @@
+# Rename this file to backend.tf AFTER running the first apply (which creates the lock table).
+#
+# Migration sequence:
+#   1. terraform apply              # creates aws_dynamodb_table.tf_lock
+#   2. mv backend.tf.example backend.tf
+#   3. terraform init -migrate-state
+#      # answers "yes" to migrate local state -> S3
+#   4. rm terraform.tfstate terraform.tfstate.backup  # local state no longer needed
+#   5. Future engineers can clone the repo + terraform init + apply with no local state.
+#
+# State file location:
+#   s3://lazy-tf-state-65v583i6my68y6x9/iaac/state-dr/terraform.tfstate
+#
+# Self-protection: this state file IS itself replicated to us-west-2 by the very CRR
+# configuration it manages — so the state-of-the-state survives a us-east-2 outage too.
+# Meta but correct.
+
+terraform {
+  backend "s3" {
+    bucket         = "lazy-tf-state-65v583i6my68y6x9"
+    key            = "iaac/state-dr/terraform.tfstate"
+    region         = "us-east-2"
+    dynamodb_table = "lazy-tf-state-crr-lock"
+    encrypt        = true
+  }
+}
