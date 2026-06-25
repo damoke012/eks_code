@@ -12,12 +12,23 @@ FRESHSERVICE_TICKET = ""             # e.g. "FS-12345"
 LIVE_LOGIN_TS_UTC = ""               # e.g. "2026-06-25 14:30 UTC"
 # =================================
 
-EMAIL = "doke@usxpress.com"
-TOKEN = ""
-for ln in Path("/workspaces/eks_code/scripts/push-to-confluence.sh").read_text().splitlines():
-    if ln.startswith("CONFLUENCE_TOKEN="):
-        TOKEN = ln.split("=", 1)[1].strip().strip('"').strip("'")
-        break
+import os
+EMAIL = os.environ.get("ATLASSIAN_EMAIL", "doke@usxpress.com")
+TOKEN = os.environ.get("ATLASSIAN_TOKEN", "")
+if not TOKEN:
+    for candidate in [
+        "/workspaces/eks_code/scripts/push-to-confluence.sh",
+        os.path.expanduser("~/work/eks_code/scripts/push-to-confluence.sh"),
+    ]:
+        p = Path(candidate)
+        if p.exists():
+            for ln in p.read_text().splitlines():
+                if ln.startswith("CONFLUENCE_TOKEN="):
+                    TOKEN = ln.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+            if TOKEN:
+                break
+assert TOKEN, "Set ATLASSIAN_TOKEN env var or place the token script at the expected codespace/WSL paths."
 BASE = "https://usxpress.atlassian.net"
 auth = base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode()
 HEADERS = {"Authorization": f"Basic {auth}", "Accept": "application/json", "Content-Type": "application/json"}
