@@ -104,6 +104,19 @@ data "aws_iam_policy_document" "replication" {
     ]
     resources = ["${aws_s3_bucket.destination.arn}/*"]
   }
+
+  # Decrypt source objects (source uses SSE-KMS with alias/aws/s3)
+  statement {
+    sid     = "KMSSourceDecrypt"
+    effect  = "Allow"
+    actions = ["kms:Decrypt"]
+    resources = [var.source_kms_key_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.us-east-2.amazonaws.com"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "replication" {

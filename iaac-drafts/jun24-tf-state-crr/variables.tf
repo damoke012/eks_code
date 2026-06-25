@@ -16,6 +16,12 @@ variable "destination_region" {
   default     = "us-west-2"
 }
 
+variable "source_kms_key_arn" {
+  description = "ARN of the KMS key the source bucket uses for SSE-KMS (alias/aws/s3 default resolves to a specific key per account)"
+  type        = string
+  default     = "arn:aws:kms:us-east-2:700736442855:key/c1f3cd42-f77f-43a1-b2e4-b45dd6783ee0"
+}
+
 variable "tags" {
   description = "Common tags"
   type        = map(string)
