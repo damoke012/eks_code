@@ -1,0 +1,373 @@
+<h2>Purpose</h2>
+<p>This page captures the design and acceptance criteria for standing up the <strong>op-usxpress-qa</strong> on-prem Talos cluster, with explicit production-readiness hardening that closes the gaps identified in our Dev environment retrospective. The intent is that QA is not a relaxed copy of Dev &mdash; it is the first cluster built to the standard Prod will be held to. Dev remains the experimentation surface; QA is the integration + acceptance environment that Prod will mirror.</p>
+<p>This design follows industry best practice for production-like Kubernetes environments. Every section below addresses a category of concern that any production-bound cluster must explicitly answer; where Dev took shortcuts, QA does not.</p>
+
+<h2>Source of best practice</h2>
+<p>The structure below reflects the consensus pattern across mature on-prem Kubernetes operators (large financial services, regulated SaaS, defense-adjacent enterprises). Each section maps to a category of concern that production governance frameworks (CIS Kubernetes Benchmark, NIST 800-190, SOC 2 CC sections) hold operators to. We document our specific implementation rather than the abstract control; the abstract controls are inherited from those references.</p>
+
+<h2>Scope of this design</h2>
+<table>
+  <tbody>
+    <tr><th>In scope</th><th>Out of scope</th></tr>
+    <tr>
+      <td>
+        <ul>
+          <li>Standing up <code>op-usxpress-qa</code> Talos cluster</li>
+          <li>Identity management architecture for the new cluster</li>
+          <li>Log management end-to-end (audit + platform + application)</li>
+          <li>Node pool isolation (system / platform / application)</li>
+          <li>Per-environment account and secret boundary</li>
+          <li>Capacity planning and sizing rationale</li>
+          <li>Cluster audit logging destination</li>
+          <li>DR posture and restore drill</li>
+          <li>Multi-fault-domain spread within the data centre</li>
+          <li>Policy baseline (Pod Security Admission tier + Kyverno)</li>
+          <li>Image registry promotion and signing</li>
+          <li>Per-environment DNS subdomain and TLS certificate strategy</li>
+          <li>Platform application onboarding for the new environment</li>
+          <li>Path-to-Production governance</li>
+        </ul>
+      </td>
+      <td>
+        <ul>
+          <li>Standing up the eventual <code>op-usxpress-prod</code> cluster (separate design, follows from this one)</li>
+          <li>Application-level changes to onboarded workloads (RisingWave schema, etc.)</li>
+          <li>Cloud-side platform changes (those run through cloud-ops)</li>
+          <li>Decommissioning of the legacy environment (dpl2 was already replaced)</li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>1. Per-environment account and secret boundary</h2>
+<p>Each environment has explicit isolation of the off-cluster resources it depends on. The boundary is enforced at the AWS account and secret-path level, not at the Kubernetes namespace level alone.</p>
+<h3>Decisions</h3>
+<table>
+  <tbody>
+    <tr><th>Resource</th><th>Dev</th><th>QA</th><th>Prod (future)</th></tr>
+    <tr><td>AWS account hosting Terraform state bucket</td><td>USX-Dev (<code>700736442855</code>)</td><td>USX-QA (<code>527101283767</code>)</td><td>USX-Prod (<code>937464026810</code>)</td></tr>
+    <tr><td>AWS Secrets Manager path prefix</td><td><code>op-usxpress-dev/*</code></td><td><code>op-usxpress-qa/*</code></td><td><code>op-usxpress-prod/*</code></td></tr>
+    <tr><td>ECR image registry</td><td>Shared (DevOps account <code>064859874041</code>)</td><td>Shared, same registry, different image promotion gate</td><td>Same; promotion requires cosign signature plus admission policy verification</td></tr>
+    <tr><td>S3 cross-region replication of state</td><td>Live (INFRA-1557)</td><td>Required at provisioning time; carry the same kms:Decrypt + opt-in pattern</td><td>Required; tested via DR drill</td></tr>
+    <tr><td>Route 53 hosted zone for cluster ingress</td><td><code>op-dev.usxpress.io</code></td><td><code>op-qa.usxpress.io</code></td><td><code>usxpress.io</code> (root or <code>op.usxpress.io</code>)</td></tr>
+  </tbody>
+</table>
+<h3>Rationale</h3>
+<p>A per-environment AWS account boundary is the most defensible isolation we can give the on-prem clusters. A compromised Dev secret cannot be used to read Prod state; a Dev IAM role cannot list Prod buckets. The cost of the per-account boundary is an additional set of AWS resources to provision and a path-to-promote for resources that are intentionally identical across environments (ECR being the deliberate exception &mdash; we want the same image to be promotable from Dev to Prod).</p>
+<h3>Implementation</h3>
+<ul>
+  <li>The QA state bucket is provisioned in USX-QA at QA cluster-creation time, following the same lazy-tf-state naming convention</li>
+  <li>S3 CRR enabled at provisioning time, not retrofitted (carry the SSE-KMS triple-gotcha checklist from the Dev work)</li>
+  <li>AWS SM path prefix <code>op-usxpress-qa/</code> is the only path the QA cluster's IRSA roles can read; enforced via IAM policy condition</li>
+  <li>External-Secrets <code>ClusterSecretStore</code> on QA uses an IRSA role that only allows <code>op-usxpress-qa/*</code> access</li>
+</ul>
+
+<h2>2. Capacity planning and sizing</h2>
+<p>Dev was sized for experimentation: three control plane nodes at 8 GB each plus seven worker nodes at 4 GB each, with no node-pool isolation. QA is sized for production-like workload patterns: control plane appropriately sized for etcd and API throughput, and worker pool divided across three node classes (see Section 3 for the node pool design).</p>
+<h3>Proposed QA sizing</h3>
+<table>
+  <tbody>
+    <tr><th>Node class</th><th>Count</th><th>vCPU</th><th>RAM</th><th>Boot disk</th><th>Data disk(s)</th><th>Purpose</th></tr>
+    <tr><td>Control plane</td><td>3</td><td>4</td><td>16 GB</td><td>50 GB SSD</td><td>50 GB SSD for etcd</td><td>API server, scheduler, controller-manager, etcd (separate disk for etcd write isolation)</td></tr>
+    <tr><td>System worker pool</td><td>2</td><td>4</td><td>8 GB</td><td>50 GB SSD</td><td>&mdash;</td><td>kube-system DaemonSets, CNI, kube-proxy, CoreDNS &mdash; small, dedicated, never co-scheduled with platform or app workloads</td></tr>
+    <tr><td>Platform worker pool</td><td>3</td><td>8</td><td>16 GB</td><td>100 GB SSD</td><td>&mdash;</td><td>cert-manager, ESO, Velero, Rook operator, Prometheus, Grafana, Istio control plane, Kyverno, Reloader</td></tr>
+    <tr><td>Application worker pool</td><td>5</td><td>16</td><td>32 GB</td><td>100 GB SSD</td><td>1&times;200 GB SSD per node for Rook OSDs</td><td>RisingWave compute and meta, tenant applications (geo-handler, brands-api, attrition-api, future workloads)</td></tr>
+  </tbody>
+</table>
+<h3>Total resource budget</h3>
+<ul>
+  <li>Control plane: 12 vCPU, 48 GB RAM, 300 GB storage</li>
+  <li>System worker pool: 8 vCPU, 16 GB RAM, 100 GB storage</li>
+  <li>Platform worker pool: 24 vCPU, 48 GB RAM, 300 GB storage</li>
+  <li>Application worker pool: 80 vCPU, 160 GB RAM, 1500 GB storage</li>
+  <li><strong>Total: 124 vCPU, 272 GB RAM, 2.2 TB storage</strong></li>
+</ul>
+<h3>Rationale</h3>
+<p>Dev's 4 GB control plane nodes were destroyed by the Rook CSI OOM cascade on 2026-06-17 because Rook CSI driver pods land on every node. We raised Dev CP to 8 GB but that was the minimum to recover, not the target for a production-like environment. QA gets 16 GB CP nodes from day one with a separate disk for etcd (etcd write fsync latency is the single most important indicator of API server health). The node pool split (Section 3) means platform and application contention is engineered in, not accidental.</p>
+
+<h2>3. Node pool isolation</h2>
+<p>This is the most important architectural decision in this design. In Dev, every worker node is "general purpose" &mdash; kube-system pods, monitoring, RisingWave, application workloads, and Rook OSDs all schedule onto the same workers. This means a noisy application can starve the platform, a memory leak in monitoring can evict an application, and a Rook OSD recovery can spike CPU on a worker hosting tenant traffic. In QA we explicitly separate three classes of workload onto dedicated node pools.</p>
+<h3>The three pools</h3>
+<table>
+  <tbody>
+    <tr><th>Pool</th><th>Label</th><th>Taint</th><th>What runs here</th><th>What does NOT run here</th></tr>
+    <tr>
+      <td>System</td>
+      <td><code>node.cloud-platform.io/pool: system</code></td>
+      <td><code>node-role.cloud-platform.io/system:NoSchedule</code> &mdash; only system DaemonSets tolerate</td>
+      <td>kube-proxy, CoreDNS, CNI (Cilium agents), kube-system DaemonSets, the small set of cluster-wide infrastructure that must run on every node or in dedicated capacity</td>
+      <td>Cluster-platform services (cert-manager, ESO, Velero, monitoring, Istio control plane) &mdash; those belong on the platform pool</td>
+    </tr>
+    <tr>
+      <td>Platform</td>
+      <td><code>node.cloud-platform.io/pool: platform</code></td>
+      <td><code>node-role.cloud-platform.io/platform:NoSchedule</code> &mdash; only platform workloads tolerate</td>
+      <td>cert-manager, ESO controller, Velero server, Rook operator, Prometheus, Grafana, Loki, Kyverno controller, Reloader, Istio control plane, External-DNS, Flux controllers</td>
+      <td>Tenant applications, RisingWave compute, anything customer-traffic-bearing</td>
+    </tr>
+    <tr>
+      <td>Application</td>
+      <td><code>node.cloud-platform.io/pool: app</code></td>
+      <td>Untainted (default scheduling target)</td>
+      <td>RisingWave compute and meta workers, tenant applications (geo-handler, brands-api, attrition-api), future tenant onboardings, Rook-Ceph OSDs (only on app pool nodes that hold the secondary data disk)</td>
+      <td>Platform services that need stable capacity; system DaemonSets</td>
+    </tr>
+  </tbody>
+</table>
+<h3>How the isolation is enforced</h3>
+<ol>
+  <li><strong>Talos machine configuration</strong> labels each worker pool at provisioning time. The Talos config for system workers includes <code>kubelet.extraArgs: { node-labels: "node.cloud-platform.io/pool=system" }</code>; same pattern for platform and app pools.</li>
+  <li><strong>Talos machine configuration</strong> applies the taint at provisioning time for system and platform pools. Application pool is untainted because it is the default scheduling target.</li>
+  <li><strong>Every platform Helm release</strong> includes a <code>nodeSelector</code> and <code>tolerations</code> stanza that selects the platform pool. This is shipped in the Flux Kustomizations under <code>iaac-talos-flux-platform</code>. Existing Dev releases gain these settings as part of the QA rollout so the same chart values apply to both clusters.</li>
+  <li><strong>Anti-affinity rules</strong> ensure RisingWave compute pods, brands-api replicas, and other multi-replica workloads spread across application pool nodes (not co-located on a single host).</li>
+  <li><strong>Rook-Ceph OSD placement</strong> targets only application pool nodes that have the secondary data disk. The CephCluster spec's <code>placement.osd</code> includes the application-pool nodeSelector and an anti-affinity rule across hosts.</li>
+</ol>
+<h3>Why this matters</h3>
+<p>Three concrete scenarios this isolation prevents:</p>
+<ol>
+  <li><strong>A memory leak in Prometheus</strong> on Dev would push a worker hard against memory limits and trigger OOMKills on whichever workloads happened to be co-scheduled. Under node pool isolation, Prometheus is constrained to the platform pool; an application pool worker hosting RisingWave cannot be evicted by Prometheus pressure.</li>
+  <li><strong>A Rook OSD recovery operation</strong> spikes CPU and disk I/O. Under Dev's flat pool, that spike can starve a tenant application. Under isolation, OSDs live on application pool nodes with the secondary data disk; tenant applications are co-located but the host has resources sized for both. Platform workloads are completely untouched.</li>
+  <li><strong>A tenant application gone runaway</strong> &mdash; an aggressive batch job, a misconfigured queue consumer &mdash; can saturate every worker on Dev because there is nowhere safe for platform pods to retreat. Under isolation, the runaway is bounded to the application pool; cert-manager and ESO and monitoring continue functioning on the platform pool.</li>
+</ol>
+<h3>vSphere fault-domain spread</h3>
+<p>Each pool is spread across at least three vSphere ESXi hosts using DRS anti-affinity rules. This means a single ESXi host failure cannot remove all system workers (or all platform workers, or all app workers). The exact ESXi host map will be captured in the implementation ticket; the principle is that no pool is single-host-dependent.</p>
+
+<h2>4. Identity management</h2>
+<p>The identity story for the QA cluster has three concerns, each addressed independently: cluster admin access, workload identity for IRSA, and end-user web SSO into platform tools.</p>
+<h3>4.1 Cluster admin access</h3>
+<p>Cluster administrators authenticate to the QA API server using X.509 client certificates issued through the existing split-provisioning pattern documented in <code>onprem-cluster-access-runbook</code>. Each administrator's certificate has a name in the certificate subject that maps to a <code>ClusterRoleBinding</code> in the cluster. No shared cluster-admin credentials; every action is attributable.</p>
+<p>The QA cluster will issue at least the following administrator certificates at stand-up time:</p>
+<ul>
+  <li>Doke &mdash; <code>cluster-admin</code> ClusterRoleBinding (full access for incident response)</li>
+  <li>Idris &mdash; <code>cluster-admin</code> for QA stand-up phase; downgrades to namespace-scoped after stand-up matches the existing Dev pattern</li>
+  <li>Tim Preble &mdash; namespace-admin on <code>risingwave</code> namespace only (matches Dev pattern)</li>
+  <li>Break-glass certificate &mdash; stored in 1Password, used only during incidents; usage logged via the audit pipeline (Section 6)</li>
+</ul>
+<h3>4.2 Workload identity (IRSA)</h3>
+<p>Every workload that calls AWS APIs from the cluster uses an IAM Role for ServiceAccount. The OIDC provider for the QA cluster is registered with AWS at cluster stand-up time. Each workload's ServiceAccount is annotated with the role ARN it should assume; AWS STS issues short-lived credentials when the workload presents its projected ServiceAccount token.</p>
+<p>The naming convention for QA IRSA roles is:</p>
+<p><code>op-usxpress-qa-&lt;workload&gt;-&lt;purpose&gt;</code></p>
+<p>Examples:</p>
+<ul>
+  <li><code>op-usxpress-qa-velero-backup</code> &mdash; Velero server reading and writing the backup bucket</li>
+  <li><code>op-usxpress-qa-etcd-backup</code> &mdash; etcd snapshot job writing to the snapshot bucket</li>
+  <li><code>op-usxpress-qa-external-secrets</code> &mdash; ESO reading Secrets Manager values under <code>op-usxpress-qa/*</code></li>
+  <li><code>op-usxpress-qa-external-dns</code> &mdash; External-DNS writing Route 53 records in <code>op-qa.usxpress.io</code></li>
+  <li><code>op-usxpress-qa-cert-manager</code> &mdash; cert-manager solving DNS-01 challenges in <code>op-qa.usxpress.io</code></li>
+  <li><code>op-usxpress-qa-cluster-autoscaler</code> &mdash; if cluster autoscaler is adopted on QA, role for vSphere API access</li>
+</ul>
+<p>Each role's IAM policy is scoped to the minimum AWS resources the workload requires. No role on QA can read or write resources owned by the Dev or Prod clusters.</p>
+<h3>4.3 End-user web SSO</h3>
+<p>This is the Azure AD identity strategy parked under epic INFRA-1559. For QA the operational definition is:</p>
+<ul>
+  <li><strong>Grafana</strong> at <code>https://grafana.op-qa.usxpress.io</code> &mdash; AAD OIDC SSO via the shared Dev+QA App Registration (per INFRA-1559's recommended per-environment topology).</li>
+  <li><strong>Any future web tools</strong> (Kiali, ArgoCD, Loki UI) follow the same App Registration pattern.</li>
+  <li><strong>RBAC mapping</strong> &mdash; AAD groups arrive as token claims; Grafana role config maps groups to Grafana roles. Initial groups: <code>cloud-platform-admins</code> (Grafana Admin), <code>cloud-platform-engineers</code> (Editor), <code>app-team-readers</code> (Viewer).</li>
+</ul>
+<h3>4.4 Identity sizing and lifecycle</h3>
+<table>
+  <tbody>
+    <tr><th>Principal class</th><th>Count at QA stand-up</th><th>Growth trajectory</th><th>Rotation cadence</th></tr>
+    <tr><td>Administrator X.509 certs</td><td>3 (Doke, Idris, break-glass)</td><td>1-2 per new platform engineer</td><td>Annual; rotate on personnel departure</td></tr>
+    <tr><td>IRSA roles</td><td>10-15 (platform workloads)</td><td>+1 per new workload that calls AWS</td><td>N/A; roles do not rotate (short-lived tokens do)</td></tr>
+    <tr><td>AAD App Registrations</td><td>1 shared (Dev+QA), 1 future for Prod</td><td>0; one App Reg covers all platform web tools per env</td><td>Client secret rotation every 12 months</td></tr>
+    <tr><td>ServiceAccounts (workload)</td><td>~50 at stand-up</td><td>+5-10 per onboarded application</td><td>Tokens auto-rotated by k8s; SA itself static</td></tr>
+  </tbody>
+</table>
+
+<h2>5. Log management</h2>
+<p>Logs from the QA cluster land in a structured pipeline with explicit retention and a search UI. Dev's logs are ad-hoc &mdash; <code>kubectl logs</code> works for the moment but there is no long-term destination, no audit trail, no security analytics surface beyond Wiz onboarding which is still in flight. QA introduces the canonical destination and the retention discipline.</p>
+<h3>5.1 Log classes and their treatment</h3>
+<table>
+  <tbody>
+    <tr><th>Log class</th><th>Source</th><th>Destination</th><th>Retention</th><th>Search UI</th></tr>
+    <tr><td>Kubernetes API audit</td><td>kube-apiserver via Talos audit policy</td><td>Local on CP node initially, shipped via fluent-bit to Loki long-term</td><td>30 days hot in Loki; 1 year cold in S3 via Loki S3 backend</td><td>Grafana Loki + saved queries for common audit-of-audit patterns</td></tr>
+    <tr><td>Application stdout/stderr</td><td>Pod stdout/stderr</td><td>fluent-bit DaemonSet on every node &rarr; Loki</td><td>7 days hot; 30 days cold in S3</td><td>Grafana Loki</td></tr>
+    <tr><td>Platform service logs</td><td>cert-manager, ESO, Velero, Rook, Istio, Flux, Kyverno controller stdout</td><td>fluent-bit &rarr; Loki, separate stream tag</td><td>14 days hot; 90 days cold</td><td>Grafana Loki</td></tr>
+    <tr><td>Istio access logs</td><td>Envoy sidecar access log format</td><td>fluent-bit &rarr; Loki, separate stream tag</td><td>14 days hot; 30 days cold</td><td>Grafana Loki + service-mesh dashboard</td></tr>
+    <tr><td>Flux event logs</td><td>Flux controller events from k8s API</td><td>kube-events &rarr; Loki</td><td>30 days hot; 90 days cold</td><td>Grafana Loki + Flux dashboard</td></tr>
+    <tr><td>Octopus deployment audit</td><td>Octopus Deploy server's own audit log</td><td>Stays in Octopus; not shipped to Loki</td><td>Octopus default (typically 1 year)</td><td>Octopus UI</td></tr>
+    <tr><td>Security-relevant events</td><td>Wiz sensor (when INFRA-1513 lands)</td><td>Wiz SaaS cloud</td><td>Wiz default</td><td>Wiz console</td></tr>
+  </tbody>
+</table>
+<h3>5.2 Pipeline architecture</h3>
+<p>The collection-to-storage path:</p>
+<ol>
+  <li><strong>fluent-bit DaemonSet</strong> on every worker (system, platform, application pools) collects stdout/stderr from every container, parses standard fields, and ships to Loki.</li>
+  <li><strong>Loki distributor + ingester</strong> deployed on the platform pool. Storage backend is S3 (in the QA AWS account) with the boltdb-shipper index. Per-tenant labels enforce tenant isolation between application logs and platform logs.</li>
+  <li><strong>Grafana Loki datasource</strong> provisioned alongside Prometheus. Engineers query logs via Grafana Explore using LogQL.</li>
+  <li><strong>Kubernetes audit log</strong> is enabled via a Talos audit policy that selects RequestResponse for high-value events (token creation, exec, port-forward, Secret reads) and Metadata for routine API calls. The audit log is written to a file on each CP node; fluent-bit on the CP nodes ships it to Loki with a dedicated stream tag.</li>
+</ol>
+<h3>5.3 Sizing estimate</h3>
+<ul>
+  <li>Dev steady-state log volume is approximately 30-50 GB per day across all classes</li>
+  <li>QA, given equivalent workload and additional audit log enablement, is estimated at 80-120 GB per day</li>
+  <li>Prod, with fully onboarded tenant applications, is estimated at 200-300 GB per day</li>
+  <li>Loki ingester sizing for QA: 2 ingester replicas with 2 vCPU and 4 GB RAM each; distributor 1 replica</li>
+  <li>S3 storage cost for QA: roughly 10 GB hot index, 1 TB cold object storage at peak retention &mdash; approximately $25-30 per month</li>
+</ul>
+<h3>5.4 Audit log policy</h3>
+<p>The Talos audit policy enabled on QA captures:</p>
+<ul>
+  <li><strong>RequestResponse level</strong> &mdash; full request and response body &mdash; for: <code>create</code> on <code>secrets</code>, <code>create</code> on <code>tokenreviews</code>, <code>create</code>/<code>update</code>/<code>delete</code> on <code>clusterrolebindings</code>, <code>create</code> on <code>pods/exec</code>, <code>create</code> on <code>pods/portforward</code>, <code>create</code>/<code>update</code> on <code>networkpolicies</code></li>
+  <li><strong>Metadata level</strong> &mdash; method, resource, requester &mdash; for routine reads and writes outside the above set</li>
+  <li><strong>None</strong> &mdash; skip &mdash; for: read-only operations from system controllers (kubelet, kube-controller-manager) that would otherwise drown the log in noise</li>
+</ul>
+
+<h2>6. Cluster audit logging destination</h2>
+<p>(Architecture detailed in Section 5.4.) The destination is Grafana Loki running on the platform pool, with S3 backend for cold storage in the QA AWS account. Retention is 30 days hot in Loki, 1 year cold in S3 via Loki's S3-backed index. Search UI is Grafana Explore against the Loki datasource.</p>
+<p>Acceptance criteria for the audit pipeline:</p>
+<ul>
+  <li>A <code>kubectl exec</code> command against any pod on QA appears in Loki as an audit event within 30 seconds</li>
+  <li>The exec event includes the requester's identity (X.509 cert subject)</li>
+  <li>Querying "all exec events in the last 24 hours" returns a complete list</li>
+  <li>The audit log volume is monitored; a sudden spike or drop triggers a PrometheusRule alert</li>
+</ul>
+
+<h2>7. DR posture</h2>
+<p>The QA cluster has explicit RTO and RPO targets and a documented restore procedure that is exercised before the cluster is declared production-ready. Dev's DR posture is implicit and unproven beyond the Velero restore exercise of 2026-06-23; QA upgrades this to documented, exercised, and observable.</p>
+<h3>7.1 Recovery objectives</h3>
+<table>
+  <tbody>
+    <tr><th>Scenario</th><th>RTO target</th><th>RPO target</th><th>Mechanism</th></tr>
+    <tr><td>Single worker node loss</td><td>15 minutes (kubelet rejoin or replacement)</td><td>0 (no data on local-path; ceph-block survives)</td><td>Talos auto-rejoin or replacement VM</td></tr>
+    <tr><td>Single control plane node loss</td><td>30 minutes</td><td>0 (etcd quorum from remaining two CPs)</td><td>Talos CP recovery, etcd member-replace procedure</td></tr>
+    <tr><td>Two control plane node loss</td><td>2 hours</td><td>0 if any CP responds; up to last backup if quorum-loss</td><td>etcd snapshot restore from S3 (etcd-backup CronJob)</td></tr>
+    <tr><td>Full cluster loss (all CPs, vSphere host failure)</td><td>4 hours</td><td>Up to 24 hours (etcd snapshot cadence)</td><td>Rebuild cluster from Talos config, restore etcd snapshot, Flux reconciles platform, Velero restores tenant PVCs</td></tr>
+    <tr><td>Data centre loss</td><td>Best-effort, days &mdash; no hot standby cluster in another DC at QA scope</td><td>Up to 24 hours via the etcd and PVC backups in S3 (replicated to us-west-2)</td><td>Spin up new cluster in alternate DC, restore from S3 backups; expected to take days, not hours, at QA tier</td></tr>
+  </tbody>
+</table>
+<h3>7.2 What backs up and where</h3>
+<ul>
+  <li><strong>Terraform state</strong> &mdash; lazy-tf-state bucket in USX-QA, replicated to us-west-2 via the same CRR pattern proven on Dev (INFRA-1557)</li>
+  <li><strong>etcd snapshots</strong> &mdash; daily CronJob; written to S3 in USX-QA; replicated to us-west-2</li>
+  <li><strong>Velero PVC backups</strong> &mdash; daily for all PVCs; written to S3 in USX-QA; replicated to us-west-2; restore exercise required before sign-off</li>
+  <li><strong>AWS Secrets Manager values</strong> &mdash; AWS provides intrinsic replication and versioning; no separate backup required</li>
+  <li><strong>Flux Git state</strong> &mdash; the source of truth lives in <code>variant-inc/iaac-talos-flux-cluster</code> and <code>variant-inc/iaac-talos-flux-platform</code>; GitHub provides the durability</li>
+</ul>
+<h3>7.3 Restore drill</h3>
+<p>Before QA is declared production-ready, the following restore drills are executed and documented:</p>
+<ol>
+  <li>Delete a non-trivial PVC, restore from Velero, confirm pod returns to Ready and data is intact (passes the existing Dev pattern)</li>
+  <li>Stop etcd on one CP, verify quorum from remaining two, restart CP, verify etcd member rejoin</li>
+  <li>Simulate full cluster loss by terraform-destroying the cluster, re-provisioning, restoring etcd from snapshot, and verifying Flux brings the platform back. This drill is the most important and is the gate for "QA is production-ready."</li>
+</ol>
+
+<h2>8. Multi-fault-domain spread within the data centre</h2>
+<p>Dev's seven workers may all sit on a single ESXi host or a single rack today; we have not audited the placement and have not enforced anti-affinity at the vSphere level. QA enforces explicit fault-domain spread.</p>
+<h3>Requirements</h3>
+<ul>
+  <li>Audit the current vSphere host topology to identify at least three ESXi hosts and (where applicable) racks</li>
+  <li>Map each pool to a DRS anti-affinity rule that spreads the pool across at least three ESXi hosts</li>
+  <li>Verify the rule by initiating a planned migration of one pool member; observe DRS places it on a host that does not already host another member of the same pool</li>
+  <li>Document the host-to-VM map in the cluster's runbook so on-call engineers know which physical hosts to inspect during an incident</li>
+</ul>
+
+<h2>9. Policy baseline (Pod Security Admission + Kyverno)</h2>
+<p>QA enforces a stricter policy baseline than Dev. Where Dev tolerates baseline PSA on most namespaces and uses Kyverno mostly for label mutation, QA enforces restricted PSA on tenant namespaces and uses Kyverno for verification and blocking, not only mutation.</p>
+<h3>Namespace tier policy</h3>
+<table>
+  <tbody>
+    <tr><th>Namespace class</th><th>PSA enforce</th><th>Kyverno policies applied</th></tr>
+    <tr><td>kube-system</td><td>privileged</td><td>Minimal &mdash; system components require host access</td></tr>
+    <tr><td>Platform pool namespaces (cert-manager, eso, velero, rook-ceph, monitoring, istio, kyverno, reloader)</td><td>baseline</td><td>Image signature verification (cosign), required label set, network policy required</td></tr>
+    <tr><td>Application namespaces (risingwave, brands-api, attrition-api, future tenants)</td><td>restricted</td><td>All of the above plus: no privileged escalation, runAsNonRoot required, seccompProfile RuntimeDefault required, no hostPath mounts, image from approved registry list only</td></tr>
+  </tbody>
+</table>
+<h3>Acceptance</h3>
+<ul>
+  <li>A pod that attempts to run privileged in an application namespace is rejected at admission with a clear error</li>
+  <li>An image not signed by the trusted cosign keys is rejected at admission</li>
+  <li>A NetworkPolicy is required in every application namespace; deployments without one are rejected after a grace period</li>
+</ul>
+
+<h2>10. Image registry promotion and signing</h2>
+<p>QA images are promoted from Dev images, not built fresh. The image SHA that ran on Dev is the same SHA that runs on QA. This eliminates "works on Dev but not QA" mysteries caused by accidental rebuild differences.</p>
+<h3>Promotion mechanism</h3>
+<ul>
+  <li>Image promoted from Dev to QA by re-tagging in ECR, not by re-building</li>
+  <li>Cosign signature applied at the QA promotion gate &mdash; signed by a Cloud Platform team key stored in AWS KMS</li>
+  <li>Kyverno verifyImages policy on QA application namespaces requires the cosign signature; unsigned images are rejected</li>
+  <li>Promotion to Prod follows the same pattern: SHA frozen at Dev, signed at QA, signed again at Prod with a separate key</li>
+</ul>
+<h3>Approved registry list</h3>
+<ul>
+  <li><code>064859874041.dkr.ecr.us-east-2.amazonaws.com</code> &mdash; the shared DevOps ECR</li>
+  <li><code>quay.io/&lt;official upstream charts that we vendor unmodified&gt;</code></li>
+  <li><code>docker.io/bitnamilegacy/*</code> &mdash; Bitnami legacy images for the unavoidable cases</li>
+  <li>No other registry is permitted on QA application namespaces</li>
+</ul>
+
+<h2>11. Per-environment DNS subdomain and TLS strategy</h2>
+<p>QA gets its own subdomain so that DNS-based tooling, certificate scope, and ingress configuration cannot accidentally reach across environments.</p>
+<h3>DNS</h3>
+<ul>
+  <li>Hosted zone <code>op-qa.usxpress.io</code> created in Route 53 within the USX-QA AWS account</li>
+  <li>External-DNS on QA configured with the IRSA role <code>op-usxpress-qa-external-dns</code> scoped to that hosted zone only</li>
+  <li>The corporate DNS resolves <code>op-qa.usxpress.io</code> via NS delegation to Route 53</li>
+</ul>
+<h3>TLS certificates</h3>
+<ul>
+  <li>cert-manager on QA holds a wildcard certificate for <code>*.op-qa.usxpress.io</code> issued by Let's Encrypt via DNS-01 (matching the proven Dev pattern)</li>
+  <li>Per-team certificates follow the pattern documented in <code>onprem-per-team-cert-pattern-may28</code></li>
+  <li>Certificate renewal is verified during the DR drill (Section 7.3)</li>
+</ul>
+
+<h2>12. Platform application onboarding</h2>
+<p>The reusable <code>platform-app-expose</code> chart (INFRA-1527) currently targets Dev. For QA we generalise the chart to accept the environment as a parameter and emit the appropriate Istio Gateway, VirtualService, ExternalSecret, IRSA annotation, and ServiceMonitor.</p>
+<p>A workload onboarded to QA produces a values file that specifies its environment as <code>qa</code> and inherits the rest. The same values file with <code>prod</code> produces the Prod-bound equivalent. This is the single mechanism by which apps move across environments.</p>
+
+<h2>13. Path-to-Production governance</h2>
+<p>Promotion of any change &mdash; cluster IaC, platform Helm release, application Helm release &mdash; from Dev to QA to Prod follows the same path. The path enforces explicit human review at each environment boundary.</p>
+<table>
+  <tbody>
+    <tr><th>Change class</th><th>Dev gate</th><th>QA gate</th><th>Prod gate</th></tr>
+    <tr><td>Cluster Terraform (iaac-talos)</td><td>Octopus TfApply manually flipped; cloud-platform-team-only</td><td>Octopus TfApply with cloud-platform team review</td><td>Octopus TfApply with two-person review; deploy in a scheduled change window</td></tr>
+    <tr><td>Platform Flux Helm releases</td><td>PR to <code>op-dev</code> branch of iaac-talos-flux-platform; one Cloud Platform reviewer</td><td>PR to <code>op-qa</code> branch; one Cloud Platform reviewer; smoke test verification after Flux reconciles</td><td>PR to <code>op-prod</code> branch; two reviewers; change window; canary on a single namespace first where applicable</td></tr>
+    <tr><td>Application Flux Helm releases</td><td>Application team's PR to their values file in iaac-talos-flux-platform; application team review</td><td>Application team's PR; both application and platform reviewers</td><td>Application team's PR; both reviewers; change window; rollback plan in PR description</td></tr>
+    <tr><td>Cluster admin certificate issuance</td><td>Cloud Platform team approval</td><td>Cloud Platform team plus security/IT acknowledgement</td><td>Cloud Platform team plus security/IT plus change advisory board for non-break-glass</td></tr>
+  </tbody>
+</table>
+
+<h2>14. Acceptance criteria for QA</h2>
+<p>QA is declared production-ready &mdash; meaning Prod stand-up can proceed from this baseline &mdash; when every item below is satisfied and documented.</p>
+<ol>
+  <li>QA Talos cluster is provisioned and reachable; control plane survives a planned single-CP reboot test without API server unavailability beyond 30 seconds</li>
+  <li>Three worker pools are provisioned with the labels and taints from Section 3; a test pod with no nodeSelector is scheduled to the application pool; a test platform-style pod with the platform tolerations and selector is scheduled to the platform pool; system DaemonSets land on the system pool</li>
+  <li>Per-environment AWS account boundary is enforced; QA IRSA roles cannot read Dev or Prod resources (tested via aws sts decode-authorization-message)</li>
+  <li>Per-environment AWS Secrets Manager path prefix is the only path QA workloads can read (tested via a deliberately-attempted cross-env access that is denied)</li>
+  <li>Identity management: at least three administrator certificates issued; all administrators verified via <code>kubectl auth whoami</code>; Grafana SSO live with at least one AAD group mapping</li>
+  <li>Log management: a <code>kubectl exec</code> on a QA pod produces an audit event in Loki within 30 seconds; the event includes the requester identity</li>
+  <li>DR: the Velero restore drill (Section 7.3 item 1) passes; etcd snapshot exists in S3; the full-cluster-loss drill (item 3) is scheduled and held within 30 days of stand-up</li>
+  <li>Multi-fault-domain spread: each pool is on at least three ESXi hosts; the DRS anti-affinity rule is in place; the host-to-VM map is in the runbook</li>
+  <li>Policy baseline: a test pod attempting privileged escalation in an application namespace is rejected with a clear error; an unsigned image is rejected</li>
+  <li>Image promotion: at least one image has been promoted Dev-to-QA via the cosign-signed re-tag mechanism and is running on QA</li>
+  <li>DNS and TLS: <code>https://grafana.op-qa.usxpress.io</code> serves the live cluster Grafana with a valid Let's Encrypt certificate</li>
+  <li>Platform app onboarding: at least one application has been onboarded to QA via the generalised platform-app-expose chart and is serving traffic</li>
+  <li>Path-to-Production: the gates in Section 13 are enforced by branch protection rules and Octopus approval steps; an attempt to push a change without review is rejected</li>
+</ol>
+
+<h2>15. Linked tickets</h2>
+<p>The implementation of this design is tracked under epic INFRA-XXXX (created alongside this page). Each of the sections above maps to one or more child tickets with explicit story points and acceptance criteria. The ticket list is maintained on the epic and is the source of truth for execution order.</p>
+
+<h2>16. Timeline phasing</h2>
+<p>The work is sequenced into four phases. Each phase is gated on the previous; nothing in a later phase starts until the gating criteria of the earlier phase are met.</p>
+<table>
+  <tbody>
+    <tr><th>Phase</th><th>Scope</th><th>Gate</th></tr>
+    <tr><td>1. Foundation</td><td>QA AWS account boundary, secret path, ECR access, Route 53 zone, TF state bucket with CRR</td><td>QA AWS resources accessible from a workstation; CRR verified</td></tr>
+    <tr><td>2. Cluster</td><td>Talos cluster provisioned with the three node pools, labels, taints, vSphere anti-affinity</td><td>Cluster API server reachable; all worker pools have the expected count and labels</td></tr>
+    <tr><td>3. Platform</td><td>Flux bootstrap; cert-manager, ESO, Velero, Rook-Ceph, monitoring, Istio, Kyverno; identity management; audit log pipeline</td><td>All Flux Kustomizations Ready; first DR drill (PVC restore) passes</td></tr>
+    <tr><td>4. Application + governance</td><td>platform-app-expose generalised; one application onboarded; path-to-Production gates enforced; restore drill 3 (full cluster) scheduled</td><td>Section 14 acceptance criteria all met; design declared production-ready</td></tr>
+  </tbody>
+</table>
+
+<h2>Related</h2>
+<ul>
+  <li>ADR-001 Observability Phase 0 (linked from this page; the per-env App Reg recommendation in Section 4.3 implements Decision 2 of that ADR)</li>
+  <li>INFRA-1557 (S3 CRR for Terraform state) &mdash; the pattern repeated for QA at provisioning time</li>
+  <li>INFRA-1559 (Hybrid AAD identity strategy) &mdash; the parent for Section 4.3's Grafana SSO work</li>
+  <li>INFRA-1527 (platform-app-expose chart) &mdash; the chart that Section 12 generalises</li>
+  <li>INFRA-1513 (Wiz onboarding) &mdash; the security analytics surface referenced in Section 5</li>
+</ul>
