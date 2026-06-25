@@ -144,6 +144,14 @@ resource "aws_s3_bucket_replication_configuration" "source" {
 
     filter {}
 
+    # REQUIRED for SSE-KMS source objects — default behaviour is to skip them.
+    # Without this, ReplicationStatus is omitted entirely on KMS-encrypted objects.
+    source_selection_criteria {
+      sse_kms_encrypted_objects {
+        status = "Enabled"
+      }
+    }
+
     delete_marker_replication {
       status = "Enabled"
     }
