@@ -33,12 +33,27 @@ resource "aws_s3_bucket_versioning" "destination" {
   }
 }
 
+resource "aws_kms_key" "replica" {
+  provider                = aws.destination
+  description             = "CMK for lazy-tf-state CRR replica bucket"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+  tags                    = var.tags
+}
+
+resource "aws_kms_alias" "replica" {
+  provider      = aws.destination
+  name          = "alias/lazy-tf-state-replica"
+  target_key_id = aws_kms_key.replica.key_id
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "destination" {
   provider = aws.destination
   bucket   = aws_s3_bucket.destination.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.replica.arn
     }
   }
 }
@@ -117,6 +132,24 @@ data "aws_iam_policy_document" "replication" {
       values   = ["s3.us-east-2.amazonaws.com"]
     }
   }
+
+  # Encrypt replica objects with destination CMK
+  statement {
+    sid    = "KMSDestinationEncrypt"
+    effect = "Allow"
+    actions = [
+      "kms:Encrypt",
+      "kms:GenerateDataKey",
+      "kms:ReEncrypt*",
+      "kms:DescribeKey"
+    ]
+    resources = [aws_kms_key.replica.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.us-west-2.amazonaws.com"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "replication" {
@@ -159,6 +192,10 @@ resource "aws_s3_bucket_replication_configuration" "source" {
     destination {
       bucket        = aws_s3_bucket.destination.arn
       storage_class = "STANDARD"
+
+      encryption_configuration {
+        replica_kms_key_id = aws_kms_key.replica.arn
+      }
     }
   }
 }
