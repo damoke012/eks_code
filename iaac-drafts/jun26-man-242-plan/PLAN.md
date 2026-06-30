@@ -1,158 +1,208 @@
-# MAN-242 — Plan: Service-level GitHub identity for ADO pipeline to on-prem Manhattan VM
+# MAN-242 — Service identity for the Manhattan deployment pipeline
 
 | Field | Value |
 |---|---|
 | Jira | [MAN-242](https://usxpress.atlassian.net/browse/MAN-242) |
-| Type | Story |
 | Reporter | Sreekanth Ande |
-| Assignee | Matthew B. Higdon |
-| Co-owner (anticipated) | Doke |
+| Assignee on file | Matthew B. Higdon |
+| Co-owner (proposed) | Doke |
 | Deadline | 2026-07-03 (QA-ready per Shannon Jernigan) |
 | Today | 2026-06-26 |
 | Time remaining | ~7 days |
-| Memory ref | [[cloud-gha-pat-jeff-shaw-jun19]] (anticipated this work; pre-staged questions + recommendation) |
+| Design source | Memory file [[cloud-gha-pat-jeff-shaw-jun19]] |
 
-## Why this exists
+---
 
-Sender + Handler are Manhattan integration components (TCP socket-based) that deploy to an on-prem Windows VM ending in `2P`. The deployment pipeline today uses **Jeff Shaw's personal GitHub PAT** to bridge GitHub Actions (build) → Azure DevOps Artifact Feed (broker) → ADO Release Pipeline (deploy to VM). Personal PAT in a production pipeline is the same offboarding risk Vibin's departure exposed on 2026-06-03. The ticket replaces the personal PAT with a service identity.
+## What we are changing — in one paragraph anyone can follow
 
-## What's actually being asked (mapping to the 5 ACs)
+Today the automated deployment of the Manhattan Sender and Handler components depends on **Jeff Shaw's personal GitHub login**. If Jeff is on vacation, out sick, or leaves the company, the deployment quietly breaks the next time someone tries to ship a change. The ticket replaces Jeff's personal login with a **cryptographic trust between GitHub and Microsoft**. Nothing is tied to a specific person. There is no password to share, nothing to rotate by hand, and the trust survives any personnel change. Microsoft and GitHub already support this pattern out of the box; we are just turning it on for our pipeline.
 
-| AC | Restated in plain language | Implementation surface |
+---
+
+## The decision — Option C (OIDC federation). Locked.
+
+We are not splitting this into "easy version now, real version later." The easy versions (`Personal Access Token` and `GitHub App with a stored private key`) still have something a person has to remember to rotate, something that lives in a secret store, and something that can be leaked. The whole point of this ticket is to eliminate that class of risk, not to defer it. We do it once, correctly.
+
+| Option | What it is | Why we are NOT picking it |
 |---|---|---|
-| AC1 | A non-human GitHub identity exists | GitHub App or service user account |
-| AC2 | That identity has a token with least-privilege scopes | App installation token (short-lived) OR fine-grained PAT |
-| AC3 | ADO pipeline auths against GitHub using that token | ADO service connection |
-| AC4 | GitHub Actions uploads artifacts to ADO Artifact Feed | GHA workflow + curl/ADO REST |
-| AC5 | ADO release pipeline deploys to the on-prem VM from the feed | ADO release pipeline + agent on the `2P` VM |
+| A | A non-human GitHub user with a Personal Access Token | Still a password. Still needs manual rotation. Still tied to one secret store. Just renames the problem we are fixing today. |
+| B | A GitHub App with a stored private key | Better than A, but the private key still lives somewhere as a secret. Someone has to manage that secret's lifecycle. |
+| **C** | **GitHub OIDC federation → Azure AD → Azure DevOps** | **No secret stored anywhere. No rotation. Microsoft and GitHub verify each request cryptographically. This is the correct prod pattern; doing it once now is cheaper than doing it twice.** |
 
-## The identity choice (the core decision)
+The 2026-07-03 deadline is real but achievable. The longest part of Option C is getting an IT-side App Registration provisioned in the USXpress Azure tenant (~24-48 hours typical). We file that request **today** and the rest of the work runs in parallel.
 
-This is the same decision pre-staged in [[cloud-gha-pat-jeff-shaw-jun19]]. Three options, ordered by security posture:
+---
 
-### Option A — GitHub user/bot account + fine-grained PAT
-- **Setup:** ~30 min
-- **Maintenance:** PAT rotation cadence (90 days for fine-grained); manual rotation work
-- **Security posture:** Static credential, token-leak risk. Better than "Jeff's personal" because account isn't tied to a human's lifecycle, but still has all the static-token risks (theft, shoulder-surfing of secrets UI, mis-set scopes).
-- **Verdict:** The "PAT for a service account" option Jeff floated in the original meeting. **Memory flagged this as the worst path** — same rotation problem, just renamed. Avoid unless time genuinely forces it.
-
-### Option B — GitHub App (org-level)
-- **Setup:** ~2 hr
-- **Maintenance:** App-level audit; installation tokens auto-rotate every ~1 hour; only the app private key needs rotation (yearly is typical)
-- **Security posture:** Short-lived installation tokens, scoped per-repo by installation, no human dependency, organisation-owned
-- **Verdict:** **Recommended v0.1 ship** for the 2026-07-03 deadline. Fits a week, eliminates the personal-PAT problem cleanly.
-
-### Option C — GitHub OIDC federation → Azure AD workload identity → ADO
-- **Setup:** ~4-6 hr (more if your ADO instance hasn't seen federation; possibly requires ADO admin involvement)
-- **Maintenance:** None — no static credentials at all
-- **Security posture:** Federated trust; GitHub Actions presents an OIDC token; Azure trusts it; ADO trusts Azure; no secrets stored anywhere
-- **Verdict:** **The prod-ready answer** per the memory recommendation. Fits if we have ADO admin coordination + an Azure AD App Registration for the federation. **May not fit a week alongside everything else.**
-
-### Decision matrix for THIS deadline
-
-| If we have | Choose |
-|---|---|
-| Full Cloud Platform week + ADO admin available | **C (OIDC federation)** — do it right the first time |
-| Reasonable but constrained time + Matt H. available for the ADO side | **B (GitHub App)** — ships in time, replaces personal-PAT cleanly, leaves OIDC as v0.2 |
-| Crunch time + need to land Monday | **A (PAT for service account)** as a temporary measure with a hard commitment to migrate to B or C within 30 days | 
-
-**Recommendation: B (GitHub App) for v0.1, file v0.2 ticket to migrate to C (OIDC federation) within the next sprint.**
-
-This matches what we'd tell Matt + Steve if they kicked off the conversation today: "PAT for a service account is the wrong destination; let's do B now and C next."
-
-## What the credential lifecycle looks like (Option B detail)
-
-1. **GitHub App registration** — created under `variant-inc` org (Matt H. + Doke have org admin; Steve V. is also an org owner)
-2. **App permissions** — minimum: `Contents: Read`, `Metadata: Read`, `Actions: Read`. NO write to repo contents; NO admin permissions.
-3. **App installation** — scoped to the specific repo(s) holding Sender + Handler code, NOT org-wide
-4. **App private key** — generated at app creation; downloaded once, stored in a secure secret manager (see below)
-5. **In each GHA workflow:**
-   - Use `actions/create-github-app-token@v1` to exchange the App private key for a short-lived installation token (1 hour lifetime)
-   - That token authenticates the curl-to-ADO call
-6. **App private key storage** — TWO options:
-   - **B.1 — GitHub org secret** (`MANHATTAN_GH_APP_PRIVATE_KEY`) — simplest, key visible in GitHub admin UI to org owners
-   - **B.2 — Azure Key Vault, retrieved via `azure/login` step using ADO service connection** — more complex setup but matches the existing Manhattan ADO security model
-
-For v0.1 deadline, **B.1** is simpler. Migrate to B.2 with the v0.2 OIDC federation work.
-
-## The artifact upload flow
+## How it works — the flow
 
 ```
-GitHub repo (sender + handler)
-  ↓ push to main
-GitHub Actions workflow
-  ↓ build .NET artifact + zip
-  ↓ exchange App private key → installation token
-  ↓ curl ADO REST: POST https://feeds.dev.azure.com/<org>/<project>/_apis/packaging/feeds/<feed>/upload?api-version=6.0-preview.1
-  ↓ artifact lands in Manhattan ADO Artifact Feed
-ADO Artifact Feed (new artifact published)
-  ↓ ADO release pipeline trigger (continuous deployment)
-  ↓ pulls latest artifact from feed
-  ↓ deploys to on-prem `2P` VM
+   ┌──────────────────────────────────────────────────────────────┐
+   │                                                              │
+   │   An engineer commits Sender or Handler code to GitHub.      │
+   │                                                              │
+   └────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                                                              │
+   │   GitHub Actions runs automatically.                         │
+   │                                                              │
+   │   No passwords are stored anywhere in this step.             │
+   │                                                              │
+   │     1. Build the Sender or Handler application.              │
+   │     2. Ask Microsoft: "Am I who I say I am?"                 │
+   │        (using a cryptographic proof, not a password)         │
+   │     3. Microsoft replies:                                    │
+   │        "Yes, you are the trusted USXpress build pipeline."   │
+   │                                                              │
+   └────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+
+                Microsoft hands GitHub a short-lived
+              digital access pass valid for about 1 hour.
+
+                                │
+                                ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                                                              │
+   │   GitHub Actions uses that pass to upload the new build      │
+   │   to the Azure DevOps Artifact Feed.                         │
+   │                                                              │
+   │   The pass expires automatically; nothing remains on disk.   │
+   │                                                              │
+   └────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                                                              │
+   │   Azure DevOps sees the new build land in the feed and       │
+   │   automatically triggers the release pipeline.               │
+   │                                                              │
+   └────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                                                              │
+   │   The release pipeline copies the build files to the on-prem │
+   │   Windows VM (the one ending in "2P") and starts or restarts │
+   │   the Windows service.                                       │
+   │                                                              │
+   └────────────────────────────┬─────────────────────────────────┘
+                                │
+                                ▼
+
+                    ✓  Sender or Handler is live
+                    ✓  Nobody's personal login was used
+                    ✓  Nothing to rotate by hand later
 ```
 
-**Open question on the deploy mechanism (right side of the arrow):** does the `2P` VM run an ADO build agent already, or does the ADO release pipeline use a remote-exec pattern (SSH / WinRM / PowerShell remoting)? Memory has it as "PowerShell installer + Windows service" so likely WinRM or a self-hosted agent on the VM. **Sub-ticket: confirm with Jeff.**
+---
 
-## Sub-tickets to file under MAN-242
+## Today vs after the change — side-by-side
 
-To file once Doke confirms his role + Matt H. is briefed (see "Open question on ownership" below).
+```
+   TODAY                                  AFTER THIS CHANGE
 
-| # | Sub-ticket | Story points | Owner candidate |
-|---|---|---|---|
-| MAN-XXX | Create GitHub App in variant-inc org with minimum scopes + install on Sender/Handler repos | 3 | Doke or Matt (whoever has GH org admin time first) |
-| MAN-XXX | Store GitHub App private key in chosen secret store (B.1 GitHub org secret for v0.1) | 1 | Doke |
-| MAN-XXX | Write GHA workflow: build → install-token exchange → curl ADO Artifact Feed upload | 5 | Doke (or Jeff if more familiar with the Sender/Handler build) |
-| MAN-XXX | Configure ADO release pipeline to point at the real artifact + deploy to `2P` VM (CONFIRM deploy mechanism first) | 5 | Matt H. (ADO-side expertise) + Jeff (VM-side) |
-| MAN-XXX | End-to-end test against German Higuera's testing requirement (target 2026-07-03) | 2 | All three (Jeff drives, Doke + Matt monitor) |
-| MAN-XXX | Documentation: GitHub App lifecycle (creation, install, rotation, off-boarding) | 2 | Doke |
-| MAN-XXX | v0.2 follow-up — migrate to OIDC federation (Option C); file as a separate parent ticket linking back to MAN-242 | 8 | Doke + Matt H. + ADO admin |
-| **Total v0.1** | | **18 points** |  |
-| **+ v0.2** | | **+8 points** |  |
+   ┌─────────────────────────┐            ┌─────────────────────────┐
+   │  Jeff's personal        │            │  GitHub and Microsoft   │
+   │  GitHub login           │            │  trust each other       │
+   │                         │            │  cryptographically      │
+   └────────────┬────────────┘            └────────────┬────────────┘
+                │                                       │
+                ▼                                       ▼
+   ┌─────────────────────────┐            ┌─────────────────────────┐
+   │  Personal access token  │            │  Short-lived digital    │
+   │  pasted into secrets    │            │  passes (~1 hour each)  │
+   │                         │            │                         │
+   │  Must be rotated by     │            │  Issued automatically   │
+   │  Jeff manually          │            │  on every pipeline run  │
+   └────────────┬────────────┘            └────────────┬────────────┘
+                │                                       │
+                ▼                                       ▼
+   ┌─────────────────────────┐            ┌─────────────────────────┐
+   │  Pipeline depends on    │            │  Pipeline depends only  │
+   │  Jeff staying at the    │            │  on the company's       │
+   │  company and being      │            │  GitHub and Microsoft   │
+   │  available              │            │  accounts existing      │
+   └─────────────────────────┘            └─────────────────────────┘
 
-18 points across 7 days with 2-3 people working in parallel is achievable. The OIDC follow-up is **explicitly NOT** in the 7-day window.
+   If Jeff leaves: BROKEN                  If Jeff leaves: KEEPS RUNNING
+   If Jeff is on PTO: AT RISK              If Jeff is on PTO: KEEPS RUNNING
+   Audit asks "who deployed?": Jeff        Audit asks "who deployed?": Pipeline
+```
 
-## Risk register
+---
+
+## What needs to happen — sub-tickets
+
+All sized for the 2026-07-03 deadline. IT App Registration is the long pole; we file it **first**, today.
+
+| # | Sub-ticket | Story points | Owner | Sequence |
+|---|---|---|---|---|
+| MAN-XXX | **File Freshservice ticket** to IT requesting an Azure AD App Registration with federated credentials for GitHub OIDC. Include the GitHub repo path, federation subject pattern (`repo:variant-inc/<sender-handler-repo>:ref:refs/heads/main`), and required Azure DevOps role assignment | 2 | Doke | **Day 1 — TODAY** |
+| MAN-XXX | Confirm with Jeff: deploy mechanism on the `2P` VM. ADO agent installed? WinRM-based remote-exec? PowerShell-over-SSH? Specifically: what does the existing manual deploy look like, and can we automate exactly that? | 1 | Jeff + Doke | Day 1 |
+| MAN-XXX | Once IT provisions the App Reg, configure the ADO **service connection** to trust the federated identity. Test by triggering a dummy upload from a sandbox GHA workflow | 5 | Matt H. (ADO-side expertise) | Day 2-3 |
+| MAN-XXX | Write the GHA workflow for Sender + Handler: `actions/checkout@v4` → build → `azure/login@v2` (federated) → `az artifacts universal publish` to upload the build to the ADO Artifact Feed | 5 | Doke or Jeff (whoever knows the build steps) | Day 2-4 |
+| MAN-XXX | Configure the ADO release pipeline to pull the latest artifact from the feed and run the existing PowerShell installer on the `2P` VM. Migrate from "dummy source" to the real artifact reference | 5 | Matt H. + Jeff (Jeff knows the VM, Matt knows the pipeline) | Day 3-5 |
+| MAN-XXX | End-to-end test: commit to a test branch → GHA builds → ADO receives artifact → release deploys to `2P` → Sender/Handler service runs cleanly. Target German Higuera's testing window on 2026-07-03 | 3 | All three | Day 5-6 |
+| MAN-XXX | Documentation runbook: how the federation is configured, how to add a new repo to the trust, what to do if the App Reg is ever revoked, who owns rotation (answer: nobody — there is nothing to rotate) | 3 | Doke | Day 6 |
+| **Total** | | **24 points** | | **6 working days** |
+
+24 points across 7 calendar days (5 working days plus weekend buffer) with three people sharing the load is achievable. The IT App Reg request goes in today so it does not become the constraint.
+
+---
+
+## What we need to learn in the kickoff (6 open questions)
+
+The pre-staged questions from [[cloud-gha-pat-jeff-shaw-jun19]] that are still open:
+
+1. **Does `variant-inc` already own a GitHub App or service identity for CI?** If yes, can we extend its installation to the Sender + Handler repos instead of creating a new one? (Reuse beats create.)
+2. **What is the `2P` VM deploy mechanism today?** ADO build agent installed on the VM, or WinRM remote-exec from an ADO-hosted agent?
+3. **Exact GitHub repo names + paths** for Sender and Handler.
+4. **The ADO organization + project** Jeff is using for the Manhattan project. (Knight-Swift, USX-Production, or its own?)
+5. **Build artifact shape** — .NET assemblies + PowerShell installer in a .zip, or a NuGet `.nupkg`?
+6. **Were any of Vibin's personal tokens used in CI?** Same risk shape; if there is a known runbook from that offboarding we reuse it.
+
+---
+
+## Risks and mitigations
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| ADO Artifact Feed auth quirks on first upload | Medium | Half a day burned | Test with a hello-world artifact early in the week, before Sender/Handler is wired |
-| Deploy mechanism on `2P` VM is more complex than assumed (custom installer, dependencies) | Medium | 1-2 days | Jeff has done the manual deploy already; ask him to share the PowerShell script + confirm it's reusable |
-| ADO permissions Matt or Doke don't currently hold | Low-Medium | Same-day blocker | Confirm Matt's ADO role early; if there's a gap, escalate to Sreekanth/Shannon early in the week |
-| Time-pressured Option A regression — someone insists on "PAT for service account" because B is too much for the deadline | Medium | Architectural debt; same problem in 90 days | Lead with B; if forced to A, file the migration ticket SAME DAY |
-| Personal-PAT-shaped accountability creep — the GH App ends up with one person's name on it informally | Low | Same offboarding hole as today | App ownership formally on `variant-inc` org admin; rotation/audit owner named in the documentation sub-ticket |
+| IT App Reg provisioning takes longer than 48 hours | Medium | Day-of-deadline slip | File the IT ticket on Day 1 today; escalate via Shannon or Sreekanth on Day 3 if no movement |
+| ADO service connection federated trust has setup quirks the team has not seen | Medium | Half a day burned | Build a hello-world workflow in a sandbox repo to prove the federation before wiring Sender/Handler |
+| `2P` VM deploy mechanism is non-standard (custom installer, dependencies, drift from prod state) | Medium | 1-2 day delay | Jeff has manually deployed already; reuse his PowerShell exactly, do not re-derive |
+| Someone pushes back arguing PAT is faster | Medium | Architectural regression | Lead with this plan; the cost of doing C now is the same time as doing B and then C; do not negotiate |
+| Doke's bandwidth — already running QA design + Wiz + Postgres window | Medium | Quality of attention | Frame work split so Matt H. owns the ADO side, Jeff owns the VM side, Doke owns IT coordination + documentation |
 
-## What we need to know from Matt + Jeff + Sreekanth (the 10 questions from memory, trimmed)
+---
 
-The memory had 10 pre-staged questions. These are the ones still open after reading the ticket body:
+## Open question on ownership — needed before sub-tickets are filed
 
-1. **Does `variant-inc` already own a GitHub service identity (App / bot user)?** Reuse beats create. (Memory question #3)
-2. **The `2P` VM deploy mechanism** — ADO agent installed, or remote-exec? (Memory question #5)
-3. **GitHub repo names + paths** for Sender + Handler (Memory question #6)
-4. **The ADO org + project Jeff is using** — Manhattan ADO project under which ADO org? Knight-Swift? USX-Production? (Memory question #7)
-5. **Build artifact shape** — .NET assemblies + PowerShell installer in .zip, or NuGet .nupkg? (Memory question #8)
-6. **Vibin offboarding precedent** — were any of his PATs in CI? If so, what runbook? (Memory question #10)
+The Jira ticket assignee is Matt Higdon. Doke received the assignment notification. Three possibilities:
 
-## Open question on ownership
+1. **Doke takes over as primary owner** — sub-tickets assign predominantly to Doke; Matt drops to consulted; Jeff stays on the VM piece
+2. **Doke and Matt co-own** — the work splits along the lines in the table above (Matt owns ADO, Doke owns IT coordination + GHA, Jeff owns the VM); this is the structure the table is already designed for
+3. **Doke consulted, Matt drives** — Matt stays primary; Doke advises on the federation pattern; sub-tickets predominantly Matt-owned
 
-**The ticket assignee is Matt Higdon. Doke received the assignment notification.** Is Doke:
-- Taking over as primary owner from Matt?
-- Co-owning with Matt (split workload)?
-- Consulted for the on-prem VM piece while Matt drives the ADO + GitHub piece?
+Confirm which, and the sub-tickets file the same day.
 
-The plan above splits work between Doke + Matt + Jeff naturally, but actual assignment depends on Doke's answer.
+---
 
-## Next steps if Doke confirms ownership
+## Why this matters beyond MAN-242
 
-1. **Brief Matt H.** with this plan (15 min Teams call); align on Option B for v0.1
-2. **File the sub-tickets** under MAN-242 with story points
-3. **Schedule a 30-min kickoff** with Matt + Jeff + Sreekanth (drive the 6 open questions above)
-4. **Start the GitHub App creation TODAY** if green-lit — it's the longest blocker and gates everything else
-5. **Send Shannon Jernigan a confidence-and-risk update** on the 2026-07-03 deadline by EOD 2026-06-27
+The pattern shipped here — federated identity in place of stored credentials — is the same pattern we want for every USXpress CI/CD pipeline that touches an external system. Doing it cleanly for Manhattan establishes the template. Subsequent pipelines (any future on-prem deployments, cloud deployments that need ADO crossover, etc.) copy this exact setup with just a different App Registration. The 24-point cost here is one-time; the per-pipeline cost after this is closer to 5 points.
+
+This also closes the same offboarding hole exposed by Vibin's departure on 2026-06-03 — and unlike the cluster-side hole (which we already addressed via separate IRSA roles), the CI/CD hole has been quietly open in every Jeff-tied pipeline.
+
+---
 
 ## Related
 
-- [[cloud-gha-pat-jeff-shaw-jun19]] — pre-staged design + questions
-- [[reference-jira-doke-displayname]] — clarifies "Matt Dare" was actually `dare` = Doke
-- [[secure-token-ingress-pattern]] — same principle in a different stack (we're applying it to GitHub Apps + ADO here)
-- [[feedback-never-accept-pasted-secrets]] — if anyone proposes sending the App private key via Teams/email, refuse
-- [[reference-usx-azure-ad-tenant]] — tenant ID for the v0.2 OIDC federation work
+- [[cloud-gha-pat-jeff-shaw-jun19]] — pre-staged design + open questions
+- [[reference-jira-doke-displayname]] — clarifies "Matt Dare" in original transcript was actually `dare` = Doke
+- [[secure-token-ingress-pattern]] — same principle in a different stack (Wiz token onboarding); we are applying federation here, scoped IAM role there
+- [[feedback-never-accept-pasted-secrets]] — if anyone proposes pasting the App private key or PAT in chat, refuse
+- [[reference-usx-azure-ad-tenant]] — tenant ID `bbb5a66d-5c9f-482a-969a-a40304b6bc8d` for the App Reg
+- [[onprem-aad-identity-strategy-jun25]] — INFRA-1559; this work is the same family of "identity right, not identity convenient"
