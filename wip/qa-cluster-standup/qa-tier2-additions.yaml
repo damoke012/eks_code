@@ -1,0 +1,265 @@
+---
+# ==============================================================================
+# QA Tier 2 platform — INFRA-1585 — 2026-07-08
+# 15 Kustomizations added to bring op-usxpress-qa to Dev parity for
+# external-secrets, cert issuers, istio chain, external-dns, prometheus, grafana.
+# Excludes RW, ARC runners, cross-cluster-eso (retired), and Tier 3 components
+# (rook, velero, etcd-backup, octopus-worker, ecr-credentials).
+# ==============================================================================
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: trust-manager-bundle
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/trust-manager-bundle
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: trust-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-namespace
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio
+  prune: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-secrets
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/external-secrets
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager-issuers
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/cert-manager-issuers
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager
+  - name: istio-namespace
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-secrets-config
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/external-secrets-config
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: external-secrets
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-csr
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio-csr
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager-issuers
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-base
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/base
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: istio-csr
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-istiod
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/istiod
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: istio-base
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-cni
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/cni
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: istio-istiod
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istiod-health
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: istio-istiod
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/istiod-health
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 5m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-ztunnel
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/ztunnel
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+  - name: istio-cni
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-ingress
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: istio-istiod
+  - name: istio-ztunnel
+  - name: istio-cni
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/istio-ingress
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: prometheus
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/prometheus
+  prune: true
+  wait: true
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-dns
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: pod-identity-webhook
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/external-dns
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets
+    - name: prometheus
+    - name: istio-ingress
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/grafana
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
