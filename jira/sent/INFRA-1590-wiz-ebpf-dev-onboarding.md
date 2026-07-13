@@ -1,4 +1,8 @@
-# Deploy Wiz (eBPF sensor) on the dev cluster
+# INFRA-1590: Deploy Wiz (eBPF sensor) on the dev cluster
+
+> ⚠️ PROBABLE DUPLICATE of **INFRA-1505** (wiz-ebpf-onboarding-op-usxpress-dev, filed from the
+> 2026-05-29 CySec call). The auto-dedup guard missed it. RECONCILE: close one as duplicate
+> of the other — keep INFRA-1505 (original) or fold its scope into this one. Do NOT run both.
 
 **Type**: Story
 **Priority**: Medium

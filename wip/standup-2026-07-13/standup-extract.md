@@ -21,7 +21,20 @@
 
 ---
 
-## NEW TICKETS TO CREATE (drafts)
+## NEW TICKETS — FILED 2026-07-13 (INFRA-1589..1594)
+
+| Draft (T#) | Filed key |
+|---|---|
+| T1 QA flux-automation + rebuild | **INFRA-1589** |
+| T2 Wiz eBPF dev | **INFRA-1590** ⚠️ probable dup of INFRA-1505 — reconcile |
+| T3 Platform SSO (Entra) | **INFRA-1591** |
+| T4 Data-lake alerting discovery | **INFRA-1592** |
+| T5 Pod crashloop alerting | **INFRA-1593** |
+| T6 EKS K8s upgrade | **INFRA-1594** |
+
+Draft bodies moved to `jira/sent/INFRA-159x-*`.
+
+## NEW TICKETS — original drafts
 
 ### T1 — Automate QA platform-stack Flux reconciliation params + rebuild QA to validate
 - **Epic:** INFRA-1560 (QA/prod readiness). **Type:** Story. **Owner:** platform lead (you).

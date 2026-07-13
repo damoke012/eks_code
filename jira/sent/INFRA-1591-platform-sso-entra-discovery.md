@@ -1,4 +1,4 @@
-# Platform SSO via Entra ID — reusable dev service-account pattern (RisingWave first consumer)
+# INFRA-1591: Platform SSO via Entra ID — reusable dev service-account pattern (RisingWave first consumer)
 
 **Type**: Story
 **Priority**: High

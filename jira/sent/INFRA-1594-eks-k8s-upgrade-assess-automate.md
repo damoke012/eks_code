@@ -1,4 +1,4 @@
-# AWS EKS Kubernetes upgrade — assess current version + automate fleet-style rollout
+# INFRA-1594: AWS EKS Kubernetes upgrade — assess current version + automate fleet-style rollout
 
 **Type**: Story
 **Priority**: Medium

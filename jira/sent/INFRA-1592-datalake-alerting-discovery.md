@@ -1,4 +1,4 @@
-# Data-lake alerting discovery — Kafka Connect + S3 (self-serve app-team guidance)
+# INFRA-1592: Data-lake alerting discovery — Kafka Connect + S3 (self-serve app-team guidance)
 
 **Type**: Story
 **Priority**: Medium
