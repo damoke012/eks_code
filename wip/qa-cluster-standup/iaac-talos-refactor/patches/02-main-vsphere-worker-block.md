@@ -1,34 +1,21 @@
-# main.tf — replace the `module "vsphere_worker"` block
+# main.tf — worker pools + talos pool metadata wiring
 
-## Find this exact block in `deploy/terraform/main.tf`:
+**Corrected 2026-07-13** after seeing the real `modules/talos` interface:
+the module ALREADY supports pools via `var.worker_pool_metadata` (a flat
+`list(object({pool_name, labels, taints}))`, taints as `map(string)` in
+Talos `key => "value:Effect"` form, empty list = Dev backward-compat).
+So there is **NO module patch needed** (old "patch 05" is obsolete). The work
+is purely in root `main.tf`: provision per-pool VMs and build the aligned
+`worker_pool_metadata` list.
 
-```hcl
-module "vsphere_worker" {
-  source                    = "./modules/vsphere_vm"
-  vm_count                  = var.worker_count
-  vm_folder                 = vsphere_folder.cluster_folder.path
-  datacenter                = var.datacenter
-  datastore                 = var.datastore
-  vm_cluster_name           = var.vm_cluster_name
-  content_library_name      = var.content_library_name
-  content_library_item_name = var.content_library_item_name
-  network_name              = var.network_name
-  cpus                      = var.worker_cpus
-  memory_mb                 = var.worker_memory_mb
-  disk_size_gb              = var.disk_size_gb
-  extra_disk_size_gb        = var.worker_ceph_disk_gb
-  name_prefix               = var.worker_name_prefix
-  sleep_seconds             = var.sleep_seconds
-}
-```
+---
 
-## Replace with:
+## 1. Add locals (top of `main.tf`, or your locals block)
 
 ```hcl
-# Worker pools: if worker_pools is set, iterate per pool (labels/taints/sizing
-# per-pool). If empty, fall back to a single implicit "default" pool built
-# from the legacy scalar variables so Dev keeps working unchanged.
 locals {
+  # Pool source: real pools if set, else a single implicit "default" pool from
+  # the legacy scalars so Dev keeps working unchanged.
   effective_worker_pools = length(var.worker_pools) > 0 ? var.worker_pools : {
     default = {
       count        = var.worker_count
@@ -40,8 +27,27 @@ locals {
       taints       = []
     }
   }
-}
 
+  # Per-worker metadata for modules/talos, index-aligned with worker_ips.
+  # MUST iterate pools in the SAME order Terraform flattens module.vsphere_worker
+  # (map keys are sorted), so we sort() the keys here too. Each pool contributes
+  # `count` entries. Taints convert "key=value:Effect" -> { key = "value:Effect" }.
+  # Dev (empty worker_pools) -> [] so the module applies exactly today's behavior.
+  worker_pool_metadata = length(var.worker_pools) > 0 ? flatten([
+    for pool in sort(keys(var.worker_pools)) : [
+      for _ in range(var.worker_pools[pool].count) : {
+        pool_name = pool
+        labels    = var.worker_pools[pool].labels
+        taints    = { for t in var.worker_pools[pool].taints : split("=", t)[0] => split("=", t)[1] }
+      }
+    ]
+  ]) : []
+}
+```
+
+## 2. Replace `module "vsphere_worker"` with a per-pool `for_each`
+
+```hcl
 module "vsphere_worker" {
   for_each = local.effective_worker_pools
 
@@ -63,34 +69,40 @@ module "vsphere_worker" {
 }
 ```
 
-## Also update the `module "talos"` block
+## 3. REQUIRED: `moved` block so Dev doesn't destroy/recreate
 
-The Talos module currently receives flat lists `worker_ips` + `worker_vm_names` from the single vsphere_worker module. Now they come from multiple pool instances.
-
-### Find:
-
-```hcl
-  control_plane_ips         = module.vsphere_cp.ip_addresses
-  worker_ips                = module.vsphere_worker.ip_addresses
-  control_plane_vm_names    = module.vsphere_cp.vm_names
-  worker_vm_names           = module.vsphere_worker.vm_names
-```
-
-### Replace with:
+Singleton → `for_each` changes the address `module.vsphere_worker` ->
+`module.vsphere_worker["default"]`. Without this, `plan` shows Dev workers
+being replaced (breaks the empty-diff retest).
 
 ```hcl
-  control_plane_ips         = module.vsphere_cp.ip_addresses
-  worker_ips                = flatten([for k, v in module.vsphere_worker : v.ip_addresses])
-  control_plane_vm_names    = module.vsphere_cp.vm_names
-  worker_vm_names           = flatten([for k, v in module.vsphere_worker : v.vm_names])
+moved {
+  from = module.vsphere_worker
+  to   = module.vsphere_worker["default"]
+}
 ```
 
-### Also add — pool metadata (for later per-pool label/taint application in talos module):
+## 4. Rewire the `module "talos"` inputs
 
-Right after the existing `worker_count` and `worker_name_prefix` lines inside the `module "talos"` block, add:
+Worker IP/name lists now come from multiple pool instances (sorted key order),
+and pass the new pool metadata list. In the `module "talos"` block:
 
 ```hcl
-  worker_pools = local.effective_worker_pools
+  # was: worker_ips = module.vsphere_worker.ip_addresses
+  worker_ips             = flatten([for k, v in module.vsphere_worker : v.ip_addresses])
+  # was: worker_vm_names = module.vsphere_worker.vm_names
+  worker_vm_names        = flatten([for k, v in module.vsphere_worker : v.vm_names])
+
+  # NEW — drives per-pool labels+taints in modules/talos (empty [] on Dev):
+  worker_pool_metadata   = local.worker_pool_metadata
 ```
 
-**Note:** The `modules/talos` code needs to accept this new `worker_pools` input and apply labels/taints per-worker in the machine config. That module change is drafted separately (see `patches/04-modules-talos-*.md`) — after you paste the module's `main.tf` and `variables.tf` I'll finalize those changes.
+`for k, v in module.vsphere_worker` and `sort(keys(var.worker_pools))` both
+iterate sorted pool keys (application, platform, system), so `worker_ips[i]`
+lines up with `worker_pool_metadata[i]`.
+
+## Verify
+- `terraform plan -var-file=envs/dev.tfvars` → **No changes** (the `moved` block
+  absorbs the address change; `worker_pool_metadata=[]` keeps module output identical).
+- `terraform plan -var-file=envs/qa.tfvars` → all-adds; spot-check the machine
+  config for pool nodes shows `nodeLabels.pool` + `nodeTaints` (platform/application).

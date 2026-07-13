@@ -116,13 +116,15 @@ terraform plan \
   -out=qa-plan.tfplan
 ```
 
-## Modules/talos changes — still pending
+## Modules/talos changes — NOT NEEDED (resolved 2026-07-13)
 
-For pool labels/taints to actually land on the QA worker nodes, `modules/talos/main.tf` needs to accept the `worker_pools` structure and apply labels+taints per-worker in the machine config.
+`modules/talos/main.tf` ALREADY applies per-worker labels+taints from
+`var.worker_pool_metadata`: the `join_workers` resource merges a synthetic zone
+label with `worker_pool_metadata[idx].labels` and sets `worker_pool_metadata[idx].taints`
+(empty list = Dev backward-compat). No module patch (old "patch 05") required.
 
-Please paste `deploy/terraform/modules/talos/main.tf` and `deploy/terraform/modules/talos/variables.tf` when you can — I'll draft that patch and add it as `patches/05-modules-talos-*.md`.
-
-Until that lands, `worker_pools` sets sizing but nodes come up without pool labels.
+Only root `main.tf` work remains: build the aligned `worker_pool_metadata` list
+from `var.worker_pools` and pass it — see the corrected `patches/02-*`.
 
 ## Follow-up tickets to file
 

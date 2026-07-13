@@ -9,12 +9,12 @@
 | Patch | What | Status |
 |---|---|---|
 | 01-variables-additions.tf | append new vars to variables.tf | drafted (mechanical) |
-| 02-main-vsphere-worker-block | main.tf → `worker_pools` structure | drafted (manual edit) |
+| 02-main-vsphere-worker-block | main.tf → per-pool `for_each` + build `worker_pool_metadata` + `moved` block | **CORRECTED 2026-07-13** (was buggy) |
 | 03-risingwave-2-imports-gate | gate RW-2 imports off in QA | drafted (`git mv` hack; cleanup = INFRA follow-up) |
 | 04-talosconfig-secret-import | Dev ARN → `var.talosconfig_secret_arn` | drafted (manual edit) |
-| **05-modules-talos-labels-taints** | **modules/talos accepts `worker_pools`, applies pool labels+taints per worker** | ⛔ **NOT DRAFTED — blocked on modules/talos/*.tf** |
+| ~~05-modules-talos-labels-taints~~ | **OBSOLETE** — `modules/talos` ALREADY accepts `worker_pool_metadata` (list, taints as map, empty=Dev). No module change needed. | ✅ not needed |
 
-Without 05, QA nodes come up sized but WITHOUT pool labels/taints → the 3-pool architecture (System/Platform/Application) doesn't actually land.
+**Key correction (2026-07-13):** `modules/talos/main.tf` already applies per-worker `nodeLabels`/`nodeTaints` from `var.worker_pool_metadata`. My old patch 02 was wrong (passed a map named `worker_pools`; module wants a flat index-aligned LIST named `worker_pool_metadata`, taints as `{key="value:Effect"}`). Patch 02 now builds that list correctly + adds a `moved` block so the singleton→for_each change doesn't destroy/recreate Dev workers (which would break the empty-diff retest).
 
 ### B. INFRA-1589 — automate the manual Flux reconciliation params
 Lessons-learned from the QA build: several platform-stack Flux reconciliation params were set by hand.
@@ -31,9 +31,10 @@ Lessons-learned from the QA build: several platform-stack Flux reconciliation pa
 ### E. Follow-ups to file (from refactor README)
 - op-qa flux branch scaffolding · seed `op-usxpress-qa/talosconfig` SM secret · cloud `ONPREM_BOOTSTRAP_ROLE_ARN_QA` + GHA secret · RW-2 gating cleanup (`.tf.dev-only` → for_each).
 
-## Blockers → need from Dare (both live in the iaac-talos WSL clone, not this repo)
-1. Paste `deploy/terraform/modules/talos/main.tf` + `variables.tf` → I draft **patch 05**.
-2. List the **manual Flux reconciliation steps** from the QA build → I codify them for **INFRA-1589**.
+## Blockers → need from Dare
+1. ✅ RESOLVED — modules/talos already pool-aware; patch 02 corrected. (Was: paste module files.)
+2. List the **manual Flux reconciliation steps** from the QA build → I codify them for **INFRA-1589** (still open).
+3. To make patch 02's find/replace exact: paste the root `deploy/terraform/main.tf` `module "talos"` block (optional — the logic above is correct regardless).
 
 ## Critical path
-05 (labels/taints) → apply 01–05 on a refactor branch → Dev empty-diff retest → QA dry-run → rebuild QA → prod.
+apply 01–04 on a refactor branch → **Dev empty-diff retest** (must say "No changes"; watch for the `moved` block absorbing the vsphere_worker address change) → QA dry-run (verify pool labels/taints in machine config) → rebuild QA → prod.
