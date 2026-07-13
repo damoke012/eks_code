@@ -1,4 +1,4 @@
-# Automate secret rotation — pod-scan + swap from Secrets Manager (future)
+# INFRA-1596: Automate secret rotation — pod-scan + swap from Secrets Manager (future)
 
 **Type**: Story
 **Priority**: Low

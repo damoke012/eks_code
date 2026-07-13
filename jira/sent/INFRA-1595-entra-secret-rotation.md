@@ -1,4 +1,4 @@
-# Entra app-registration secret rotation — Jul–Aug 2026 expiries + runbook
+# INFRA-1595: Entra app-registration secret rotation — Jul–Aug 2026 expiries + runbook
 
 **Type**: Story
 **Priority**: High
