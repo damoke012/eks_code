@@ -82,8 +82,9 @@ QA_VARS = {
     # Talos secret
     "TF_VAR_talosconfig_secret_arn":  "arn:aws:secretsmanager:us-east-2:527101283767:secret:op-usxpress-qa/talosconfig-1Q1ozc",
 
-    # IRSA (off for phase 1)
-    "TF_VAR_enable_irsa":             "false",
+    # IRSA — MUST be true for QA: the IRSA resources (roles/OIDC/buckets/SM) are
+    # already in the QA tfstate. false here would DESTROY them on apply (landmine).
+    "TF_VAR_enable_irsa":             "true",
     "TF_VAR_irsa_oidc_bucket_name":   "op-usxpress-qa-irsa-oidc-v2",
 
     # Flux
