@@ -52,5 +52,15 @@ Lessons-learned from the QA build: several platform-stack Flux reconciliation pa
 **Track 1 — Storage / Tier-3 (REAL BLOCKER):** `qa-tier2-additions.yaml` excluded Tier-3. QA has cluster + Tier-2 but **NO storage** — `kubectl get storageclass` = none, so grafana PVC (wants `ceph-block`) unbound → grafana Pending 6d. Application pool has `ceph_disk_gb=500` (OSD disks ready). FIX: add Rook-Ceph (+ Velero, etcd-backup, etc.) Kustomizations to `op-qa` branch of iaac-talos-flux-platform → `ceph-block` SC → grafana binds. This is the substantive remaining stand-up work.
 **Track 2 — Pool isolation (INFRA-1589, not urgent):** nothing currently needs pool labels (istiod ran flat on app node; grafana blocked on storage not labels). Realize isolation in IaC later.
 
+### RESUME HERE (storage chain — 2026-07-14 EOD)
+Grafana Pending → PVC wants `ceph-block` → no storageclasses → Rook not deployed. Findings:
+- op-qa branch HAS the Rook manifests (`infrastructure/rook-ceph-{operator,cluster}`, `rook-recovery-jobs`), just NOT wired (no Flux Kustomization, no rook ns). Velero IS deployed on op-qa.
+- op-qa `rook-ceph-cluster/cephcluster.yaml` is ALREADY QA-correct: raw-device OSDs `deviceFilter "^sdb$"`, worker-only. Device confirmed `/dev/sdb` (app pool has the 500GB disk).
+- **Prerequisite gap:** the CephCluster mons use `volumeClaimTemplate storageClassName: local-path` (20Gi), but QA has NO storageclass — so mons can't bind → Ceph won't form. Need a **`local-path` StorageClass first**.
+- Minor follow-up: SM `op-usxpress-qa/talosconfig` still = literal `PLACEHOLDER` (TF didn't write real talosconfig back on apply); kubeconfig works so not blocking. File as cleanup.
+
+**Rollout sequence to finish QA storage:** local-path Kustomization → rook-ceph-operator → rook-ceph-cluster → `ceph-block` SC → grafana binds.
+**Next command:** `git -C iaac-talos-flux-platform ls-tree op-qa --name-only infrastructure/ | grep -iE 'local|storage|path'` + `flux get kustomizations -A | grep -iE 'local|storage|path'` → determine if local-path is unwired vs absent. Then draft the storage Kustomization set (dependsOn chain) for the QA cluster flux config. Rook Kustomization draft already in `qa-rook-ceph-additions.yaml`.
+
 ## Critical path
 apply 01–04 on a refactor branch → **Dev empty-diff retest** (must say "No changes"; watch for the `moved` block absorbing the vsphere_worker address change) → QA dry-run (verify pool labels/taints in machine config) → rebuild QA → prod.
