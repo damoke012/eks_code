@@ -1,0 +1,14 @@
+# SC name MUST be exactly "local-path" — the Rook CephCluster mon
+# volumeClaimTemplate (infrastructure/rook-ceph-cluster/cephcluster.yaml)
+# references storageClassName: local-path.
+# NOT default: ceph-block is the intended default for app workloads; local-path
+# exists only to back the Rook mons (and any explicitly-opted-in local volume).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

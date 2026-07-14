@@ -1,0 +1,80 @@
+# ==============================================================================
+# QA Tier-3 STORAGE — INFRA-1585 / INFRA-1589 — 2026-07-14
+# APPEND these to: iaac-talos-flux-cluster
+#                  clusters/op-usxpress-qa/flux-system/infra.yaml
+#
+# Brings op-usxpress-qa to Dev storage parity. Unblocks grafana (PVC on
+# ceph-block, Pending ~6d) and every stateful platform workload.
+#
+# Chain:  local-path-storage (SC "local-path")
+#            └─> rook-ceph-operator  (Rook operator via HelmRelease)
+#                  └─> rook-ceph-cluster  (CephCluster raw OSDs /dev/sdb;
+#                                          mons bind local-path; publishes
+#                                          the "ceph-block" StorageClass)
+#
+# All three manifest dirs already exist on the op-qa branch of
+# iaac-talos-flux-platform (GitRepository "infra"):
+#   infrastructure/local-path-storage/   (NEW — added alongside this change)
+#   infrastructure/rook-ceph-operator/   (present, previously unwired)
+#   infrastructure/rook-ceph-cluster/    (present, previously unwired; QA-correct
+#                                         raw-device OSDs deviceFilter "^sdb$")
+#
+# NOTE vs Dev: Dev's rook-ceph-cluster only dependsOn rook-ceph-operator because
+# Dev's local-path was applied manually/out-of-band. Here local-path is Flux-
+# managed, so rook-ceph-cluster also dependsOn local-path-storage to guarantee
+# the mon SC exists before the CephCluster reconciles. This codifies the manual
+# local-path step the troubleshooting doc flagged as still-owed (INFRA-1589).
+# ==============================================================================
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: local-path-storage
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/local-path-storage
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 5m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-operator
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph-operator
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 15m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-cluster
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: rook-ceph-operator
+    - name: local-path-storage
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph-cluster
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: false
+  timeout: 20m0s

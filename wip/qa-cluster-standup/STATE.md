@@ -60,7 +60,20 @@ Grafana Pending → PVC wants `ceph-block` → no storageclasses → Rook not de
 - Minor follow-up: SM `op-usxpress-qa/talosconfig` still = literal `PLACEHOLDER` (TF didn't write real talosconfig back on apply); kubeconfig works so not blocking. File as cleanup.
 
 **Rollout sequence to finish QA storage:** local-path Kustomization → rook-ceph-operator → rook-ceph-cluster → `ceph-block` SC → grafana binds.
-**Next command:** `git -C iaac-talos-flux-platform ls-tree op-qa --name-only infrastructure/ | grep -iE 'local|storage|path'` + `flux get kustomizations -A | grep -iE 'local|storage|path'` → determine if local-path is unwired vs absent. Then draft the storage Kustomization set (dependsOn chain) for the QA cluster flux config. Rook Kustomization draft already in `qa-rook-ceph-additions.yaml`.
+
+### 2026-07-14 EOD — storage change set DRAFTED, ready to apply
+Investigation complete. Facts established:
+- **QA `infra.yaml` is missing exactly 2 Kustomizations** vs Dev: `rook-ceph-operator` + `rook-ceph-cluster`. Everything else (incl. velero/etcd-backup) already present. Both Rook manifest dirs already exist on flux-platform **op-qa** branch (operator: helmrelease+values-cm+namespace; cluster: cephcluster+storageclasses+toolbox+servicemonitor). op-qa cephcluster = QA-correct (raw OSDs `^sdb$`, worker-only) and BYTE-IDENTICAL to Dev — incl. `mon.volumeClaimTemplate storageClassName: local-path`.
+- **Repo topology:** manifests live in `iaac-talos-flux-platform` (branch-per-env: op-dev/op-qa). The Flux **Kustomization CRs** live in `iaac-talos-flux-cluster` on **master**, dir-per-cluster: `clusters/{bm-dev,op-usxpress-qa,dpl,dpl2}/flux-system/infra.yaml`. QA dir already exists.
+- **`local-path` is uncodified everywhere** — exists on NO flux-platform branch, not in iaac-talos IaC. Dev runs it from a MANUAL apply. The troubleshooting doc (`iaac-talos/deploy/docs/troubleshooting/02-storage/local-path-helper-pod-namespace.md`) documents the intended-but-never-merged IaC + the critical gotcha: helper pod is privileged hostPath in ns `local-path-storage`; cluster PodSecurity=restricted denies it unless ns has `pod-security.kubernetes.io/enforce: privileged` → else mons hang Pending. Since there's no canonical Dev spec, **what we author becomes the standard**; Dev backfill = INFRA-1589 follow-up.
+
+**DRAFTED (in `wip/qa-cluster-standup/`):**
+- `local-path-storage/` — full component (namespace w/ privileged label, rbac, configmap w/ Talos-safe `/var/local-path-provisioner` path, deployment `rancher/local-path-provisioner:v0.0.30`, `local-path` SC WaitForFirstConsumer, kustomization). → goes to flux-platform **op-qa** `infrastructure/local-path-storage/`.
+- `qa-infra-storage-kustomizations.yaml` — the 3 Kustomizations (local-path-storage → rook-ceph-operator[dependsOn external-secrets] → rook-ceph-cluster[dependsOn operator+local-path-storage]). → append to cluster-repo `clusters/op-usxpress-qa/flux-system/infra.yaml`.
+- `APPLY-qa-storage.md` — exact copy/commit/push (both repos, GitOps — push not Octopus) + reconcile/verify + rollback.
+
+**RESUME HERE:** run `APPLY-qa-storage.md` on WSL (2 commits: flux-platform op-qa, cluster-repo master), then `flux reconcile` + watch `kubectl get sc` for `ceph-block` and grafana PVC → Bound. Then close INFRA-1585 storage track; file/advance INFRA-1589 for op-dev local-path backfill.
+**(Superseded draft:** `qa-rook-ceph-additions.yaml` — earlier guess; the real op-qa cephcluster is already correct, don't use its Part B.)
 
 ## Critical path
 apply 01–04 on a refactor branch → **Dev empty-diff retest** (must say "No changes"; watch for the `moved` block absorbing the vsphere_worker address change) → QA dry-run (verify pool labels/taints in machine config) → rebuild QA → prod.

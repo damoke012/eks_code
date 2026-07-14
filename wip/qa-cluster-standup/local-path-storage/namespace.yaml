@@ -1,0 +1,15 @@
+# local-path-storage namespace.
+# The pod-security enforce=privileged label is LOAD-BEARING: the Rancher
+# provisioner spawns a transient privileged hostPath "helper pod" IN THIS
+# namespace to mkdir/rm the backing dir. The cluster enforces PodSecurity
+# `restricted` by default, which denies that helper pod -> PVCs (incl. Rook
+# mons) hang Pending forever. See:
+#   iaac-talos/deploy/docs/troubleshooting/02-storage/local-path-helper-pod-namespace.md
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: local-path-storage
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged
