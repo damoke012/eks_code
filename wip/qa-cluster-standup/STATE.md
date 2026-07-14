@@ -41,5 +41,11 @@ Lessons-learned from the QA build: several platform-stack Flux reconciliation pa
 2. List the **manual Flux reconciliation steps** from the QA build → I codify them for **INFRA-1589** (still open).
 3. To make patch 02's find/replace exact: paste the root `deploy/terraform/main.tf` `module "talos"` block (optional — the logic above is correct regardless).
 
+## 2026-07-14 — QA DEPLOYED via Octopus (release .201) + first INFRA-1589 finding
+- Deployed `0.1.0-refactor-multi-env-parameterization.1.201` to Octopus env `qa` (DevOps space). Auto plan+apply (no manual gate). Cluster op-usxpress-qa reconciled (nodes ~7d old — QA existed since ~Jul 7; deploy applied refactor on top).
+- **Cluster HEALTHY**: 13 nodes Ready (3 CP + 5 app + 3 platform + 2 system), istio fully up (istiod Running, all istio Flux Kustomizations Ready), endpoint https://10.10.82.51:6443.
+- **INFRA-1589 finding**: 3-pool SIZING correct, but pool LABELS+TAINTS only landed on `system` nodes. application + platform nodes have NO pool label, NO taint → isolation NOT enforced (istiod runs on an application node). **terraform STATE has the correct config for ALL pools** (join_workers[0]=application, [5]=platform, [8]=system all show right nodeLabels/nodeTaints) — so NOT a code bug; it's a Talos reconcile/apply gap: labels/taints not materialized onto already-joined app/platform nodes.
+- NEXT: `talosctl get machineconfig` on an app node (10.10.82.138) to determine if config is pushed-but-not-reconciled vs not-pushed → fix = Talos re-register nudge OR force re-apply. Do NOT hand kubectl-label/taint (that's the manual step 1589 kills; tainting `application` would evict istiod).
+
 ## Critical path
 apply 01–04 on a refactor branch → **Dev empty-diff retest** (must say "No changes"; watch for the `moved` block absorbing the vsphere_worker address change) → QA dry-run (verify pool labels/taints in machine config) → rebuild QA → prod.
