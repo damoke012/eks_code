@@ -56,6 +56,18 @@ Lessons-learned from the QA build: several platform-stack Flux reconciliation pa
 - `ecr-credentials`/`octopus-worker`/`arc-runner-rw-pipeline` — Dev role ARNs (acct 700736442855) + dev PAT path; HARMLESS (not in QA infra.yaml / not deployed). Fix when enabled on QA.
 - cert-manager role comments, dashboard titles/uids, SA comments — cosmetic.
 Root pattern = branch-per-env hardcodes env into shared manifests. Proper fix (INFRA-1589) = Flux `postBuild.substituteFrom` a per-cluster env ConfigMap so op-dev/op-qa manifests stay identical.
+
+## 2026-07-14 — "make QA rebuild-clean" (all IaC, zero post-creation) — INFRA-1589
+User goal: tear down + rebuild QA → everything auto, nothing manual. Investigation:
+- **Bootstrap roadmap exists:** `iaac-talos/deploy/docs/troubleshooting/QA-CLUSTER-BOOTSTRAP-CHECKLIST.md` (10 phases + DR principle "never manually create a Secret that isn't IaC'd"; SM values = ESO-from-SM wrapper-TF'd + value out-of-band-persistent, OR Octopus runbook, OR tfstate).
+- **BIG finding — QA IRSA is ALREADY fully TF-managed:** QA tfstate contains `module.irsa[0].*` + all enable_irsa-gated resources (roles, OIDC provider d2t7d36wmf0hbm.cloudfront.net, buckets, talosconfig SM, ssm params, magerunner SA) — built 2026-07-07 with enable_irsa=true. So NO import-flip needed for IRSA; it's in state.
+- **LANDMINE:** committed `envs/qa.tfvars enable_irsa=false` (+ empty bucket, `-XXXXXX` talosconfig ARN) is WRONG vs state. Octopus deploys from `TF_VAR_*` (env.auto.tfvars), NOT `-var-file` (proven: .201 didn't destroy IRSA despite committed false) — so committed false is currently inert, BUT any apply that resolves false → destroys all IRSA. Fix committed tfvars to true (matches state).
+- **Only AWS resource NOT in TF = the 2 hand-seeded grafana SM secrets.** Codify as wrappers in modules/irsa (talosconfig pattern), count-gated on per-env ARN (safe for shared module), adopt via import blocks.
+- QA grafana ARNs: `…/platform/grafana-FMI2a9`, `…/azure-ad-8PBQhR`. Dev: `…grafana-9O868z`, `…azure-ad-Y9xkdl`. talosconfig `…/talosconfig-1Q1ozc`.
+- **Item D bug:** QA talosconfig SM VALUE still literal `PLACEHOLDER_POPULATED_BY_TERRAFORM_ON_FI…` — NO `aws_secretsmanager_secret_version` exists (TF never writes it, comment is wrong) → etcd-backup CronJob would fail. Fix = add secret_version fed by talos_client_configuration (separate careful step).
+
+**DRAFTED (in wip/qa-cluster-standup/):** `apply-irsa-grafana-codify.sh` (edits iaac-talos refactor branch: grafana-secret.tf module + import blocks + root/module vars + qa.tfvars landmine fix + dev.tfvars grafana ARNs) and `APPLY-irsa-grafana.md` (local plan GATE = 2 imports + 0 destroy; **mandatory Octopus TF_VAR_grafana_*_secret_arn add** since Octopus ignores -var-file; commit/push; external-dns txtOwnerId dev→qa on op-qa; item D notes).
+**RESUME:** run apply-irsa-grafana-codify.sh → git diff → fmt/validate → local plan (must be 2 imports, 0 destroy) → add Octopus QA TF_VARs → commit/push → Octopus QA deploy. Then external-dns fix. Then item D (talosconfig value). enable_irsa flip is SAFE (matches state); do NOT plan with committed false.
 **Track 2 — Pool isolation (INFRA-1589, not urgent):** nothing currently needs pool labels (istiod ran flat on app node; grafana blocked on storage not labels). Realize isolation in IaC later.
 
 ### RESUME HERE (storage chain — 2026-07-14 EOD)
