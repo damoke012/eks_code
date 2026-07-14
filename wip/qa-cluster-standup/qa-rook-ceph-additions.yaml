@@ -1,0 +1,114 @@
+# ==============================================================================
+# QA Rook-Ceph — the missing storage tier for op-usxpress-qa (INFRA-1585)
+# 2026-07-14. Unblocks grafana (PVC on ceph-block, Pending 6d) + all stateful
+# platform workloads. Velero already deployed on op-qa; only Rook-Ceph missing.
+#
+# DIFFERS FROM DEV: Dev uses PVC-backed OSDs on local-path. QA has raw 500GB
+# disks on the APPLICATION pool (qa.tfvars application ceph_disk_gb=500) and no
+# storageclass, so QA uses RAW-DEVICE OSDs placed on the application pool.
+#
+# ⚠️ DRAFT — storage is sensitive. Before applying:
+#   1. Verify the raw device name on an application node (see command below).
+#   2. Confirm infrastructure/rook-ceph-operator + rook-ceph-cluster exist on the
+#      op-qa branch of iaac-talos-flux-platform (inherited from op-dev). The
+#      operator manifest is env-agnostic; the CephCluster below REPLACES the
+#      inherited one for QA topology.
+#   3. Review with Dare before Flux applies (prune:true).
+#
+# Verify device on a QA application node (raw disk that is NOT the Talos OS disk):
+#   talosctl -n 10.10.82.138 get disks        # needs op-usxpress-qa talosconfig from SM
+#   # expect the 500GB disk (e.g. /dev/sdb) distinct from the ~100GB OS disk
+# ==============================================================================
+
+# ---- PART A: Flux Kustomizations (add to the op-qa cluster flux config, ----
+# ---- i.e. the QA equivalent of clusters/bm-dev/flux-system/infra.yaml) ----
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-operator
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph-operator
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 15m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-cluster
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: rook-ceph-operator
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rook-ceph-cluster
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: false
+  timeout: 20m0s
+
+# ---- PART B: QA CephCluster (op-qa branch: infrastructure/rook-ceph-cluster/ ----
+# ---- cephcluster.yaml) — raw-device OSDs on the application pool. ----
+# ---- <<< VERIFY deviceFilter against the real disk before applying >>> ----
+#
+# apiVersion: ceph.rook.io/v1
+# kind: CephCluster
+# metadata:
+#   name: rook-ceph
+#   namespace: rook-ceph
+# spec:
+#   cephVersion: { image: quay.io/ceph/ceph:v18 }   # match Dev's pinned version
+#   dataDirHostPath: /var/lib/rook
+#   mon: { count: 3, allowMultiplePerNode: false }
+#   mgr: { count: 2 }
+#   dashboard: { enabled: false }
+#   # OSDs: raw device on application-pool nodes only
+#   storage:
+#     useAllNodes: false
+#     useAllDevices: false
+#     deviceFilter: "^sdb$"          # <<< VERIFY: the 500GB raw disk, NOT the OS disk
+#     nodes:
+#       - name: talos-wk-op-qa-application-1
+#       - name: talos-wk-op-qa-application-2
+#       - name: talos-wk-op-qa-application-3
+#       - name: talos-wk-op-qa-application-4
+#       - name: talos-wk-op-qa-application-5
+#   placement:
+#     all:
+#       nodeAffinity:                 # keep ceph daemons off control-plane
+#         requiredDuringSchedulingIgnoredDuringExecution:
+#           nodeSelectorTerms:
+#             - matchExpressions:
+#                 - { key: node-role.kubernetes.io/control-plane, operator: DoesNotExist }
+#   # resource sizing: reuse Dev's post-2026-06-17-retro trims (mgr 2Gi, osd 2Gi limit)
+#
+# Then a CephBlockPool + StorageClass "ceph-block" (grafana's PVC references it):
+# apiVersion: ceph.rook.io/v1
+# kind: CephBlockPool
+# metadata: { name: replicapool, namespace: rook-ceph }
+# spec: { failureDomain: host, replicated: { size: 3 } }
+# ---
+# apiVersion: storage.k8s.io/v1
+# kind: StorageClass
+# metadata: { name: ceph-block }
+# provisioner: rook-ceph.rbd.csi.ceph.com
+# parameters: { pool: replicapool, clusterID: rook-ceph, imageFormat: "2", imageFeatures: layering, csi.storage.k8s.io/fstype: ext4 }
+# reclaimPolicy: Delete
+# allowVolumeExpansion: true
+
+# NOTE: the op-qa CephBlockPool/StorageClass may already exist in the inherited
+# rook-ceph-cluster manifests (from op-dev) — reuse those; only the CephCluster
+# storage/placement block needs QA raw-device values. The SC name MUST be
+# "ceph-block" to satisfy the existing grafana PVC.
