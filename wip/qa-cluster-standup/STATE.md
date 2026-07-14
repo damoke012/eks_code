@@ -5,7 +5,12 @@
 
 ## Completion checklist
 
-### A. iaac-talos parameterization refactor (single code path, per-env tfvars)
+### ⚑ REALITY CHECK (2026-07-13): the refactor is ALREADY DONE in the repo
+The parameterization refactor is committed on `iaac-talos` branch **`refactor/multi-env-parameterization`** (commit `5492f9b`), now merged with `feature/op-usxpress-dev` (merge `adfbed0`) and **`terraform validate` → "configuration is valid."** The real repo already has: worker_pools/enable_rw2_imports/talosconfig_secret_arn vars, `effective_worker_pools` + `worker_pool_metadata` locals (sort(keys) aligned), vsphere_worker `for_each`, talos module wired, `envs/{dev,qa}.tfvars`, RW-2 gated (`.tf.dev-only`), and the `for_each`-gated talosconfig import.
+**The draft patches 01–04 below were REDUNDANT re-drafts (and had bugs: taints-as-list, obsolete patch 05). The real repo uses taints as `map(string)` and is correct. Do NOT apply them — the work exists.**
+Remaining = run the plans + fill QA values (see D).
+
+### A. iaac-talos parameterization refactor (single code path, per-env tfvars) — SUPERSEDED by repo
 | Patch | What | Status |
 |---|---|---|
 | 01-variables-additions.tf | append new vars to variables.tf | drafted (mechanical) |
