@@ -1,4 +1,4 @@
-# Automate QA platform-stack Flux reconciliation params + rebuild QA to validate
+# INFRA-1589: Automate QA platform-stack Flux reconciliation params + rebuild QA to validate
 
 **Type**: Story
 **Priority**: High

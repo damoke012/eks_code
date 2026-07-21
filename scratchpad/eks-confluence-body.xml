@@ -1,0 +1,305 @@
+<p>How the AWS EKS fleet is built, run, and extended &#8212; cluster provisioning, the app onboarding &amp; deploy pipeline, the platform stack, and the services underneath. <strong>Region:</strong> us-east-2 &#183; <strong>Clusters:</strong> 3 (dev / qa / prod) &#183; <strong>Kubernetes:</strong> 1.35 on Bottlerocket &#183; <strong>Provisioner:</strong> Terragrunt &#8594; Octopus &#183; <strong>Source:</strong> variant-inc/iaac-eks.</p>
+<ac:structured-macro ac:name="info"><ac:rich-text-body>
+<p><strong>Scope:</strong> AWS cloud EKS only. On-prem Talos (op-usxpress-dev/qa) is a separate architecture. <strong>Baseline confirmed live 2026-07-15</strong>; component versions sampled from <code>usxpress-dev</code>. Interactive (styled) version: the Claude artifact &#8212; <ac:link><ri:url ri:value="https://claude.ai/code/artifact/8fbc2338-45dc-4b9b-a796-05e626c11c30"/><ac:plain-text-link-body><![CDATA[open]]></ac:plain-text-link-body></ac:link>.</p>
+</ac:rich-text-body></ac:structured-macro>
+
+<h1>1. At a glance</h1>
+<p>Three single-tenant EKS clusters, one per AWS account, all in <code>us-east-2</code>. Everything is provisioned as code and promoted dev &#8594; qa &#8594; prod.</p>
+<table><tbody>
+<tr><th>Tier</th><th>Cluster</th><th>Account</th><th>Profile</th><th>Region</th></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">DEV</ac:parameter></ac:structured-macro></td><td><code>usxpress-dev</code></td><td>700736442855</td><td>usx-dev</td><td>us-east-2</td></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">QA</ac:parameter></ac:structured-macro></td><td><code>qa-one</code></td><td>527101283767</td><td>usx-qa</td><td>us-east-2</td></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Red</ac:parameter><ac:parameter ac:name="title">PROD</ac:parameter></ac:structured-macro></td><td><code>usxpress-prod</code></td><td>937464026810</td><td>ops-controller</td><td>us-east-2</td></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Grey</ac:parameter><ac:parameter ac:name="title">SHARED</ac:parameter></ac:structured-macro></td><td><code>devops / ECR</code></td><td>064859874041</td><td>usx-devops</td><td>Image + Helm-chart registry</td></tr>
+</tbody></table>
+<table><tbody>
+<tr><th>Kubernetes version</th><th>Node OS / AMI</th></tr>
+<tr><td><strong>1.35</strong> on all three envs (platform eks.15&#8211;17), one minor behind newest <code>1.36</code>. Insights PASS except a kube-proxy skew warning.</td><td><strong>Bottlerocket OS 1.62.1</strong> (aws-k8s-1.35), kernel 6.12.88, containerd 2.1.8, kubelet v1.35.4 &#8212; Graviton <code>m7g/m6g.xlarge</code>, AMI type <code>BOTTLEROCKET_ARM_64</code>.</td></tr>
+</tbody></table>
+
+<h1>2. Environments &amp; accounts</h1>
+<p>Isolation is by AWS account, not namespace. A shared services account holds the image &amp; chart registry consumed by all three clusters.</p>
+<table><tbody>
+<tr><th>Tier</th><th>Cluster</th><th>Account</th><th>Profile</th><th>Role</th></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">DEV</ac:parameter></ac:structured-macro></td><td><code>usxpress-dev</code></td><td>700736442855</td><td>usx-dev</td><td>First landing zone for every change; RisingWave &amp; new addons prove out here.</td></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">QA</ac:parameter></ac:structured-macro></td><td><code>qa-one</code></td><td>527101283767</td><td>usx-qa</td><td>Pre-prod validation tier in the Octopus lifecycle.</td></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Red</ac:parameter><ac:parameter ac:name="title">PROD</ac:parameter></ac:structured-macro></td><td><code>usxpress-prod</code></td><td>937464026810</td><td>ops-controller</td><td>Production workloads; ~150 Octopus projects in the USXpress space.</td></tr>
+<tr><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Grey</ac:parameter><ac:parameter ac:name="title">SHARED</ac:parameter></ac:structured-macro></td><td><code>devops / ECR</code></td><td>064859874041</td><td>usx-devops</td><td>Image + Helm-chart registry (ECR) pulled by all clusters.</td></tr>
+</tbody></table>
+<ac:structured-macro ac:name="info"><ac:rich-text-body>
+<p>INFRA-1594's fleet-upgrade plan references a <strong>dev &#8594; QA/staging &#8594; prod</strong> flow &#8212; a distinct <strong>staging</strong> tier may be introduced for the upgrade rollout. Today the running fleet is the three clusters above.</p>
+</ac:rich-text-body></ac:structured-macro>
+
+<h1>3. How a cluster is created</h1>
+<p>Clusters are provisioned from <code>variant-inc/iaac-eks</code> (default branch <code>master</code>). Nothing is applied from a laptop &#8212; a GitHub Action packages the release and Octopus runs it.</p>
+<p><strong>Flow:</strong> <code>iaac-eks/apps/terragrunt</code> (Terragrunt) + PowerShell &#8594; GitHub Actions packages the release &#8594; Octopus <strong>DevOps</strong> space &#8594; Terragrunt run per env (EKS control plane + Karpenter node config) &#8594; <code>iaac-eks-bootstrap</code> lays in networking, security, DNS, certs.</p>
+<ac:structured-macro ac:name="note"><ac:rich-text-body>
+<p>The KT-era "<code>deploy/terraform</code> + <code>modules/</code>" layout is <strong>outdated</strong>. In <code>iaac-eks</code> the <code>deploy/</code> dir holds orchestration only (<code>config.yaml</code>, <code>secrets.yaml</code>, <code>deploy.ps1</code>); the actual IaC lives under <code>apps/</code> &#8212; Terragrunt units in <code>apps/terragrunt</code> (<code>root.hcl</code>, <code>_envcommon</code>, <code>modules/</code>, <code>live/</code>), Helm via Helmfile in <code>apps/charts</code>.</p>
+</ac:rich-text-body></ac:structured-macro>
+<h2>The cloud repo family</h2>
+<table><tbody>
+<tr><th>Repo</th><th>Owns</th></tr>
+<tr><td><code>iaac-eks</code></td><td>Cluster + app infrastructure &#8212; Terragrunt units in <code>apps/terragrunt</code> + Helm charts in <code>apps/charts</code>, driven by PowerShell (<code>deploy/deploy.ps1</code>).</td></tr>
+<tr><td><code>iaac-eks-bootstrap</code></td><td>Core platform bootstrap &#8212; <strong>networking, security, DNS, certificate management</strong>. A Helmfile with a dir per component: cilium, cert-manager, external-dns, external-secrets, flux, karpenter, aws-load-balancer, reloader, vpa, kube-system, pre_helm, common.</td></tr>
+<tr><td><code>terraform-eksctl-nodegroup</code></td><td>Reusable Terraform module for AWS node groups.</td></tr>
+<tr><td><code>iaac-eks-manifests</code></td><td>Flux GitOps source for the platform layer.</td></tr>
+<tr><td><code>sre-iaac</code></td><td>SRE scripts deployed across all EKS clusters.</td></tr>
+<tr><td><code>eks-auth-sync</code></td><td>Cluster auth / access sync.</td></tr>
+<tr><td><code>observability-stack</code></td><td>OpenTelemetry operator, Honeycomb agent, observability tooling.</td></tr>
+<tr><td><code>prowler-sechub-app</code></td><td>Prowler security scans &#8594; AWS Security Hub.</td></tr>
+</tbody></table>
+<h2>Terragrunt layout &amp; where the addons come from</h2>
+<table><tbody>
+<tr><th><code>iaac-eks/apps/terragrunt</code></th><th><code>iaac-eks-bootstrap/apps</code> &#8212; the platform addons</th></tr>
+<tr><td><p>Textbook Terragrunt:</p><ul><li><code>root.hcl</code> &#8212; root Terragrunt config</li><li><code>_envcommon</code> &#8212; shared inputs per env</li><li><code>modules/</code> &#8212; the TF modules</li><li><code>live/</code> &#8212; per-env instantiations</li></ul><p><code>live/</code> wires each env to <code>modules/</code> with <code>_envcommon</code> defaults. Helm is layered via Helmfile in <code>apps/charts</code> (<code>helmfiles.d</code>, <code>values</code>, <code>bases</code>).</p></td><td><p>A <strong>Helmfile</strong> (<code>helmfile.yaml</code>) with a directory per component &#8212; this is where the &sect;5 stack is actually authored:</p><p><code>cilium &#183; cert-manager &#183; external-dns &#183; external-secrets &#183; flux &#183; karpenter &#183; aws-load-balancer &#183; reloader &#183; vpa &#183; kube-system &#183; pre_helm &#183; common</code></p></td></tr>
+</tbody></table>
+
+<h1>4. Kubernetes &amp; node configuration</h1>
+<p>Karpenter provisions the entire fleet just-in-time. All three clusters run K8s <strong>1.35</strong>; newest available is 1.36 (one minor behind &#8212; healthy).</p>
+<table><tbody>
+<tr><th>Cluster</th><th>K8s</th><th>Platform</th><th>Upgrade policy</th><th>Readiness</th></tr>
+<tr><td><code>usxpress-dev</code></td><td>1.35</td><td>eks.15</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">EXTENDED</ac:parameter></ac:structured-macro></td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">PASSING*</ac:parameter></ac:structured-macro></td></tr>
+<tr><td><code>qa-one</code></td><td>1.35</td><td>eks.17</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">EXTENDED</ac:parameter></ac:structured-macro></td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">PASSING*</ac:parameter></ac:structured-macro></td></tr>
+<tr><td><code>usxpress-prod</code></td><td>1.35</td><td>eks.15</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">EXTENDED</ac:parameter></ac:structured-macro></td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">PASSING*</ac:parameter></ac:structured-macro></td></tr>
+</tbody></table>
+<p><em>* Every UPGRADE_READINESS insight PASSES except <code>kube-proxy version skew</code> (WARNING) on all three. Upgrade policy EXTENDED = clusters may roll into paid extended support rather than auto-upgrade &#8212; a cost/governance choice, not a sign they're unsupported.</em></p>
+<p><strong>Nodes:</strong> Karpenter 1.11.1 owns the whole fleet &#8212; every node carries a <code>karpenter.sh/nodepool</code> label; none run on an EKS managed node group. NodePools observed: <code>iaac</code> (platform), <code>apps</code> (workloads), <code>ingressgateway</code> (Istio). Node image Bottlerocket 1.62.1 / Graviton ARM64 (m7g/m6g.xlarge).</p>
+<ac:structured-macro ac:name="warning"><ac:rich-text-body>
+<p><strong>cluster-autoscaler is vestigial</strong> &#8212; still deployed (<code>cluster-autoscaler-aws-cluster-autoscaler</code>, image <code>v1.26.2</code>, 9 minors stale) but every node is Karpenter-owned, so it has nothing to scale. Confirm idle, then remove.</p>
+</ac:rich-text-body></ac:structured-macro>
+
+<h1>5. Platform stack</h1>
+<p>Addons ship three ways. <strong>Delivery reality (live 2026-07-15):</strong> only <code>kube-proxy</code> is an AWS-managed EKS addon; vpc-cni, CoreDNS, EBS/EFS CSI are self-managed Helm releases reconciled by Flux (authored as Helmfile in <code>iaac-eks-bootstrap</code>). <strong>Cilium 1.19.2 runs alongside the AWS VPC CNI</strong> (network-policy / observability).</p>
+<table><tbody>
+<tr><th><code>aws_eks_addon</code></th><th>Helm / Flux</th><th>GitOps</th></tr>
+<tr><td><p>The only AWS-managed addon.</p><ul><li><code>kube-proxy</code> &#8212; v1.34.1, one minor behind cluster (skew warning)</li></ul></td><td><p>Everything else &#8212; authored as Helmfile in iaac-eks-bootstrap, reconciled by Flux:</p><ul><li><strong>networking</strong> &#8212; aws-vpc-cni, cilium, coredns, external-dns</li><li><strong>autoscaling</strong> &#8212; karpenter (owns fleet), keda, descheduler, goldilocks, VPA 1.5.1 (cluster-autoscaler vestigial)</li><li><strong>certs/secrets</strong> &#8212; cert-manager, trust-manager, external-secrets</li><li><strong>mesh/ingress</strong> &#8212; istio, aws-load-balancer-controller, agentgateway</li><li><strong>storage</strong> &#8212; ebs-csi, efs-csi, topolvm autoresizer</li><li><strong>data operators</strong> &#8212; cloudnative-pg, strimzi-kafka, rabbitmq</li><li><strong>observability</strong> &#8212; kube-prometheus-stack, opentelemetry, kubecost</li></ul></td><td><p>Flux owns the platform layer.</p><ul><li><code>flux2 2.18.4</code> &#8212; controllers</li><li><code>iaac-eks-manifests</code> &#8212; platform sync</li><li><code>iaac-monitoring-manifests</code> &#8212; monitoring sync</li><li><code>reloader 2.2.9</code> &#8212; config/secret rollout</li></ul></td></tr>
+</tbody></table>
+<h2>Key component versions (live, usxpress-dev, 2026-07-15)</h2>
+<table><tbody>
+<tr><th>Component</th><th>Role</th><th>Version</th></tr>
+<tr><td><code>karpenter</code></td><td>Node autoscaling</td><td>1.11.1</td></tr>
+<tr><td><code>cilium</code></td><td>CNI / network policy</td><td>1.19.2</td></tr>
+<tr><td><code>aws-vpc-cni</code></td><td>Pod networking</td><td>1.21.1</td></tr>
+<tr><td><code>istio</code> (istiod/base/cni)</td><td>Service mesh</td><td>1.29.2</td></tr>
+<tr><td><code>aws-load-balancer-controller</code></td><td>ALB / NLB ingress</td><td>3.1.0</td></tr>
+<tr><td><code>cert-manager</code></td><td>TLS issuance</td><td>1.20.1</td></tr>
+<tr><td><code>external-secrets</code></td><td>SM &#8594; k8s secrets</td><td>2.2.0</td></tr>
+<tr><td><code>external-dns</code></td><td>Route53 records</td><td>0.20.0</td></tr>
+<tr><td><code>cloudnative-pg</code></td><td>Postgres operator</td><td>1.29.0</td></tr>
+<tr><td><code>strimzi-kafka-operator</code></td><td>Kafka operator</td><td>0.51.0</td></tr>
+<tr><td><code>kube-prometheus-stack</code></td><td>Monitoring</td><td>chart 83.4.0 / op v0.90.1</td></tr>
+<tr><td><code>opentelemetry-operator</code></td><td>Tracing / metrics</td><td>0.109.0</td></tr>
+<tr><td><code>keda</code></td><td>Event autoscaling</td><td>2.19.0</td></tr>
+<tr><td><code>flux2</code></td><td>GitOps controllers</td><td>2.18.4 (app 2.8.8)</td></tr>
+<tr><td><code>kube-proxy</code></td><td>Managed addon</td><td>v1.34.1 &#8594; 1.35 avail (behind)</td></tr>
+</tbody></table>
+<ac:structured-macro ac:name="info"><ac:rich-text-body>
+<p><strong>kube-system also carries:</strong> the VPA stack (admission/recommender/updater 1.5.1), the VPC-CNI <code>aws-network-policy-agent</code> (v1.3.1), a <code>headroom</code> DaemonSet (pause pods reserving warm capacity for Karpenter), a Windows EBS-CSI node DaemonSet, and homegrown ops controllers (<code>cleanup-oomkilled/pending/stuck-resize-pods</code>, <code>bump-vpa-on-oom</code>, <code>service-topology</code>) running on an unpinned <code>chainguard/kubectl:latest-dev</code> tag &#8212; worth pinning.</p>
+</ac:rich-text-body></ac:structured-macro>
+<h2>Ingress &amp; mesh</h2>
+<p><strong>North-south</strong> traffic (external clients &#8596; the cluster) enters through the <code>aws-load-balancer-controller</code> (v3.1.0, ALB/NLB) + a pair of Istio ingress gateways (public + internal). <strong>East-west</strong> traffic (service &#8596; service inside the cluster) runs on <strong>Istio 1.29.2</strong> with the Istio CNI, namespaces labelled <code>istio.io/dataplane-mode: ambient</code>. Monitoring is the full <code>kube-prometheus-stack</code>. Flux reconciles the platform layer.</p>
+<h2>Data &amp; messaging layer</h2>
+<p>None of the datastores are AWS-managed services (no MSK / DocumentDB / ElastiCache). They're a mix of external SaaS and on-cluster operators &#8212; which decides who owns version upgrades:</p>
+<table><tbody>
+<tr><th>System</th><th>Where it runs</th><th>We manage</th><th>Engine upgrades</th></tr>
+<tr><td>PostgreSQL</td><td>RDS PostgreSQL <strong>14.22</strong> &#8212; one per env (dev/qa t4g.small, prod r6g.large Multi-AZ). CNPG operator installed but unused.</td><td>DB + users (TF)</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">AWS RDS</ac:parameter></ac:structured-macro></td></tr>
+<tr><td>Kafka brokers</td><td>Confluent Cloud (SaaS)</td><td>Topics / ACLs / service accounts (TF)</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">CONFLUENT</ac:parameter></ac:structured-macro></td></tr>
+<tr><td>Kafka Connect</td><td>Strimzi, on-cluster (op 0.51.0, connect &#215;3)</td><td>Operator + Connect + connectors</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">US</ac:parameter></ac:structured-macro></td></tr>
+<tr><td>MongoDB</td><td>Atlas (SaaS)</td><td>Cluster tier + users (TF)</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">ATLAS</ac:parameter></ac:structured-macro></td></tr>
+<tr><td>RabbitMQ</td><td>Operator installed (4.4.34) &#8212; 0 clusters in any env</td><td>&#8212;</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Grey</ac:parameter><ac:parameter ac:name="title">IDLE</ac:parameter></ac:structured-macro></td></tr>
+</tbody></table>
+<p><em>Confirmed across dev + qa + prod: app Postgres is RDS PostgreSQL 14.22 (Graviton; prod Multi-AZ). The CNPG and RabbitMQ operators run 0 clusters and are effectively unused. Kafka brokers are external (Confluent Cloud); Strimzi on-cluster runs Kafka Connect (the connect-connect-* pods), not brokers. <strong>PG 14 nears end-of-life &#8212; an RDS major upgrade (14 &#8594; 16/17) is a due item alongside the K8s one.</strong></em></p>
+
+<h1>6. Identity &#8212; IRSA</h1>
+<p>Pods get AWS credentials through IAM Roles for Service Accounts. On EKS this is native: the OIDC provider and pod-identity webhook are supplied by the managed control plane (nothing to vendor, unlike on-prem Talos).</p>
+<p><strong>Flow:</strong> SA annotated <code>eks.amazonaws.com/role-arn</code> &#8594; EKS pod-identity webhook injects token + role env &#8594; <code>sts:AssumeRoleWithWebIdentity</code> &#8594; short-lived creds for AWS API calls. Trust-policy subject must be <code>system:serviceaccount:&lt;ns&gt;:&lt;sa&gt;</code> exactly.</p>
+
+<h1>7. How an app onboards</h1>
+<p>An app is defined by a <code>spec.yaml</code> in its own repo (the deployment contract). <strong>mage-runner</strong> reads it, validates against JSON schemas, and drives <code>terraform-variant-apps</code> to build the app's infra + deploy its Helm chart.</p>
+<ul>
+<li><code>common/</code> &#8212; eks-data, role, replicator, auth, buckets, kafka, postgres, dynamodb, mongodb-cluster, mongodb-user, mongodb-privatelink</li>
+<li><code>apps/</code> &#8212; exactly one of api / cron / handler / ui</li>
+</ul>
+<p>One chart per app type from ECR: <code>helm-charts/dx-{api,cron,handler,ui}</code> &#8212; provisions Deployment, Service, ServiceAccount (IRSA-annotated), and the Istio VirtualService/Gateway. Per-app state: <code>s3://{bucket}/{space}/{app}/{module}/terraform.tfstate</code>.</p>
+
+<h1>8. Deploy &amp; upgrade workflow</h1>
+<p><strong>Pipeline:</strong> git push (app repo) &#8594; GitHub Actions builds + tests, pushes image to ECR (064859874041) &#8594; mage-runner creates an Octopus release with the new tag &#8594; Octopus <strong>USXpress</strong> space &#8212; click Deploy (dev &#8594; qa &#8594; prod) &#8594; mage-runner CD drives <code>terraform-variant-apps</code> &#8594; infra + Helm chart &#8594; pod running.</p>
+<h2>8a. The DX system &#8212; what's what</h2>
+<p>"DX" is the whole deployment platform, not a single repo. Three layers, easy to conflate:</p>
+<table><tbody>
+<tr><th>Layer</th><th>What it is</th></tr>
+<tr><td><strong>DX (the system)</strong></td><td><code>mage-runner</code> + Octopus library variable sets (<code>DX__Common</code>, <code>DX__EKSCluster</code>, <code>DX__Runner</code>, <code>DX__TFState</code>, <code>DX__AWSAccounts</code>) + the DX-Apply step + GitHub Actions workflows.</td></tr>
+<tr><td><strong>DX-Apply</strong></td><td>A specific Octopus deployment-process step (inline PowerShell) that prepares the environment and invokes mage. (On-prem, a patched version reads SSM and strips <code>spec.yaml</code>.)</td></tr>
+<tr><td><strong>mage-runner</strong></td><td>The actual Go binary that does the work &#8212; reads the spec, decides which Terraform modules to run, runs them, composes Helm values, talks to Octopus.</td></tr>
+</tbody></table>
+
+<h2>8b. Two repos, and how they connect</h2>
+<table><tbody>
+<tr><th>Repo</th><th>Role</th></tr>
+<tr><td><code>variant-inc/mage-runner</code></td><td>The <strong>orchestrator</strong> &#8212; Go, built with the Mage tool. Fork branch <code>feature/onprem-support</code>.</td></tr>
+<tr><td><code>variant-inc/terraform-variant-apps</code></td><td>The <strong>Terraform modules</strong> mage invokes (~40 modules across common/infrastructure/apps).</td></tr>
+</tbody></table>
+<p><strong>The link:</strong> mage-runner builds a path into <code>$TERRAFORM_APPS_PATH/modules/&lt;module&gt;</code> and runs each module through the <code>hashicorp/terraform-exec</code> Go SDK &#8212; it <strong>never shells out to the <code>terraform</code> CLI</strong>.</p>
+
+<h2>8c. Where the Go lives &#8212; mage-runner folder structure</h2>
+<p>Go 1.22+, built with <a href="https://magefile.org/">Mage</a> (a Go-based Make): <code>go build -o /usr/local/bin/mage ./cmd/mage</code>. Entry point is <code>cmd/mage/magefiles/terraform.go &#8594; TfDeploy.Apply()</code>.</p>
+<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">text</ac:parameter><ac:plain-text-body><![CDATA[mage-runner/
+|- cmd/mage/magefiles/
+|    |- terraform.go     # TfDeploy: Apply / Destroy / Infrastructure / Apps / ScriptRun
+|    |- common.go        # Prepare, ParseSpec, ValidateSpec
+|    |- octopus.go       # CreateOctopusRelease, project/channel setup
+|    \- github.go        # GitHub Actions integration
+|- internal/
+|    |- context/
+|    |    |- context.go  # DXContext, DXSpec types
+|    |    \- env.go       # Config struct + env-tag mapping (caarlos0/env)
+|    |- terraform/                    # verified live 2026-07-15
+|    |    |- terraform_functions.go  # * TfRun() -- the heart of the pipeline
+|    |    |- terraform.go  terraform_helpers.go
+|    |    |- interface.go  # TF abstraction     constants.go
+|    |    |- common.go     # shouldRunTerraform(), S3 state management
+|    |    |- apps.go  apps_functions.go  script_run.go
+|    |    |- namespace.go replicator.go role.go auth.go
+|    |    |- buckets.go kafka.go postgres.go dynamodb.go
+|    |    |- mongodb_cluster.go mongodb_user.go
+|    |    \- *_test.go  test_helpers.go  test_mocks.go   # full unit-test suite
+|    |- kube/            # namespace.go, apps.go (helm/pod mgmt), common.go (kubeconfig)
+|    |- shared/          # spec.go (YAML parse + env merge), schema_validation.go, functions.go
+|    \- octopus/         # Octopus SDK wrappers
+|- hack/                # local dev: spec.yaml + <cluster>-terraform.tfvars.json
+\- go.mod
+
+Mage targets:  mage tfDeploy:apply | tfDeploy:destroy | tfDeploy:apps | createOctopusRelease]]></ac:plain-text-body></ac:structured-macro>
+
+<h2>8d. The stages &#8212; <code>TfDeploy.Apply()</code></h2>
+<p>The full pipeline runs in three ordered stages. Each infrastructure module runs <strong>only if present in the spec</strong> (gated by <code>shouldRunTerraform()</code>, which checks both spec content and existing S3 state).</p>
+<table><tbody>
+<tr><th>#</th><th>Stage</th><th>What runs</th></tr>
+<tr><td>0</td><td>Validate</td><td>Env + channel guard &#8212; a <code>feature</code> channel may only deploy to the dev/qa allow-list.</td></tr>
+<tr><td>1</td><td><strong>Infrastructure</strong></td><td>Each TF module in sequence: <code>replicator</code> &#8594; <code>buckets</code> (S3) &#8594; <code>auth</code> (Azure AD) &#8594; <code>kafka</code> (Confluent) &#8594; <code>postgres</code> &#8594; <code>dynamodb</code> &#8594; <code>mongodb-cluster/user/privatelink</code> &#8594; <code>role</code> (IAM/IRSA, always if an app type is defined). The <strong>namespace is created by mage via the K8s SDK</strong> (<code>internal/kube/namespace.go</code>) &#8212; there is no namespace Terraform module.</td></tr>
+<tr><td>2</td><td><strong>Apps</strong></td><td>Exactly ONE of <code>api / cron / handler / ui</code>. Composes Helm values from prior module outputs (tags, labels, role ARN, configmaps, secret refs) and applies the <code>dx-&lt;type&gt;</code> chart.</td></tr>
+<tr><td>3</td><td>ScriptRun</td><td>Runs <code>spec.octopus.postStep</code>, writes <code>artifacts/outputs.yaml</code>, cleans up <code>/tmp</code>.</td></tr>
+</tbody></table>
+
+<h2>8e. Where Terraform triggers &#8212; <code>TfRun()</code></h2>
+<p>The heart of the engine (<code>internal/terraform/terraform_functions.go</code>). For each module it:</p>
+<ol>
+<li>Builds the module path: <code>$TERRAFORM_APPS_PATH/modules/&lt;relpath&gt;</code> (e.g. <code>.../modules/apps/api</code>).</li>
+<li>Generates <code>*.auto.tfvars.json</code> <strong>in the module dir</strong>: <code>backend.auto.tfvars.json</code> (S3 backend config), <code>mage.auto.tfvars.json</code> (tags, spec, labels, role_arn, configmaps, aws_secrets), <code>hack.auto.tfvars.json</code> (local overrides).</li>
+<li>Creates a handle: <code>tfexec.NewTerraform(modulePath, "/usr/local/bin/terraform")</code>.</li>
+<li>Runs <code>Init</code> (with backend-config) &#8594; <code>Apply</code> &#8594; <code>Output</code>.</li>
+<li>Stores outputs in <code>GlobalContext.Outputs[module]</code> so later modules consume them.</li>
+<li>Persists <code>mage.auto.tfvars.json</code> to S3 (so a later <code>destroy</code> uses the same vars even if the spec changed).</li>
+</ol>
+
+<h2>8f. What's in Terraform &#8212; terraform-variant-apps</h2>
+<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">text</ac:parameter><ac:plain-text-body><![CDATA[terraform-variant-apps/            (invoked per-module by mage, not one big plan)
+\- modules/                        # ONLY two top-level dirs
+     |- common/
+     |    |- eks-data *            # cluster endpoint / OIDC / CA  -- the hub
+     |    |- role                  # IAM role + IRSA trust
+     |    |- replicator            # deploy-metadata ConfigMap
+     |    |- auth                  # Azure AD app registration
+     |    |- buckets               # S3
+     |    |- kafka                 # Confluent topics + service account
+     |    |- postgres   dynamodb
+     |    \- mongodb-cluster  mongodb-user  mongodb-privatelink
+     \- apps/
+          \- api  cron  handler  ui     # helm_release of the dx-<type> chart
+
+NOTE: there is NO modules/infrastructure dir, and NO namespace or tags module --
+the namespace is created by mage via the K8s SDK, not by Terraform.]]></ac:plain-text-body></ac:structured-macro>
+<table><tbody>
+<tr><th>Key module</th><th>What it does</th></tr>
+<tr><td><code>common/eks-data</code> &#11088;</td><td>Reads cluster endpoint / OIDC issuer / CA from the EKS API. <strong>The hub every other module consumes</strong> &#8212; if it can't resolve, nothing deploys.</td></tr>
+<tr><td><code>common/role</code></td><td>Per-app IAM role named <code>&lt;cluster&gt;-&lt;app&gt;</code> with an IRSA trust policy binding the SA (<code>system:serviceaccount:&lt;ns&gt;:&lt;sa&gt;</code>) via the OIDC provider. This <strong>is</strong> the per-app IRSA setup.</td></tr>
+<tr><td><code>apps/&lt;type&gt;</code></td><td><code>helm_release</code> of the <code>dx-{api,cron,handler,ui}</code> chart from ECR &#8212; provisions Deployment, Service, IRSA-annotated ServiceAccount, and Istio VirtualService/Gateway.</td></tr>
+<tr><td><code>common/replicator</code></td><td>Writes a <code>&lt;app&gt;-iaac-replicator</code> ConfigMap of deploy metadata; Flux uses it as a drift breadcrumb.</td></tr>
+</tbody></table>
+
+<h2>8g. The contract &#8212; <code>spec.yaml</code></h2>
+<p>Every app repo carries a <code>spec.yaml</code>. mage parses it into the Go <code>DXSpec</code> struct and validates the free-form maps against <code>schemas/</code>.</p>
+<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">yaml</ac:parameter><ac:plain-text-body><![CDATA[name: brands-api
+octopus: { space: DevOps, group: brands }        # group -> K8s namespace
+git:
+  repository: brands-api
+  version: 1.1266
+  image: 064859874041.dkr.ecr.us-east-2.amazonaws.com/usxpress/brands-api:1.1266
+  language: go                                    # used for OTel auto-instrument
+tags: { owner: enterprise, team: enterprise, purpose: api }
+infrastructure:                                   # each key -> a module that runs
+  kafka: { ... }
+  postgres: { ... }
+  iam: { policy: [ { effect: Allow, actions: [s3:GetObject], resources: [...] } ] }
+api:                                              # exactly ONE of api|cron|handler|ui
+  service: { targetPort: 8080 }
+  configVars: { LOG_LEVEL: info }]]></ac:plain-text-body></ac:structured-macro>
+
+<h2>8h. Config, state &amp; the end-to-end connection</h2>
+<p><strong>Env vars</strong> (<code>internal/context/env.go</code>, populated by <code>caarlos0/env</code>): <code>S3_BUCKET</code> (from <code>DX__TFState</code>), <code>AWS_REGION</code>, <code>KUBECONFIG</code> (must be absolute), <code>TERRAFORM_APPS_PATH</code> (from <code>DX__Common</code>), <code>OctopusEnvironmentName/ReleaseChannelName/ProjectName</code>, and any <code>TF_VAR_*</code> pass-through.</p>
+<p><strong>State &amp; outputs:</strong></p>
+<ul>
+<li>State: <code>s3://{S3_BUCKET}/{space}/{app}/{module}/terraform.tfstate</code></li>
+<li>Vars cache: <code>s3://{S3_BUCKET}/{space}/{app}/{module}.tfvars.json</code></li>
+<li>Outputs: <code>$TERRAFORM_APPS_PATH/artifacts/outputs.yaml</code></li>
+</ul>
+<p><strong>End-to-end:</strong> git push &#8594; GitHub Actions build/test &#8594; ECR image &#8594; <code>mage createOctopusRelease</code> (new release pinned to the image tag) &#8594; Octopus USXpress space, click Deploy &#8594; DX-Apply step &#8594; <code>mage tfDeploy:apply</code> &#8594; Infrastructure modules &#8594; Apps module &#8594; Helm release &#8594; pod running.</p>
+<ul>
+<li><strong>Onboarding = the first release.</strong> Author writes <code>spec.yaml</code>; first <code>Apply()</code> creates the namespace, IAM role + IRSA, any S3/Kafka/PG/Dynamo, and the Helm release.</li>
+<li><strong>Upgrade = every release after.</strong> Same pipeline, new image tag; infra modules are idempotent, the apps module rolls the Deployment. ~200 app releases across the fleet.</li>
+</ul>
+<p><em>App chart is <code>dx-{api,cron,handler,ui}</code> (2.x); a legacy <code>variant-*</code> chart is mid-migration and accounts for the handful of failed Helm releases. <strong>Repo structure verified against the live <code>mage-runner</code> + <code>terraform-variant-apps</code> repos, 2026-07-15</strong> &#8212; note this corrects the older KT docs, which described a <code>modules/infrastructure</code> split and <code>namespace</code>/<code>tags</code> modules that do not exist.</em></p>
+
+<h1>9. AWS services in play</h1>
+<table><tbody>
+<tr><th>Service</th><th>Role</th></tr>
+<tr><td>EKS</td><td>The three managed Kubernetes clusters.</td></tr>
+<tr><td>EC2</td><td>Worker nodes &#8212; Karpenter-provisioned Graviton.</td></tr>
+<tr><td>IAM + OIDC + STS</td><td>Cluster role, per-app IRSA roles, OIDC provider, AssumeRoleWithWebIdentity.</td></tr>
+<tr><td>S3</td><td>Terraform state, app buckets, RisingWave state store.</td></tr>
+<tr><td>Secrets Manager</td><td>App + integration secrets; the ESO source of truth.</td></tr>
+<tr><td>ECR</td><td>Container images + Helm charts (064859874041).</td></tr>
+<tr><td>RDS (Postgres)</td><td>Primary app Postgres &#8212; one PG 14.22 instance per env (prod Multi-AZ); Graviton t4g/r6g.</td></tr>
+<tr><td>DynamoDB</td><td>App table module; historical TF state locking.</td></tr>
+<tr><td>ELB (ALB/NLB)</td><td>Ingress via aws-load-balancer-controller; NLB/PrivateLink for exposed services.</td></tr>
+<tr><td>VPC</td><td>Subnets, security groups, VPC endpoints / PrivateLink.</td></tr>
+<tr><td>KMS</td><td>EKS envelope encryption of etcd secrets (per cluster; INFRA-1507).</td></tr>
+<tr><td>SSM Parameter Store</td><td>Cluster parameters under <code>/clusters/&lt;name&gt;/*</code>.</td></tr>
+<tr><td>CloudWatch / CloudTrail</td><td>Control-plane logs; IRSA / cross-account assume debugging.</td></tr>
+<tr><td>Route53 / ACM</td><td>DNS automated by external-dns (v0.20.0, active); ACM for certs.</td></tr>
+</tbody></table>
+
+<h1>10. Maintenance &amp; upgrades</h1>
+<table><tbody>
+<tr><th>Signal</th><th>State (2026-07-15)</th><th>Action</th></tr>
+<tr><td>Cluster version</td><td>1.35 (newest 1.36)</td><td>One behind &#8212; plan 1.36 via INFRA-1594.</td></tr>
+<tr><td>kube-proxy addon</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">SKEW WARNING</ac:parameter></ac:structured-macro> v1.34.1</td><td>Bump to v1.35.x &#8212; clears the only failing insight.</td></tr>
+<tr><td>Node AMI</td><td>Bottlerocket 1.62.1</td><td>Current for 1.35; re-bakes on Karpenter drift.</td></tr>
+<tr><td>Support policy</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">EXTENDED</ac:parameter></ac:structured-macro></td><td>Confirm intent &#8212; EXTENDED = paid extended support vs auto-upgrade.</td></tr>
+<tr><td>Failed Helm releases</td><td>~7 (legacy variant-*)</td><td>Migrate to dx-* charts / clean up.</td></tr>
+<tr><td>cluster-autoscaler</td><td>v1.26.2 (vestigial)</td><td>Confirm idle, then remove &#8212; Karpenter owns all nodes.</td></tr>
+<tr><td>Unpinned images</td><td>ops ctrls &#183; latest-dev</td><td>Pin <code>chainguard/kubectl</code> to a digest.</td></tr>
+<tr><td>RDS Postgres</td><td>14.22 (all envs)</td><td>PG 14 nears EOL &#8212; plan RDS major upgrade (&#8594; 16/17).</td></tr>
+</tbody></table>
+<h2>Addon versions vs the 1.36 target</h2>
+<table><tbody>
+<tr><th>Addon</th><th>Current (dev)</th><th>1.36 default (AWS)</th><th>Gap</th></tr>
+<tr><td>kube-proxy</td><td>v1.34.1</td><td>v1.36.0-eksbuild.7</td><td>2 minors behind</td></tr>
+<tr><td>coredns</td><td>1.13.1</td><td>v1.14.2-eksbuild.4</td><td>bump at 1.36</td></tr>
+<tr><td>aws-ebs-csi-driver</td><td>1.58.0</td><td>v1.62.0-eksbuild.1</td><td>bump at 1.36</td></tr>
+<tr><td>aws-efs-csi-driver</td><td>3.0.0</td><td>v3.3.0-eksbuild.1</td><td>bump at 1.36</td></tr>
+<tr><td>vpc-cni</td><td>1.21.1</td><td>v1.21.2-eksbuild.2</td><td>patch only</td></tr>
+</tbody></table>
+<p><em>Only kube-proxy is an EKS managed addon; vpc-cni / coredns / EBS / EFS are Helm &#8212; upgrade = bump the pinned chart in <code>iaac-eks-manifests</code>.</em></p>
+<p><strong>Active workstreams:</strong> INFRA-1594 (fleet EKS upgrade, owner Mark w/ Rohit + Parul) &#8212; now a dual upgrade with RDS PG 14&#8594;16/17. INFRA-1507 (EKS etcd envelope-encryption posture, read-only audit).</p>
+
+<h1>11. Open items &amp; next actions</h1>
+<ol>
+<li><strong>Bump kube-proxy</strong> to v1.35.x &#8212; clears the one WARNING insight across all three clusters.</li>
+<li><strong>Decide support policy</strong> &#8212; all three are EXTENDED. Keep (buys runway, costs more) or switch to STANDARD before 1.36.</li>
+<li><strong>Plan 1.35 &#8594; 1.36</strong> (INFRA-1594) + the RDS PG 14 &#8594; 16/17 major.</li>
+<li><strong>Clean up</strong> ~7 failed Helm releases, the vestigial cluster-autoscaler, and pin the <code>latest-dev</code> ops controllers.</li>
+<li><strong>Confirm intent</strong> on the idle CNPG + RabbitMQ operators (0 clusters in any env).</li>
+</ol>
+<hr/>
+<p><em>Sources: docs/onboarding/idris-kt (sessions 3&#8211;7), jira INFRA-1594 / INFRA-1507, and live cluster + repo inspection on 2026-07-15.</em></p>

@@ -1,0 +1,784 @@
+<title>USXpress Cloud Platform — EKS Reference Architecture</title>
+<style>
+  :root {
+    --bg:#f5f8f9; --surface:#ffffff; --surface-2:#eef3f4; --surface-3:#e6edee;
+    --ink:#152229; --ink-soft:#47585f; --ink-faint:#78888f;
+    --line:#dbe4e7; --line-strong:#c4d0d3;
+    --accent:#0e7c86; --accent-ink:#0a5c64; --accent-soft:#d9edee;
+    --good:#1c8450; --good-soft:#dbeee3;
+    --warn:#a9711a; --warn-soft:#f3e7cf;
+    --crit:#bd3d2b; --crit-soft:#f4ddd7;
+    --shadow:0 1px 2px rgba(20,40,48,.04), 0 6px 20px -12px rgba(20,40,48,.18);
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+    --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --maxw:1120px; --prose:70ch;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0c1316; --surface:#121c21; --surface-2:#16232a; --surface-3:#1c2b32;
+      --ink:#e7eff2; --ink-soft:#a4b4bb; --ink-faint:#6d7f87;
+      --line:#233238; --line-strong:#2e4149;
+      --accent:#35c1cd; --accent-ink:#8fe0e8; --accent-soft:#0f3033;
+      --good:#4bbd83; --good-soft:#123024;
+      --warn:#d6a24e; --warn-soft:#332813;
+      --crit:#e07862; --crit-soft:#361d18;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 26px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f8f9; --surface:#ffffff; --surface-2:#eef3f4; --surface-3:#e6edee;
+    --ink:#152229; --ink-soft:#47585f; --ink-faint:#78888f;
+    --line:#dbe4e7; --line-strong:#c4d0d3;
+    --accent:#0e7c86; --accent-ink:#0a5c64; --accent-soft:#d9edee;
+    --good:#1c8450; --good-soft:#dbeee3; --warn:#a9711a; --warn-soft:#f3e7cf;
+    --crit:#bd3d2b; --crit-soft:#f4ddd7;
+    --shadow:0 1px 2px rgba(20,40,48,.04), 0 6px 20px -12px rgba(20,40,48,.18);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c1316; --surface:#121c21; --surface-2:#16232a; --surface-3:#1c2b32;
+    --ink:#e7eff2; --ink-soft:#a4b4bb; --ink-faint:#6d7f87;
+    --line:#233238; --line-strong:#2e4149;
+    --accent:#35c1cd; --accent-ink:#8fe0e8; --accent-soft:#0f3033;
+    --good:#4bbd83; --good-soft:#123024; --warn:#d6a24e; --warn-soft:#332813;
+    --crit:#e07862; --crit-soft:#361d18;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 26px -14px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(var(--line) .8px,transparent .8px);
+    background-size:26px 26px;background-attachment:fixed;}
+  @media (prefers-color-scheme:dark){body{background-image:radial-gradient(#182831 .8px,transparent .8px)}}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 clamp(18px,4vw,40px)}
+
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono)}
+  h2,h3{text-wrap:balance}
+  ::selection{background:var(--accent-soft);color:var(--ink)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--accent-ink);font-weight:600}
+
+  /* ---- masthead ---- */
+  header.mast{padding:clamp(40px,7vw,84px) 0 34px;position:relative}
+  .mast .kicker{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+  .chip-brand{font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-soft);border:1px solid var(--line-strong);border-radius:999px;padding:5px 11px;background:var(--surface)}
+  h1{font-size:clamp(2.1rem,5.4vw,3.35rem);line-height:1.02;letter-spacing:-.02em;
+    margin:.1em 0 .35em;font-weight:750}
+  h1 .tint{color:var(--accent)}
+  .lede{font-size:clamp(1.05rem,2vw,1.22rem);color:var(--ink-soft);max-width:60ch;line-height:1.5}
+  .mast-meta{display:flex;flex-wrap:wrap;gap:8px 26px;margin-top:26px;
+    font-family:var(--mono);font-size:.78rem;color:var(--ink-faint)}
+  .mast-meta b{color:var(--ink-soft);font-weight:600}
+
+  /* ---- sticky nav ---- */
+  nav.toc{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(8px);border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:8px}
+  nav.toc .row{display:flex;gap:4px;overflow-x:auto;padding:9px 0;scrollbar-width:thin}
+  nav.toc a{font-family:var(--mono);font-size:.76rem;color:var(--ink-soft);white-space:nowrap;
+    padding:6px 12px;border-radius:7px}
+  nav.toc a:hover{background:var(--surface-2);text-decoration:none;color:var(--ink)}
+
+  section{padding:clamp(38px,6vw,60px) 0;border-bottom:1px solid var(--line)}
+  .sec-head{display:flex;gap:14px;align-items:baseline;margin-bottom:8px}
+  .sec-num{font-family:var(--mono);font-size:.8rem;color:var(--accent);font-weight:600;padding-top:.35em}
+  h2{font-size:clamp(1.45rem,3.2vw,2rem);letter-spacing:-.015em;margin:0;font-weight:720}
+  .sec-sub{color:var(--ink-soft);max-width:var(--prose);margin:.5em 0 0}
+  p{max-width:var(--prose)}
+  h3{font-size:1.02rem;letter-spacing:.005em;margin:2em 0 .6em;font-weight:680}
+
+  /* ---- fact panel ---- */
+  .grid{display:grid;gap:16px}
+  .env-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:8px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;box-shadow:var(--shadow)}
+  .env-card{position:relative;overflow:hidden}
+  .env-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+  .env-card[data-tier="dev"]::before{background:var(--good)}
+  .env-card[data-tier="qa"]::before{background:var(--warn)}
+  .env-card[data-tier="prod"]::before{background:var(--crit)}
+  .env-card h4{margin:0 0 2px;font-family:var(--mono);font-size:1.02rem;letter-spacing:-.01em}
+  .env-card .tier{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+  .kv{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:.8rem;
+    padding:5px 0;border-top:1px dashed var(--line);margin-top:8px}
+  .kv:first-of-type{border-top:0;margin-top:12px}
+  .kv span:first-child{color:var(--ink-faint)}
+  .kv span:last-child{color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+
+  /* ---- status chips ---- */
+  .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.68rem;
+    letter-spacing:.06em;text-transform:uppercase;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .chip.good{background:var(--good-soft);color:var(--good)}
+  .chip.warn{background:var(--warn-soft);color:var(--warn)}
+  .chip.crit{background:var(--crit-soft);color:var(--crit)}
+  .chip.neutral{background:var(--surface-2);color:var(--ink-soft)}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+
+  .callout{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);
+    border-radius:12px;padding:16px 18px;margin:22px 0;box-shadow:var(--shadow)}
+  .callout.gap{border-left-color:var(--crit)}
+  .callout .ic{font-family:var(--mono);font-weight:700;color:var(--warn);font-size:.9rem}
+  .callout.gap .ic{color:var(--crit)}
+  .callout p{margin:0;max-width:none;font-size:.94rem;color:var(--ink-soft)}
+  .callout b{color:var(--ink)}
+
+  /* ---- tables ---- */
+  .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin:14px 0;background:var(--surface);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:520px;font-size:.9rem}
+  th,td{text-align:left;padding:11px 15px;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-faint);font-weight:600;background:var(--surface-2);position:sticky;top:0}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:var(--surface-2)}
+  td.mono,th.mono{font-family:var(--mono);font-size:.83rem;font-variant-numeric:tabular-nums}
+  .muted{color:var(--ink-faint)}
+
+  /* ---- pipeline / flow ---- */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:18px 0;padding:18px;
+    background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow-x:auto}
+  .node{flex:1 1 130px;min-width:120px;background:var(--surface-2);border:1px solid var(--line-strong);
+    border-radius:10px;padding:11px 13px;display:flex;flex-direction:column;gap:3px}
+  .node .n-lab{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink)}
+  .node .n-body{font-size:.83rem;color:var(--ink);line-height:1.35}
+  .node.term{background:var(--accent-soft);border-color:var(--accent)}
+  .node.emph{border-color:var(--accent);border-width:1.5px}
+  .arrow{align-self:center;color:var(--ink-faint);font-family:var(--mono);font-size:1.1rem;flex:0 0 auto;padding:0 2px}
+  @media (max-width:640px){
+    .flow{flex-direction:column}
+    .arrow{transform:rotate(90deg);align-self:flex-start;padding:2px 0 2px 16px}
+    .node{flex:1 1 auto}
+  }
+
+  /* ---- addon columns ---- */
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:8px}
+  .stack-card h4{margin:0 0 4px;font-size:.98rem;display:flex;align-items:center;gap:8px}
+  .stack-card .tagline{font-size:.8rem;color:var(--ink-faint);margin:0 0 12px}
+  .stack-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+  .stack-list li{font-size:.86rem;display:flex;gap:9px;align-items:baseline;line-height:1.4}
+  .stack-list li::before{content:"▸";color:var(--accent);font-size:.7rem;flex:0 0 auto;transform:translateY(-1px)}
+  .stack-list .comp{font-family:var(--mono);font-size:.82rem;color:var(--ink)}
+  .stack-list .desc{color:var(--ink-soft)}
+
+  /* code block */
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-family:var(--mono);font-size:.82rem;line-height:1.6;box-shadow:var(--shadow);margin:14px 0}
+  pre .cm{color:var(--ink-faint)}
+  pre .kw{color:var(--accent)}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media (max-width:720px){.two{grid-template-columns:1fr}}
+
+  footer{padding:40px 0 70px;color:var(--ink-faint);font-size:.85rem}
+  footer .src{font-family:var(--mono);font-size:.76rem;line-height:1.9}
+  footer .src b{color:var(--ink-soft)}
+  .pill-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <div class="kicker">
+      <span class="chip-brand">USXpress · Platform Engineering</span>
+      <span class="chip neutral"><span class="dot"></span>Cloud / AWS EKS</span>
+    </div>
+    <div class="eyebrow">Reference Architecture</div>
+    <h1>The <span class="tint">Cloud Kubernetes</span> Platform</h1>
+    <p class="lede">How the AWS EKS fleet is built, run, and extended — cluster provisioning, the app onboarding &amp; deploy pipeline, the platform stack, and the services underneath. Scope is strictly cloud; the on-prem Talos clusters are a separate system.</p>
+    <div class="mast-meta">
+      <span><b>Region</b> us-east-2</span>
+      <span><b>Clusters</b> 3 (dev · qa · prod)</span>
+      <span><b>Kubernetes</b> 1.35 · Bottlerocket</span>
+      <span><b>Provisioner</b> Terraform → Octopus</span>
+      <span><b>Source repo</b> variant-inc/iaac-eks</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <div class="row">
+      <a href="#glance">At a glance</a>
+      <a href="#environments">Environments</a>
+      <a href="#provision">Cluster creation</a>
+      <a href="#version">K8s &amp; nodes</a>
+      <a href="#stack">Platform stack</a>
+      <a href="#identity">Identity / IRSA</a>
+      <a href="#onboard">App onboarding</a>
+      <a href="#deploy">Deploy &amp; upgrade</a>
+      <a href="#services">AWS services</a>
+      <a href="#maintain">Maintenance</a>
+      <a href="#open">Open items</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- 1 GLANCE -->
+  <section id="glance">
+    <div class="sec-head"><span class="sec-num">01</span><h2>At a glance</h2></div>
+    <p class="sec-sub">Three single-tenant EKS clusters, one per AWS account, all in <span class="mono">us-east-2</span>. Everything below is provisioned as code and promoted dev → qa → prod.</p>
+
+    <div class="grid env-grid">
+      <div class="card env-card" data-tier="dev">
+        <div class="tier">Development</div>
+        <h4>usxpress-dev</h4>
+        <div class="kv"><span>account</span><span>700736442855</span></div>
+        <div class="kv"><span>profile</span><span>usx-dev</span></div>
+        <div class="kv"><span>region</span><span>us-east-2</span></div>
+      </div>
+      <div class="card env-card" data-tier="qa">
+        <div class="tier">QA</div>
+        <h4>qa-one</h4>
+        <div class="kv"><span>account</span><span>527101283767</span></div>
+        <div class="kv"><span>profile</span><span>usx-qa</span></div>
+        <div class="kv"><span>region</span><span>us-east-2</span></div>
+      </div>
+      <div class="card env-card" data-tier="prod">
+        <div class="tier">Production</div>
+        <h4>usxpress-prod</h4>
+        <div class="kv"><span>account</span><span>937464026810</span></div>
+        <div class="kv"><span>profile</span><span>ops-controller</span></div>
+        <div class="kv"><span>region</span><span>us-east-2</span></div>
+      </div>
+    </div>
+
+    <div class="two" style="margin-top:22px">
+      <div class="card">
+        <div class="eyebrow" style="color:var(--ink-faint)">Kubernetes version</div>
+        <div style="display:flex;align-items:center;gap:10px;margin:8px 0 4px">
+          <span style="font-family:var(--mono);font-size:1.5rem;font-weight:700">1.35</span>
+          <span class="chip good"><span class="dot"></span>All 3 envs</span>
+        </div>
+        <p style="margin:6px 0 0;font-size:.86rem;color:var(--ink-soft);max-width:none">Confirmed live 2026-07-15 — dev / qa / prod all on <span class="mono">1.35</span> (platform <span class="mono">eks.15–17</span>), one minor behind the newest available <span class="mono">1.36</span>. AWS readiness insights PASS except a kube-proxy skew warning (§10).</p>
+      </div>
+      <div class="card">
+        <div class="eyebrow" style="color:var(--ink-faint)">Node OS / AMI</div>
+        <div style="display:flex;align-items:center;gap:10px;margin:8px 0 4px">
+          <span style="font-family:var(--mono);font-size:1.15rem;font-weight:700">Bottlerocket · ARM64</span>
+          <span class="chip good"><span class="dot"></span>Confirmed</span>
+        </div>
+        <p style="margin:6px 0 0;font-size:.86rem;color:var(--ink-soft);max-width:none">Bottlerocket OS 1.62.1 (<span class="mono">aws-k8s-1.35</span>), kernel 6.12.88, containerd 2.1.8, kubelet v1.35.4 — on Graviton <span class="mono">m7g/m6g.xlarge</span>. AMI type <span class="mono">BOTTLEROCKET_ARM_64</span>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 ENVIRONMENTS -->
+  <section id="environments">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Environments &amp; accounts</h2></div>
+    <p class="sec-sub">Isolation is by AWS account, not by namespace. A shared services account holds the image &amp; chart registry consumed by all three clusters.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tier</th><th>Cluster</th><th class="mono">Account</th><th class="mono">Profile</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip good"><span class="dot"></span>dev</span></td><td class="mono">usxpress-dev</td><td class="mono">700736442855</td><td class="mono">usx-dev</td><td>First landing zone for every change; RisingWave &amp; new addons prove out here.</td></tr>
+          <tr><td><span class="chip warn"><span class="dot"></span>qa</span></td><td class="mono">qa-one</td><td class="mono">527101283767</td><td class="mono">usx-qa</td><td>Pre-prod validation tier in the Octopus lifecycle.</td></tr>
+          <tr><td><span class="chip crit"><span class="dot"></span>prod</span></td><td class="mono">usxpress-prod</td><td class="mono">937464026810</td><td class="mono">ops-controller</td><td>Production workloads; ~150 Octopus projects in the USXpress space.</td></tr>
+          <tr><td><span class="chip neutral">shared</span></td><td class="mono">devops / ECR</td><td class="mono">064859874041</td><td class="mono">usx-devops</td><td>Image + Helm-chart registry (ECR) pulled by all clusters.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <span class="ic">i</span>
+      <p>INFRA-1594's fleet-upgrade plan references a <b>dev → QA/staging → prod</b> flow — a distinct <b>staging</b> tier may be introduced for the upgrade rollout. Today the running fleet is the three clusters above.</p>
+    </div>
+  </section>
+
+  <!-- 3 PROVISION -->
+  <section id="provision">
+    <div class="sec-head"><span class="sec-num">03</span><h2>How a cluster is created</h2></div>
+    <p class="sec-sub">Clusters are Terraform, owned by the cloud team in <span class="mono">variant-inc/iaac-eks</span>. Nothing is applied from a laptop — a GitHub Action packages the release and Octopus runs the apply.</p>
+
+    <div class="flow" aria-label="Cluster provisioning flow">
+      <div class="node"><span class="n-lab">Source</span><span class="n-body"><b>iaac-eks</b> · <span class="mono">apps/terragrunt</span> (Terragrunt) + PowerShell</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">CI</span><span class="n-body">GitHub Actions packages the release</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">Orchestrator</span><span class="n-body">Octopus <b>DevOps</b> space</span></div>
+      <span class="arrow">→</span>
+      <div class="node emph"><span class="n-lab">Apply</span><span class="n-body">Terragrunt run per env → EKS control plane + Karpenter node config</span></div>
+      <span class="arrow">→</span>
+      <div class="node term"><span class="n-lab">Bootstrap</span><span class="n-body"><b>iaac-eks-bootstrap</b> lays in networking, security, DNS, certs</span></div>
+    </div>
+    <p class="muted" style="font-size:.85rem">The KT-era "<span class="mono">deploy/terraform</span> + <span class="mono">modules/</span>" layout is outdated. In <span class="mono">iaac-eks</span> (default branch <span class="mono">master</span>) the <span class="mono">deploy/</span> dir holds orchestration only — <span class="mono">config.yaml</span>, <span class="mono">secrets.yaml</span>, <span class="mono">deploy.ps1</span> — while the actual IaC lives under <span class="mono">apps/</span>: <b>Terragrunt units</b> in <span class="mono">apps/terragrunt</span>, Helm charts in <span class="mono">apps/charts</span>, plus <span class="mono">run.ps1</span> and <span class="mono">PowerShellModules</span>.</p>
+
+    <h3>The cloud repo family</h3>
+    <p>The platform is split across repos, not one monolith:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Repo</th><th>Owns</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">iaac-eks</td><td>Cluster + app infrastructure — Terragrunt units in <span class="mono">apps/terragrunt</span> + Helm charts in <span class="mono">apps/charts</span>, driven by PowerShell (<span class="mono">deploy/deploy.ps1</span>).</td></tr>
+          <tr><td class="mono">iaac-eks-bootstrap</td><td>Core platform bootstrap — <b>networking, security, DNS, certificate management</b> (<span class="mono">deploy</span> + <span class="mono">apps</span>).</td></tr>
+          <tr><td class="mono">terraform-eksctl-nodegroup</td><td>Reusable Terraform module for AWS node groups.</td></tr>
+          <tr><td class="mono">iaac-eks-manifests</td><td>Flux GitOps source for the platform layer (§5).</td></tr>
+          <tr><td class="mono">sre-iaac</td><td>SRE scripts deployed across all EKS clusters.</td></tr>
+          <tr><td class="mono">eks-auth-sync</td><td>Cluster auth / access sync.</td></tr>
+          <tr><td class="mono">observability-stack</td><td>OpenTelemetry operator, Honeycomb agent, observability tooling.</td></tr>
+          <tr><td class="mono">prowler-sechub-app</td><td>Prowler security scans → AWS Security Hub.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Terragrunt layout &amp; where the addons come from</h3>
+    <div class="two">
+      <div class="card">
+        <h4 style="margin:0 0 8px"><span class="mono">iaac-eks/apps/terragrunt</span></h4>
+        <pre style="margin:0;font-size:.78rem">root.hcl    <span class="cm"># root Terragrunt config</span>
+_envcommon  <span class="cm"># shared inputs per env</span>
+modules/    <span class="cm"># the TF modules ⭐</span>
+live/       <span class="cm"># per-env instantiations</span></pre>
+        <p style="font-size:.82rem;color:var(--ink-soft);margin:10px 0 0">Textbook Terragrunt — <span class="mono">live/</span> wires each env to <span class="mono">modules/</span> with <span class="mono">_envcommon</span> defaults. Helm is layered via Helmfile in <span class="mono">apps/charts</span> (<span class="mono">helmfiles.d</span>, <span class="mono">values</span>, <span class="mono">bases</span>).</p>
+      </div>
+      <div class="card">
+        <h4 style="margin:0 0 8px"><span class="mono">iaac-eks-bootstrap/apps</span> — the platform addons</h4>
+        <p style="font-size:.82rem;color:var(--ink-soft);margin:0 0 8px">A <b>Helmfile</b> (<span class="mono">helmfile.yaml</span>) with a directory per component — this is where §5's stack is actually authored:</p>
+        <p style="font-size:.82rem;margin:0"><span class="mono">cilium · cert-manager · external-dns · external-secrets · flux · karpenter · aws-load-balancer · reloader · vpa · kube-system · pre_helm · common</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 VERSION / NODES -->
+  <section id="version">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Kubernetes &amp; node configuration</h2></div>
+    <p class="sec-sub">Two-layer node model: a small managed node group carries system pods; Karpenter provisions everything else just-in-time.</p>
+
+    <div class="callout" style="border-left-color:var(--good)">
+      <span class="ic" style="color:var(--good)">✓</span>
+      <p><b>Confirmed live 2026-07-15.</b> All three clusters run Kubernetes <b>1.35</b> on Bottlerocket/Graviton. Newest EKS-available is <span class="mono">1.36</span> — the fleet is one minor behind, a healthy position. AWS upgrade-readiness insights PASS on every check except kube-proxy version skew (§10).</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Cluster</th><th class="mono">K8s</th><th class="mono">Platform</th><th>Upgrade policy</th><th>Readiness</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">usxpress-dev</td><td class="mono">1.35</td><td class="mono">eks.15</td><td><span class="chip warn">EXTENDED</span></td><td><span class="chip good">passing*</span></td></tr>
+          <tr><td class="mono">qa-one</td><td class="mono">1.35</td><td class="mono">eks.17</td><td><span class="chip warn">EXTENDED</span></td><td><span class="chip good">passing*</span></td></tr>
+          <tr><td class="mono">usxpress-prod</td><td class="mono">1.35</td><td class="mono">eks.15</td><td><span class="chip warn">EXTENDED</span></td><td><span class="chip good">passing*</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:.82rem">* Every <span class="mono">UPGRADE_READINESS</span> insight PASSES except <span class="mono">kube-proxy version skew</span> (WARNING) on all three. <b>Upgrade policy EXTENDED</b> means the clusters are allowed to roll into paid extended support rather than auto-upgrade at end of standard support — a cost/governance choice, not a sign they're currently unsupported.</p>
+
+    <div class="two">
+      <div class="card">
+        <h3 style="margin-top:0">Node image — confirmed</h3>
+        <ul class="stack-list">
+          <li><span class="desc"><b>Bottlerocket OS 1.62.1</b> (<span class="mono">aws-k8s-1.35</span>) — minimal, immutable container host.</span></li>
+          <li><span class="desc">Kernel <span class="mono">6.12.88</span> · containerd <span class="mono">2.1.8</span> · kubelet <span class="mono">v1.35.4</span>.</span></li>
+          <li><span class="desc"><b>ARM64 / Graviton</b> — AMI type <span class="mono">BOTTLEROCKET_ARM_64</span> on <span class="mono">m7g.xlarge / m6g.xlarge</span>.</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Node lifecycle — Karpenter owns it</h3>
+        <ul class="stack-list">
+          <li><span class="desc"><b>Karpenter 1.11.1</b> provisions the whole fleet — every node carries a <span class="mono">karpenter.sh/nodepool</span> label; none run on an EKS managed node group.</span></li>
+          <li><span class="desc">Dedicated NodePools observed: <span class="mono">iaac</span> (platform), <span class="mono">apps</span> (workloads), <span class="mono">ingressgateway</span> (Istio ingress).</span></li>
+          <li><span class="desc"><b>cluster-autoscaler is vestigial</b> — still deployed (<span class="mono">cluster-autoscaler-aws-cluster-autoscaler</span>, image <span class="mono">v1.26.2</span>, 9 minors stale) but every node is Karpenter-owned, so it has nothing to scale. Confirm idle, then remove.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 STACK -->
+  <section id="stack">
+    <div class="sec-head"><span class="sec-num">05</span><h2>Platform stack</h2></div>
+    <p class="sec-sub">Addons ship three ways: AWS-managed EKS addons, Helm releases, and Terraform-applied Kubernetes manifests. Versions are TF-pinned.</p>
+
+    <div class="callout" style="border-left-color:var(--accent)">
+      <span class="ic" style="color:var(--accent)">i</span>
+      <p><b>Delivery reality (live 2026-07-15).</b> Only <span class="mono">kube-proxy</span> is an AWS-managed EKS addon. <b>vpc-cni, CoreDNS, EBS/EFS CSI are self-managed Helm releases</b> reconciled by Flux — not <span class="mono">aws_eks_addon</span>. And <b>Cilium 1.19.2 runs alongside the AWS VPC CNI</b> (network-policy / observability layer).</p>
+    </div>
+    <div class="cols">
+      <div class="card stack-card">
+        <h4><span class="chip neutral">aws_eks_addon</span></h4>
+        <p class="tagline">The only AWS-managed addon.</p>
+        <ul class="stack-list">
+          <li><span class="comp">kube-proxy</span><span class="desc">— v1.34.1, one minor behind cluster (skew warning)</span></li>
+        </ul>
+      </div>
+      <div class="card stack-card">
+        <h4><span class="chip neutral">Helm / Flux</span></h4>
+        <p class="tagline">Authored as Helmfile in iaac-eks-bootstrap; reconciled by Flux (iaac-eks-manifests).</p>
+        <ul class="stack-list">
+          <li><span class="comp">networking</span><span class="desc">— aws-vpc-cni, cilium, coredns, external-dns</span></li>
+          <li><span class="comp">autoscaling</span><span class="desc">— karpenter (owns fleet), keda, descheduler, goldilocks + VPA 1.5.1 · cluster-autoscaler v1.26.2 = vestigial</span></li>
+          <li><span class="comp">certs/secrets</span><span class="desc">— cert-manager, trust-manager, external-secrets</span></li>
+          <li><span class="comp">mesh/ingress</span><span class="desc">— istio, aws-load-balancer-controller, agentgateway</span></li>
+          <li><span class="comp">storage</span><span class="desc">— ebs-csi, efs-csi, topolvm autoresizer</span></li>
+          <li><span class="comp">data operators</span><span class="desc">— cloudnative-pg, strimzi-kafka, rabbitmq</span></li>
+          <li><span class="comp">observability</span><span class="desc">— kube-prometheus-stack, opentelemetry, kubecost</span></li>
+        </ul>
+      </div>
+      <div class="card stack-card">
+        <h4><span class="chip neutral">GitOps</span></h4>
+        <p class="tagline">Flux owns the platform layer.</p>
+        <ul class="stack-list">
+          <li><span class="comp">flux2 2.18.4</span><span class="desc">— controllers</span></li>
+          <li><span class="comp">iaac-eks-manifests</span><span class="desc">— platform sync</span></li>
+          <li><span class="comp">iaac-monitoring-manifests</span><span class="desc">— monitoring sync</span></li>
+          <li><span class="comp">reloader 2.2.9</span><span class="desc">— config/secret rollout</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Key component versions <span style="font-weight:400;color:var(--ink-faint);font-size:.8rem">— live, usxpress-dev, 2026-07-15</span></h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Role</th><th class="mono">Version</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">karpenter</td><td>Node autoscaling</td><td class="mono">1.11.1</td></tr>
+          <tr><td class="mono">cilium</td><td>CNI / network policy</td><td class="mono">1.19.2</td></tr>
+          <tr><td class="mono">aws-vpc-cni</td><td>Pod networking</td><td class="mono">1.21.1</td></tr>
+          <tr><td class="mono">istio (istiod/base/cni)</td><td>Service mesh</td><td class="mono">1.29.2</td></tr>
+          <tr><td class="mono">aws-load-balancer-controller</td><td>ALB / NLB ingress</td><td class="mono">3.1.0</td></tr>
+          <tr><td class="mono">cert-manager</td><td>TLS issuance</td><td class="mono">1.20.1</td></tr>
+          <tr><td class="mono">external-secrets</td><td>SM → k8s secrets</td><td class="mono">2.2.0</td></tr>
+          <tr><td class="mono">external-dns</td><td>Route53 records</td><td class="mono">0.20.0</td></tr>
+          <tr><td class="mono">cloudnative-pg</td><td>Postgres operator</td><td class="mono">1.29.0</td></tr>
+          <tr><td class="mono">strimzi-kafka-operator</td><td>Kafka operator</td><td class="mono">0.51.0</td></tr>
+          <tr><td class="mono">kube-prometheus-stack</td><td>Monitoring</td><td class="mono">chart 83.4.0 · op v0.90.1</td></tr>
+          <tr><td class="mono">opentelemetry-operator</td><td>Tracing / metrics</td><td class="mono">0.109.0</td></tr>
+          <tr><td class="mono">keda</td><td>Event autoscaling</td><td class="mono">2.19.0</td></tr>
+          <tr><td class="mono">flux2</td><td>GitOps controllers</td><td class="mono">2.18.4 (app 2.8.8)</td></tr>
+          <tr><td class="mono">kube-proxy <span class="chip warn" style="font-size:.6rem">behind</span></td><td>Managed addon</td><td class="mono">v1.34.1 → 1.35 avail</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <span class="ic">i</span>
+      <p><b>kube-system also carries</b> the VPA stack (admission / recommender / updater 1.5.1), the VPC-CNI <span class="mono">aws-network-policy-agent</span> (v1.3.1), a <span class="mono">headroom</span> DaemonSet (pause pods reserving warm capacity for Karpenter), a Windows EBS-CSI node DaemonSet, and a set of <b>homegrown ops controllers</b> — <span class="mono">cleanup-oomkilled/pending/stuck-resize-pods</span>, <span class="mono">bump-vpa-on-oom</span>, <span class="mono">service-topology</span> — which run on an unpinned <span class="mono">chainguard/kubectl:latest-dev</span> tag (worth pinning).</p>
+    </div>
+
+    <h3>Ingress &amp; mesh</h3>
+    <p><b>North-south</b> traffic (external clients ↔ the cluster) enters through the <span class="mono">aws-load-balancer-controller</span> (v3.1.0, ALB/NLB) and a pair of Istio ingress gateways (public + internal). <b>East-west</b> traffic (service ↔ service <i>inside</i> the cluster) runs on <b>Istio 1.29.2</b> with the Istio CNI installed — workload namespaces are labelled <span class="mono">istio.io/dataplane-mode: ambient</span>. Monitoring is the full <span class="mono">kube-prometheus-stack</span> (Prometheus, Alertmanager → PagerDuty/Slack, Grafana). <b>Flux</b> (flux2 2.18.4) reconciles the platform layer from <span class="mono">iaac-eks-manifests</span>; app deploys come through Octopus / mage-runner (§7–8).</p>
+
+    <h3>Data &amp; messaging layer</h3>
+    <p>None of the datastores are AWS-managed services (no MSK / DocumentDB / ElastiCache in the fleet). They're a mix of external SaaS and on-cluster operators — which decides who owns version upgrades:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>System</th><th>Where it runs</th><th>We manage</th><th>Engine upgrades</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">PostgreSQL</td><td>RDS PostgreSQL <b>14.22</b> — one per env (dev/qa t4g.small, prod r6g.large Multi-AZ). CNPG operator installed but unused.</td><td>DB + users (TF)</td><td><span class="chip good">AWS RDS</span></td></tr>
+          <tr><td class="mono">Kafka brokers</td><td>Confluent Cloud (SaaS)</td><td>Topics · ACLs · service accounts (TF)</td><td><span class="chip good">Confluent</span></td></tr>
+          <tr><td class="mono">Kafka Connect</td><td>Strimzi, on-cluster (op 0.51.0, connect ×3)</td><td>Operator + Connect + connectors</td><td><span class="chip warn">us</span></td></tr>
+          <tr><td class="mono">MongoDB</td><td>Atlas (SaaS)</td><td>Cluster tier + users (TF)</td><td><span class="chip good">Atlas</span></td></tr>
+          <tr><td class="mono">RabbitMQ</td><td>Operator installed (4.4.34) — 0 clusters in any env</td><td>—</td><td><span class="chip neutral">idle*</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:.82rem">Confirmed 2026-07-15 across <b>dev + qa + prod</b>: app Postgres is <b>RDS PostgreSQL 14.22</b> (Graviton t4g/r6g; prod Multi-AZ) — the on-cluster CNPG operator runs 0 clusters and is effectively unused, as is the RabbitMQ operator (0 clusters everywhere). Kafka brokers are external (Confluent Cloud); Strimzi on-cluster runs <b>Kafka Connect</b> (the <span class="mono">connect-connect-*</span> pods), not brokers. <b>PG 14 nears end-of-life — an RDS major upgrade (14 → 16/17) is a due item alongside the K8s one.</b></p>
+  </section>
+
+  <!-- 6 IDENTITY -->
+  <section id="identity">
+    <div class="sec-head"><span class="sec-num">06</span><h2>Identity — IRSA</h2></div>
+    <p class="sec-sub">Pods get AWS credentials through IAM Roles for Service Accounts. On EKS this is native: the OIDC provider and the pod-identity webhook are supplied by the managed control plane — nothing to vendor (unlike the on-prem Talos build).</p>
+    <div class="flow" aria-label="IRSA credential flow">
+      <div class="node"><span class="n-lab">Service account</span><span class="n-body">annotated <span class="mono">eks.amazonaws.com/role-arn</span></span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">Webhook</span><span class="n-body">EKS pod-identity webhook injects token + role env</span></div>
+      <span class="arrow">→</span>
+      <div class="node emph"><span class="n-lab">STS</span><span class="n-body"><span class="mono">AssumeRoleWithWebIdentity</span></span></div>
+      <span class="arrow">→</span>
+      <div class="node term"><span class="n-lab">Result</span><span class="n-body">short-lived creds → AWS API calls</span></div>
+    </div>
+    <p class="muted" style="font-size:.85rem">OIDC issuer is EKS-provided: <span class="mono">https://oidc.eks.us-east-2.amazonaws.com/id/&lt;cluster-id&gt;</span>. Trust-policy subject must be <span class="mono">system:serviceaccount:&lt;ns&gt;:&lt;sa&gt;</span> exactly — a wrong namespace is a silent assume failure (debug via CloudTrail).</p>
+  </section>
+
+  <!-- 7 ONBOARD -->
+  <section id="onboard">
+    <div class="sec-head"><span class="sec-num">07</span><h2>How an app onboards</h2></div>
+    <p class="sec-sub">An app is defined by a <span class="mono">spec.yaml</span> in its own repo — the deployment contract. <b>mage-runner</b> (a Go/Mage binary) reads it, validates against JSON schemas, and drives <span class="mono">terraform-variant-apps</span> to build the app's infra and deploy its Helm chart.</p>
+
+    <div class="two">
+      <div class="card">
+        <h3 style="margin-top:0">The contract — <span class="mono">spec.yaml</span></h3>
+        <p style="font-size:.9rem">Declares the app type and what infra it needs. mage-runner validates it against <span class="mono">terraform-variant-apps/schemas/</span> and decides which modules to run.</p>
+        <ul class="stack-list">
+          <li><span class="desc"><span class="comp">common/</span> — eks-data, role, replicator, auth, buckets, kafka, postgres, dynamodb, mongodb-{cluster,user,privatelink}</span></li>
+          <li><span class="desc"><span class="comp">apps/</span> — exactly one of api · cron · handler · ui</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">The unit — Helm chart</h3>
+        <p style="font-size:.9rem">One chart per app type, pulled from ECR:</p>
+        <pre style="margin:0"><span class="cm"># 064859874041.dkr.ecr.us-east-2</span>
+helm-charts/<span class="kw">dx-api</span>
+helm-charts/<span class="kw">dx-cron</span>
+helm-charts/<span class="kw">dx-handler</span>
+helm-charts/<span class="kw">dx-ui</span></pre>
+        <p style="font-size:.85rem;color:var(--ink-soft);margin-bottom:0">Provisions Deployment, Service, ServiceAccount (IRSA-annotated), and the Istio VirtualService/Gateway.</p>
+      </div>
+    </div>
+    <p class="muted" style="font-size:.85rem">The <span class="mono">common/eks-data</span> module reads cluster endpoint / OIDC / CA from the EKS API and is the hub every other module consumes. Per-app state: <span class="mono">s3://{bucket}/{octopus.space}/{app}/{module}/terraform.tfstate</span>. (Note: the <span class="mono">onboard-app.py</span> tool in iaac-octopus-overrides is the <b>on-prem</b> path, not this one.)</p>
+  </section>
+
+  <!-- 8 DEPLOY -->
+  <section id="deploy">
+    <div class="sec-head"><span class="sec-num">08</span><h2>Deploy &amp; upgrade workflow</h2></div>
+    <p class="sec-sub">Every app change flows through the same pipeline. Build is automated; the promotion between environments is a deliberate Octopus deploy.</p>
+
+    <div class="flow" aria-label="App deploy pipeline">
+      <div class="node"><span class="n-lab">1 · Commit</span><span class="n-body"><span class="mono">git push</span> to the app repo</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">2 · CI</span><span class="n-body">GitHub Actions builds &amp; tests, pushes image</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">3 · Registry</span><span class="n-body">ECR image (<span class="mono">064859874041</span>)</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">4 · Release</span><span class="n-body">mage-runner creates Octopus release w/ new tag</span></div>
+      <span class="arrow">→</span>
+      <div class="node emph"><span class="n-lab">5 · Deploy</span><span class="n-body">Octopus <b>USXpress</b> space — click Deploy (dev→qa→prod)</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><span class="n-lab">6 · Apply</span><span class="n-body">mage-runner CD → terraform-variant-apps</span></div>
+      <span class="arrow">→</span>
+      <div class="node term"><span class="n-lab">7 · Live</span><span class="n-body">infra + Helm chart → pod running</span></div>
+    </div>
+
+    <p>Promotion uses the standard Octopus lifecycle <b>dev → qa → prod</b> (the cloud lifecycle; on-prem uses a separate <span class="mono">feature-manual</span> path). The <span class="mono">TfDeploy.Apply()</span> pipeline runs infrastructure modules first (replicator → namespace → buckets/kafka/postgres/dynamodb/mongo → role), then the single app module, then any post-deploy script.</p>
+
+    <h3>The engine — DX &amp; mage-runner</h3>
+    <p>"DX" is the whole deployment platform, not one repo. <b>mage-runner</b> is the Go binary that does the work; <b>DX-Apply</b> is the Octopus step that invokes it; the <b>DX__*</b> library variable sets feed it config.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Layer</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">DX (system)</td><td>mage-runner + Octopus var sets (DX__Common, DX__EKSCluster, DX__Runner, DX__TFState, DX__AWSAccounts) + DX-Apply + GHA workflows.</td></tr>
+        <tr><td class="mono">DX-Apply</td><td>An Octopus deploy-process step (inline PowerShell) that preps the env and invokes mage.</td></tr>
+        <tr><td class="mono">mage-runner</td><td>The Go binary: reads the spec, picks TF modules, runs them, composes Helm values, talks to Octopus.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Two repos, and how they connect</h3>
+    <p>mage-runner builds a path into <span class="mono">$TERRAFORM_APPS_PATH/modules/&lt;module&gt;</span> and runs each through the <span class="mono">hashicorp/terraform-exec</span> Go SDK — it <b>never shells out to the <span class="mono">terraform</span> CLI</b>.</p>
+    <div class="two">
+      <div class="card">
+        <h4 style="margin:0 0 8px"><span class="mono">mage-runner</span> — orchestrator (Go / Mage)</h4>
+        <pre style="margin:0;font-size:.72rem">cmd/mage/magefiles/  <span class="cm"># exactly 4 files</span>
+  terraform.go   <span class="cm"># TfDeploy: Apply/Destroy/</span>
+                 <span class="cm">#  Infrastructure/Apps/ScriptRun</span>
+  common.go      <span class="cm"># ParseSpec, ValidateSpec</span>
+  octopus.go     <span class="cm"># CreateOctopusRelease</span>
+  github.go      <span class="cm"># GHA integration</span>
+internal/terraform/
+  terraform_functions.go <span class="cm"># TfRun() ⭐</span>
+  terraform.go  terraform_helpers.go
+  interface.go   <span class="cm"># TF abstraction</span>
+  common.go      <span class="cm"># shouldRunTerraform, state</span>
+  constants.go
+  apps.go  apps_functions.go
+  script_run.go  <span class="cm"># the ScriptRun stage</span>
+  namespace.go replicator.go role.go auth.go
+  buckets.go kafka.go postgres.go dynamodb.go
+  mongodb_cluster.go  mongodb_user.go
+  *_test.go  test_helpers.go  test_mocks.go
+                 <span class="cm"># full unit-test suite ✔</span>
+internal/{context,kube,shared,octopus}/
+hack/            <span class="cm"># local spec.yaml + tfvars.json</span>
+
+<span class="cm"># build:</span> go build -o /usr/local/bin/mage ./cmd/mage</pre>
+      </div>
+      <div class="card">
+        <h4 style="margin:0 0 8px"><span class="mono">terraform-variant-apps</span> — the modules</h4>
+        <pre style="margin:0;font-size:.72rem">modules/          <span class="cm"># only TWO top-level dirs</span>
+  common/
+    eks-data ⭐     <span class="cm"># cluster endpoint/OIDC/CA</span>
+    role           <span class="cm"># IAM role + IRSA trust</span>
+    replicator     <span class="cm"># deploy-metadata ConfigMap</span>
+    auth           <span class="cm"># Azure AD app registration</span>
+    buckets        <span class="cm"># S3</span>
+    kafka          <span class="cm"># Confluent topics + SA</span>
+    postgres  dynamodb
+    mongodb-cluster  mongodb-user
+    mongodb-privatelink
+  apps/
+    api  cron  handler  ui
+                   <span class="cm"># helm_release dx-&lt;type&gt;</span></pre>
+        <p style="font-size:.78rem;color:var(--ink-faint);margin:10px 0 0">No <span class="mono">infrastructure/</span> dir and no <span class="mono">namespace</span>/<span class="mono">tags</span> module — the namespace is created by mage via the K8s SDK, not Terraform.</p>
+      </div>
+    </div>
+
+    <h3>The stages — <span class="mono">TfDeploy.Apply()</span></h3>
+    <div class="flow" aria-label="mage pipeline stages">
+      <div class="node"><span class="n-lab">0 · Validate</span><span class="n-body">env + channel guard (feature → dev/qa only)</span></div>
+      <span class="arrow">→</span>
+      <div class="node emph"><span class="n-lab">1 · Infrastructure</span><span class="n-body">replicator → buckets → auth → kafka → postgres → dynamodb → mongodb-* → <b>role (IRSA)</b></span></div>
+      <span class="arrow">→</span>
+      <div class="node emph"><span class="n-lab">2 · Apps</span><span class="n-body">ONE of api/cron/handler/ui → Helm <span class="mono">dx-&lt;type&gt;</span></span></div>
+      <span class="arrow">→</span>
+      <div class="node term"><span class="n-lab">3 · ScriptRun</span><span class="n-body">postStep, outputs.yaml, cleanup</span></div>
+    </div>
+    <p class="muted" style="font-size:.85rem">Each infra module runs <i>only if present in the spec</i> — <span class="mono">shouldRunTerraform()</span> gates on both spec content and existing S3 state. The <b>namespace is created by mage via the K8s SDK</b> (<span class="mono">internal/kube/namespace.go</span>), not by a Terraform module — there is no <span class="mono">namespace</span> module.</p>
+
+    <h3>Where Terraform triggers — <span class="mono">TfRun()</span></h3>
+    <p>The heart of the engine (<span class="mono">internal/terraform/terraform_functions.go</span>), per module:</p>
+    <ol style="max-width:70ch;font-size:.92rem;line-height:1.55">
+      <li>Build path <span class="mono">$TERRAFORM_APPS_PATH/modules/&lt;relpath&gt;</span> (e.g. <span class="mono">apps/api</span>).</li>
+      <li>Write <span class="mono">*.auto.tfvars.json</span> in the module dir: <span class="mono">backend</span> (S3), <span class="mono">mage</span> (tags/spec/labels/role_arn/configmaps/aws_secrets), <span class="mono">hack</span> (local overrides).</li>
+      <li><span class="mono">tfexec.NewTerraform(path, terraform)</span> → <span class="mono">Init</span>(backend) → <span class="mono">Apply</span> → <span class="mono">Output</span>.</li>
+      <li>Cache outputs in <span class="mono">GlobalContext.Outputs[module]</span> for later modules.</li>
+      <li>Persist <span class="mono">mage.auto.tfvars.json</span> to S3 (so destroy reuses the same vars).</li>
+    </ol>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Key module</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">common/eks-data ⭐</td><td>Reads cluster endpoint / OIDC / CA. The hub every module consumes — if it can't resolve, nothing deploys.</td></tr>
+        <tr><td class="mono">common/role</td><td>Per-app IAM role <span class="mono">&lt;cluster&gt;-&lt;app&gt;</span> with IRSA trust binding <span class="mono">system:serviceaccount:&lt;ns&gt;:&lt;sa&gt;</span> — this <i>is</i> per-app IRSA.</td></tr>
+        <tr><td class="mono">apps/&lt;type&gt;</td><td><span class="mono">helm_release</span> of <span class="mono">dx-{api,cron,handler,ui}</span> from ECR → Deployment, Service, IRSA SA, Istio VirtualService/Gateway.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>The contract — <span class="mono">spec.yaml</span></h3>
+    <pre style="font-size:.78rem">name: brands-api
+octopus: { space: DevOps, group: brands }   <span class="cm"># group → namespace</span>
+git:
+  image: 064859874041.dkr.ecr.us-east-2…/brands-api:1.1266
+  language: go                              <span class="cm"># OTel auto-instrument</span>
+infrastructure:                             <span class="cm"># each key → a module</span>
+  kafka: { … }
+  postgres: { … }
+  iam: { policy: [ { effect: Allow, actions: [s3:GetObject] } ] }
+api:                                        <span class="cm"># exactly ONE of api|cron|handler|ui</span>
+  service: { targetPort: 8080 }</pre>
+    <p class="muted" style="font-size:.82rem"><b>State:</b> <span class="mono">s3://{S3_BUCKET}/{space}/{app}/{module}/terraform.tfstate</span> · <b>vars cache:</b> <span class="mono">…/{module}.tfvars.json</span> · <b>outputs:</b> <span class="mono">artifacts/outputs.yaml</span>. Key env (via <span class="mono">caarlos0/env</span>): <span class="mono">S3_BUCKET</span> (DX__TFState), <span class="mono">TERRAFORM_APPS_PATH</span> (DX__Common), <span class="mono">KUBECONFIG</span> (absolute), <span class="mono">TF_VAR_*</span> pass-through.</p>
+
+    <div class="two">
+      <div class="card" style="border-left:4px solid var(--good)">
+        <h4 style="margin:0 0 6px">Onboarding = the first release</h4>
+        <p style="font-size:.88rem;margin:0">Author writes <span class="mono">spec.yaml</span>. First <span class="mono">Apply()</span> creates the namespace, IAM role + IRSA, any S3/Kafka/PG/Dynamo, and the Helm release.</p>
+      </div>
+      <div class="card" style="border-left:4px solid var(--accent)">
+        <h4 style="margin:0 0 6px">Upgrade = every release after</h4>
+        <p style="font-size:.88rem;margin:0">Same pipeline, new image tag. Infra modules idempotent; the <span class="mono">apps/</span> module rolls the Deployment. ~200 releases across the fleet.</p>
+      </div>
+    </div>
+    <p class="muted" style="font-size:.82rem">App chart is <span class="mono">dx-{api,cron,handler,ui}</span> (2.x); a legacy <span class="mono">variant-*</span> chart is mid-migration and accounts for the handful of <span class="mono">failed</span> Helm releases (§10). Repo structure verified against the live <span class="mono">mage-runner</span> + <span class="mono">terraform-variant-apps</span> repos, 2026-07-15.</p>
+  </section>
+
+  <!-- 9 SERVICES -->
+  <section id="services">
+    <div class="sec-head"><span class="sec-num">09</span><h2>AWS services in play</h2></div>
+    <p class="sec-sub">The platform is AWS-native. External systems (Azure AD, Confluent Kafka, MongoDB Atlas) bridge in through Secrets Manager but aren't part of the AWS surface.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Service</th><th>Role in the platform</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">EKS</td><td>The three managed Kubernetes clusters.</td></tr>
+          <tr><td class="mono">EC2</td><td>Worker nodes — managed node groups + Karpenter-provisioned.</td></tr>
+          <tr><td class="mono">IAM + OIDC</td><td>Cluster service role, per-app IRSA roles, OIDC provider.</td></tr>
+          <tr><td class="mono">STS</td><td><span class="mono">AssumeRoleWithWebIdentity</span> for IRSA credential exchange.</td></tr>
+          <tr><td class="mono">S3</td><td>Terraform state, app buckets, RisingWave state store.</td></tr>
+          <tr><td class="mono">Secrets Manager</td><td>App + integration secrets; the ESO source of truth.</td></tr>
+          <tr><td class="mono">ECR</td><td>Container images + Helm charts (account 064859874041).</td></tr>
+          <tr><td class="mono">RDS (Postgres)</td><td>Primary app Postgres — one PG 14.22 instance per env (prod Multi-AZ); Graviton t4g/r6g.</td></tr>
+          <tr><td class="mono">DynamoDB</td><td>App table module; historical TF state locking.</td></tr>
+          <tr><td class="mono">ELB — ALB / NLB</td><td>Ingress via aws-load-balancer-controller; NLB/PrivateLink for exposed services.</td></tr>
+          <tr><td class="mono">VPC</td><td>Subnets, security groups, VPC endpoints / PrivateLink.</td></tr>
+          <tr><td class="mono">KMS</td><td>EKS envelope encryption of etcd secrets (per cluster; audited under INFRA-1507); optional S3 encryption.</td></tr>
+          <tr><td class="mono">SSM Parameter Store</td><td>Cluster parameters under <span class="mono">/clusters/&lt;name&gt;/*</span>.</td></tr>
+          <tr><td class="mono">CloudWatch</td><td>EKS control-plane logs (audit / authenticator).</td></tr>
+          <tr><td class="mono">CloudTrail</td><td>IRSA / cross-account assume debugging.</td></tr>
+          <tr><td class="mono">Route53 / ACM</td><td>DNS records automated by <span class="mono">external-dns</span> (v0.20.0, active); ACM for certs. The CloudFront-fronted OIDC used on-prem is <b>not</b> needed here.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 10 MAINTAIN -->
+  <section id="maintain">
+    <div class="sec-head"><span class="sec-num">10</span><h2>Maintenance &amp; upgrades</h2></div>
+    <p class="sec-sub">Current posture is healthy. The upgrade signals below come straight from the live sweep.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Signal</th><th>State (2026-07-15)</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>Cluster version</td><td class="mono">1.35 (newest 1.36)</td><td>One behind — plan 1.36 via INFRA-1594.</td></tr>
+          <tr><td>kube-proxy addon</td><td><span class="chip warn">skew warning</span> <span class="mono">v1.34.1</span></td><td>Bump to <span class="mono">v1.35.x</span> — clears the only failing insight.</td></tr>
+          <tr><td>Node AMI</td><td class="mono">Bottlerocket 1.62.1</td><td>Current for 1.35; re-bakes on Karpenter drift.</td></tr>
+          <tr><td>Support policy</td><td><span class="chip warn">EXTENDED</span></td><td>Confirm intent — EXTENDED = paid extended support vs auto-upgrade.</td></tr>
+          <tr><td>Failed Helm releases</td><td class="mono">~7 (legacy variant-*)</td><td>Migrate to dx-* charts / clean up.</td></tr>
+          <tr><td>cluster-autoscaler</td><td class="mono">v1.26.2 (vestigial)</td><td>Confirm idle, then remove — Karpenter owns all nodes.</td></tr>
+          <tr><td>Unpinned images</td><td class="mono">ops ctrls · latest-dev</td><td>Pin <span class="mono">chainguard/kubectl</span> to a digest.</td></tr>
+          <tr><td>RDS Postgres</td><td class="mono">14.22 (all envs)</td><td>PG 14 nears EOL — plan RDS major upgrade (→ 16/17).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Addon versions vs the 1.36 target</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Addon</th><th class="mono">Current (dev)</th><th class="mono">1.36 default (AWS)</th><th>Gap</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">kube-proxy</td><td class="mono">v1.34.1</td><td class="mono">v1.36.0-eksbuild.7</td><td><span class="chip warn">2 minors behind</span></td></tr>
+          <tr><td class="mono">coredns</td><td class="mono">1.13.1</td><td class="mono">v1.14.2-eksbuild.4</td><td><span class="chip warn">bump at 1.36</span></td></tr>
+          <tr><td class="mono">aws-ebs-csi-driver</td><td class="mono">1.58.0</td><td class="mono">v1.62.0-eksbuild.1</td><td><span class="chip warn">bump at 1.36</span></td></tr>
+          <tr><td class="mono">aws-efs-csi-driver</td><td class="mono">3.0.0</td><td class="mono">v3.3.0-eksbuild.1</td><td><span class="chip warn">bump at 1.36</span></td></tr>
+          <tr><td class="mono">vpc-cni</td><td class="mono">1.21.1</td><td class="mono">v1.21.2-eksbuild.2</td><td><span class="chip good">patch only</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:.82rem">Only kube-proxy is an EKS managed addon (upgrade via <span class="mono">update-addon</span>); vpc-cni / coredns / EBS / EFS are Helm — upgrade = bump the pinned chart in <span class="mono">iaac-eks-manifests</span>. Targets from <span class="mono">describe-addon-versions --kubernetes-version 1.36</span>, 2026-07-15.</p>
+
+    <div class="two">
+      <div class="card">
+        <div class="pill-row"><span class="chip warn"><span class="dot"></span>INFRA-1594</span><span class="chip neutral">Cloud / EKS</span></div>
+        <h3 style="margin-top:12px">Fleet EKS version upgrade</h3>
+        <p style="font-size:.9rem">Confirm current version (~1.34/1.35) vs AWS-supported latest, then design an <b>automated fleet-style upgrade</b> flowing dev → QA/staging → prod. Parul owns existing end-to-end upgrade docs to build on; <b>Mark</b> drives, guided by Rohit + Parul.</p>
+        <p style="font-size:.84rem;color:var(--ink-soft);margin-bottom:0">Deliverables: current-vs-supported gap report, automated approach, per-env rollout runbook.</p>
+      </div>
+      <div class="card">
+        <div class="pill-row"><span class="chip neutral"><span class="dot"></span>INFRA-1507</span><span class="chip neutral">Security posture</span></div>
+        <h3 style="margin-top:12px">etcd encryption posture</h3>
+        <p style="font-size:.9rem">Document EKS <b>envelope encryption</b> (KMS on etcd secrets) per cluster — key alias/ARN and rotation cadence. Read-only audit; cloud team owns the EKS Terraform.</p>
+        <p style="font-size:.84rem;color:var(--ink-soft);margin-bottom:0">Output destined for <span class="mono">docs/architecture/eks-etcd-encryption-posture.md</span>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 OPEN -->
+  <section id="open">
+    <div class="sec-head"><span class="sec-num">11</span><h2>Open items &amp; next actions</h2></div>
+    <p class="sec-sub">The two unknowns are resolved. What remains is upkeep — re-run the sweep any time to refresh the baseline.</p>
+    <div class="callout" style="border-left-color:var(--good)">
+      <span class="ic" style="color:var(--good)">✓</span>
+      <p><b>Resolved 2026-07-15.</b> K8s <b>1.35</b> on all three envs; nodes <b>Bottlerocket 1.62.1 / Graviton ARM64</b> (m7g/m6g).</p>
+    </div>
+    <div class="callout">
+      <span class="ic">1</span>
+      <p><b>Bump kube-proxy</b> to <span class="mono">v1.35.x</span> — clears the one WARNING insight (version skew) across all three clusters.</p>
+    </div>
+    <div class="callout">
+      <span class="ic">2</span>
+      <p><b>Decide support policy</b> — all three are <span class="mono">EXTENDED</span>. Keep (buys runway, costs more) or switch to <span class="mono">STANDARD</span> before 1.36.</p>
+    </div>
+    <div class="callout">
+      <span class="ic">3</span>
+      <p><b>Plan 1.35 → 1.36</b> (INFRA-1594) and <b>clean up ~7 failed Helm releases</b> (legacy <span class="mono">variant-*</span> charts).</p>
+    </div>
+    <pre><span class="cm"># re-run on WSL to refresh the version / addon baseline</span>
+<span class="kw">for</span> p <span class="kw">in</span> usx-dev usx-qa ops-controller; <span class="kw">do</span>
+  c=$([ $p = usx-dev ] &amp;&amp; echo usxpress-dev || { [ $p = usx-qa ] &amp;&amp; echo qa-one || echo usxpress-prod; })
+  echo <span class="kw">"== $c ($p) =="</span>
+  aws eks describe-cluster --profile $p --region us-east-2 --name $c \
+    --query <span class="kw">'cluster.{k8s:version,platform:platformVersion,status:status}'</span> --output table
+  aws eks list-nodegroups --profile $p --region us-east-2 --cluster-name $c --query nodegroups --output text | \
+    xargs -I{} aws eks describe-nodegroup --profile $p --region us-east-2 --cluster-name $c --nodegroup-name {} \
+      --query <span class="kw">'nodegroup.{ng:nodegroupName,amiType:amiType,ver:version,rel:releaseVersion,inst:instanceTypes}'</span> --output table
+<span class="kw">done</span></pre>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <div class="src">
+    <b>Primary sources</b><br>
+    docs/onboarding/idris-kt/idris_kt_session5_iaac_eks.md &nbsp;·&nbsp; session4_dx_mage.md &nbsp;·&nbsp; session3_terraform_variant_apps.md<br>
+    session2_octopus.md &nbsp;·&nbsp; session6_supporting.md &nbsp;·&nbsp; session7_risingwave.md<br>
+    jira/sent/INFRA-1594 (EKS upgrade) &nbsp;·&nbsp; INFRA-1507 (etcd encryption) &nbsp;·&nbsp; wip/standup-2026-07-13
+  </div>
+  <p style="margin-top:18px;max-width:none">Scope: AWS cloud EKS only. On-prem Talos (op-usxpress-dev/qa) is a separate architecture. Version &amp; component baseline confirmed live 2026-07-15; component versions sampled from usxpress-dev.</p>
+</footer>
+
