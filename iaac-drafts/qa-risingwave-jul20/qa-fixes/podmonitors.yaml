@@ -1,0 +1,86 @@
+# Replaces dev's Prometheus extraScrapeConfigs. QA scrapes RW with the PLATFORM
+# Prometheus, so scrape config must be CRs, not chart values.
+# Ports taken from dev's extraScrapeConfigs:
+#   meta 1250 · frontend 8080 · compute 1222 · compactor 1260
+#
+# NOTE: dev matched TWO label schemes (risingwave/component and
+# risingwave.risingwavelabs.com/component) because operator versions differ in
+# which they emit. QA's operator chart version is not yet pinned (Tim's call).
+# If Prometheus targets come back empty, switch the selector to
+# risingwave.risingwavelabs.com/component.
+# The gate is "targets UP in Prometheus", NOT "the PodMonitor exists".
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: risingwave-meta
+spec:
+  namespaceSelector:
+    matchNames: [risingwave]
+  selector:
+    matchLabels:
+      risingwave/component: meta
+  podMetricsEndpoints:
+    - targetPort: 1250
+      path: /metrics
+      relabelings:
+        - targetLabel: app
+          replacement: risingwave
+        - sourceLabels: [__meta_kubernetes_pod_label_risingwave_component]
+          targetLabel: component
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: risingwave-frontend
+spec:
+  namespaceSelector:
+    matchNames: [risingwave]
+  selector:
+    matchLabels:
+      risingwave/component: frontend
+  podMetricsEndpoints:
+    - targetPort: 8080
+      path: /metrics
+      relabelings:
+        - targetLabel: app
+          replacement: risingwave
+        - sourceLabels: [__meta_kubernetes_pod_label_risingwave_component]
+          targetLabel: component
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: risingwave-compute
+spec:
+  namespaceSelector:
+    matchNames: [risingwave]
+  selector:
+    matchLabels:
+      risingwave/component: compute
+  podMetricsEndpoints:
+    - targetPort: 1222
+      path: /metrics
+      relabelings:
+        - targetLabel: app
+          replacement: risingwave
+        - sourceLabels: [__meta_kubernetes_pod_label_risingwave_component]
+          targetLabel: component
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: risingwave-compactor
+spec:
+  namespaceSelector:
+    matchNames: [risingwave]
+  selector:
+    matchLabels:
+      risingwave/component: compactor
+  podMetricsEndpoints:
+    - targetPort: 1260
+      path: /metrics
+      relabelings:
+        - targetLabel: app
+          replacement: risingwave
+        - sourceLabels: [__meta_kubernetes_pod_label_risingwave_component]
+          targetLabel: component

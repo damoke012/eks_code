@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: risingwave
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Dashboard ConfigMap for the platform Grafana sidecar.
+# The 1.15 MiB dev dashboard was removed: it exceeds the 1 MiB ConfigMap limit,
+# and the only alternative was a manual Grafana UI import — this repo does not
+# do manual steps.
+configMapGenerator:
+  - name: rw-user-dashboard
+    files:
+      - risingwave-user-dashboard.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - helmrepositories.yaml
+  - operator-helmrelease.yaml
+  - risingwave-cr.yaml
+  - pg-postgresql.yaml
+  - pg-externalsecret.yaml
+  - rw-license-key.yaml
+  - rw-secret-private-key.yaml
+  - rw-root-bootstrap-job.yaml
+  - rw-service-accounts-externalsecret.yaml
+  - rw-service-accounts-bootstrap-job.yaml
+  - risingwave-console.yaml
+  - rw-sql-frontend-cert.yaml
+  - ghostunnel-rw-frontend.yaml
+  - ghostunnel-rw-postgres.yaml
+  - frontend-ext.yaml
+  - dashboard-ext.yaml
+  - console-ext.yaml
+  - podmonitors.yaml
+
+# velero-schedule.yaml is deliberately ABSENT.
+# The top-level `namespace: risingwave` transformer rewrites metadata.namespace
+# on every resource, which put the Velero Schedule in the risingwave namespace.
+# Velero's controller only watches its own namespace, so the Schedule was
+# created, reported no error, and would never have taken a backup. There is no
+# clean per-resource exemption from the namespace transformer, and the Schedule
+# is platform-stack config, so it lives in iaac-talos-flux-platform op-qa
+# alongside the rest of Velero.
