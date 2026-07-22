@@ -1,0 +1,103 @@
+---
+# etcd-backup staleness alerting — INFRA-1623 durable fix.
+#
+# Why: QA's etcd snapshots failed silently for 13 days. Two independent defects
+# (SM placeholder value, then dev's VIP hardcoded in the CronJob) each produced
+# nothing but BackoffLimitExceeded in a namespace nobody watches. Every deploy
+# reported success throughout.
+#
+# Deploy to iaac-talos-flux-platform on op-qa AND op-dev.
+# Path: infrastructure/prometheus/  (confirm where existing PrometheusRules live
+# on the branch before committing — do not guess the directory).
+#
+# NOTE: `absent()` rules are not optional. If the CronJob is deleted or renamed,
+# its kube-state-metrics series disappears and every threshold rule below stops
+# evaluating — silently green. That is the exact failure shape this alert exists
+# to catch, so it must be caught explicitly.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: etcd-backup-staleness
+  namespace: etcd-backup
+  labels:
+    app.kubernetes.io/name: etcd-backup
+    # Match the label your Prometheus uses for ruleSelector. Verify with:
+    #   kubectl -n prometheus get prometheus -o yaml | grep -A5 ruleSelector
+    release: prometheus
+spec:
+  groups:
+    - name: etcd-backup.rules
+      rules:
+        # ---- Primary: no successful snapshot recently ----------------------
+        # CronJob runs hourly (:17). 6h = 6 consecutive misses before paging.
+        - alert: EtcdSnapshotStale
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{
+              namespace="etcd-backup", cronjob="etcd-snapshot-to-s3"
+            } > 21600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "etcd snapshot stale on {{ $labels.cluster }} ({{ $value | humanizeDuration }} since last success)"
+            description: >-
+              No successful etcd snapshot for over 6h. The cluster is not
+              restorable at the control-plane layer. Check:
+              kubectl -n etcd-backup get jobs
+              kubectl -n etcd-backup logs -l job-name=<recent job> --all-containers
+              Verify the CronJob targets THIS cluster's VIP (INFRA-1623: op-qa
+              shipped with dev's 10.10.82.50 for 13 days).
+            runbook_url: "https://github.com/variant-inc/iaac-talos-flux-platform/blob/op-qa/infrastructure/etcd-backup/README.md"
+
+        # ---- The CronJob itself vanished -----------------------------------
+        - alert: EtcdSnapshotCronJobMissing
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{
+              namespace="etcd-backup", cronjob="etcd-snapshot-to-s3"
+            })
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "etcd-backup CronJob metric absent — backups may be entirely gone"
+            description: >-
+              kube-state-metrics reports no series for the etcd-snapshot-to-s3
+              CronJob. Either it was deleted/renamed, Flux stopped reconciling
+              etcd-backup, or kube-state-metrics is down. Every other alert in
+              this group is blind while this fires.
+
+        # ---- Never succeeded at all (fresh cluster) -------------------------
+        # kube_cronjob_status_last_successful_time is absent until the FIRST
+        # success, so EtcdSnapshotStale cannot fire on a new cluster that has
+        # never once worked. That was QA's exact state for 13 days.
+        - alert: EtcdSnapshotNeverSucceeded
+          expr: |
+            (kube_cronjob_created{namespace="etcd-backup", cronjob="etcd-snapshot-to-s3"} < time() - 7200)
+            unless on(namespace, cronjob)
+            kube_cronjob_status_last_successful_time{namespace="etcd-backup", cronjob="etcd-snapshot-to-s3"}
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "etcd-backup CronJob has NEVER produced a successful snapshot"
+            description: >-
+              CronJob has existed for >2h with no recorded success. On a newly
+              built cluster this means the backup path was broken from birth —
+              check the talosconfig SM value is real (not PLACEHOLDER) and that
+              --endpoints/--nodes point at THIS cluster.
+
+        # ---- Job-level failures (faster signal than the 6h threshold) -------
+        - alert: EtcdSnapshotJobFailing
+          expr: |
+            kube_job_status_failed{namespace="etcd-backup"} > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "etcd-backup job {{ $labels.job_name }} failing"
+            description: >-
+              At least one etcd-backup job is in a failed state. Pods are GC'd
+              quickly — capture logs by polling right after triggering:
+              J=verify-$(date +%s);
+              kubectl -n etcd-backup create job --from=cronjob/etcd-snapshot-to-s3 $J;
+              kubectl -n etcd-backup get pods -l job-name=$J -w
