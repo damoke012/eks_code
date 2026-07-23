@@ -1,0 +1,50 @@
+---
+# G2 — NEUTER THE BUILT-IN `default` PROJECT.
+#
+# Argo CD ships `default` with sourceRepos '*', destinations '*' (any namespace,
+# any server) and clusterResourceWhitelist '*'. Any Application created without
+# an explicit project lands here, so leaving it alone silently defeats every
+# other guardrail: an app could target `risingwave` (Tim's, Flux-owned) and Argo
+# CD would accept it. That is precisely why PR #73 was rejected.
+#
+# Declaring it here makes Flux own the object and overwrite the chart default.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  description: "Neutered. Every Application must declare an explicit project."
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []
+---
+# G1 — the only project apps may use. Namespace glob is the split-brain barrier:
+# `app-*` cannot match risingwave, risingwave-2, flux-system, velero, rook-ceph,
+# istio-system, prometheus, grafana, etcd-backup, external-secrets, or argocd.
+#
+# Adding a destination here is the single most dangerous edit in this repo.
+# Anything Flux reconciles is OFF LIMITS - two controllers with ServerSideApply
+# on the same object fight over field ownership indefinitely.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  description: "App-team self-service. MUST NOT overlap any Flux-managed namespace."
+  sourceRepos:
+    - "ssh://git@github.com/variant-inc/*"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "app-*"
+  # G3 — no cluster-scoped resources. App teams do not create CRDs,
+  # ClusterRoles, or namespaces through Argo CD.
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding

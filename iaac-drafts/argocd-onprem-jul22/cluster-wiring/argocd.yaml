@@ -1,0 +1,41 @@
+---
+# Goes in iaac-talos-flux-cluster: clusters/<cluster>/flux-system/argocd.yaml
+# Replace <cluster> with bm-dev (first) or op-usxpress-qa (after dev is green).
+#
+# Doke owns this file. Idris owns iaac-argocd-onprem. Same split as RisingWave:
+# the app repo can merge first, it just will not reconcile until this lands.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: argocd-onprem
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: ssh://git@github.com/variant-inc/iaac-argocd-onprem.git
+  ref:
+    branch: main
+  secretRef:
+    name: argocd-onprem-ssh
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  path: ./manifests/<cluster>
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: argocd-onprem
+  # external-secrets must exist before argocd-repo-creds can sync.
+  dependsOn:
+    - name: external-secrets
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: argocd
+      namespace: argocd
+  timeout: 5m

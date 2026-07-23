@@ -1,0 +1,36 @@
+---
+# RisingWave metastore backup — INFRA-1624.
+#
+# Lives HERE (iaac-talos-flux-platform, branch op-qa, infrastructure/velero/)
+# and NOT in iaac-risingwave-onprem, because that repo's kustomization.yaml sets
+# `namespace: risingwave` at the top level. Kustomize's namespace transformer
+# rewrites metadata.namespace on EVERY resource, so the Schedule landed in the
+# risingwave namespace. Velero's controller only watches its own namespace, so
+# the Schedule would have been created, reported no error, and never taken a
+# backup. There is no clean per-resource exemption from that transformer.
+#
+# Why this matters: S3 holds RisingWave's streaming state, but the Postgres
+# metastore is a PVC, and a PVC does NOT survive a cluster teardown. This
+# Schedule is the only thing that makes the metastore restorable.
+#
+# VERIFY AFTER APPLY (the object existing proves nothing):
+#   velero schedule get risingwave-metastore
+#   velero backup get | grep risingwave-metastore     # a real backup after 6h
+#   aws s3 ls s3://velero-op-usxpress-qa/backups/ --profile usx-qa | grep risingwave
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: risingwave-metastore
+  namespace: velero
+spec:
+  schedule: "0 */6 * * *"
+  template:
+    includedNamespaces:
+      - risingwave
+    includedResources:
+      - persistentvolumeclaims
+      - persistentvolumes
+      - secrets
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: true
+    ttl: 720h

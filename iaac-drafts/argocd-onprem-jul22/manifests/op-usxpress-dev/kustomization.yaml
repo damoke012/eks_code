@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base
+
+# Env-specific values live HERE, never in base (README G7).
+patches:
+  - target:
+      kind: ExternalSecret
+      name: argocd-repo-creds
+    patch: |
+      - op: replace
+        path: /spec/data/0/remoteRef/key
+        value: op-usxpress-dev/argocd/deploy-key
+
+  # dev has flat workers - no `pool` labels - so the base nodeSelector would
+  # leave every Argo CD pod Pending.
+  - target:
+      kind: HelmRelease
+      name: argocd
+    patch: |
+      - op: remove
+        path: /spec/values/global/nodeSelector

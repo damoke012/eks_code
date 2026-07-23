@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    # Cluster PodSecurity is `restricted`. Argo CD components run non-root and
+    # comply, so no privileged exemption is needed here (unlike
+    # local-path-storage, whose helper pod requires it).
+    pod-security.kubernetes.io/enforce: restricted

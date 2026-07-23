@@ -1,0 +1,90 @@
+---
+# Argo CD installed BY FLUX (G6). Flux owns the controller; the controller owns
+# app-team Applications. One direction, no loop.
+#
+# ⚠️ CHART VERSION: verify the current stable release before merge --
+#   flux create source helm argo --url=https://argoproj.github.io/argo-helm --export
+#   helm search repo argo/argo-cd --versions | head
+# Pin it. An unpinned chart makes every reconcile a potential upgrade, which is
+# how QA's talosctl ended up on a version nobody chose.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: argo-cd
+      version: "7.7.11" # TODO verify before merge
+      sourceRef:
+        kind: HelmRepository
+        name: argo
+        namespace: argocd
+      interval: 12h
+  install:
+    crds: Create
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    global:
+      # QA/prod have application/platform/system pools; dev has flat workers.
+      # Without this, Argo CD scatters onto application nodes.
+      nodeSelector:
+        pool: platform
+
+    configs:
+      params:
+        # TLS terminates at the Istio gateway; running the server insecure
+        # avoids the double-TLS redirect loop behind an ingress proxy.
+        server.insecure: true
+      cm:
+        # Keep the admin account until Entra SSO lands (deferred, see README).
+        admin.enabled: "true"
+        # Argo CD must not try to manage resources Flux owns, even if someone
+        # mis-scopes an Application. Belt-and-braces alongside the AppProject.
+        resource.exclusions: |
+          - apiGroups: ["kustomize.toolkit.fluxcd.io", "source.toolkit.fluxcd.io", "helm.toolkit.fluxcd.io", "notification.toolkit.fluxcd.io"]
+            kinds: ["*"]
+            clusters: ["*"]
+
+    # G5 — no NodePort. Reached through Istio only.
+    server:
+      service:
+        type: ClusterIP
+      replicas: 1
+      resources:
+        requests: { cpu: 100m, memory: 128Mi }
+        limits:   { cpu: 500m, memory: 512Mi }
+
+    controller:
+      replicas: 1
+      resources:
+        requests: { cpu: 250m, memory: 512Mi }
+        limits:   { cpu: "1",  memory: 2Gi }
+
+    repoServer:
+      replicas: 1
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits:   { cpu: 500m, memory: 1Gi }
+
+    applicationSet:
+      enabled: false # no use case yet (README: deferred)
+
+    notifications:
+      enabled: false
+
+    dex:
+      enabled: false # enable with Entra SSO, not before
+
+    redis:
+      enabled: true
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits:   { cpu: 200m, memory: 256Mi }
