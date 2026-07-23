@@ -1,0 +1,39 @@
+---
+# ==============================================================================
+# RisingWave platform layer — INFRA-1624 — Tim's `risingwave` namespace.
+# Mirrors the dev wiring (clusters/bm-dev/flux-system/infra.yaml, the
+# `risingwave-onprem` block): shared `flux-system` credential (NOT a per-repo
+# deploy key — dev proves the org-scoped token reads this repo), and
+# prune: false as protect-RW insurance so Flux can NEVER delete in Tim's ns.
+# ==============================================================================
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: iaac-risingwave-onprem
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  ref:
+    branch: main
+  url: https://github.com/variant-inc/iaac-risingwave-onprem.git
+  secretRef:
+    name: flux-system
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: risingwave-onprem
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./manifests/op-usxpress-qa
+  prune: false
+  sourceRef:
+    kind: GitRepository
+    name: iaac-risingwave-onprem
+  dependsOn:
+    - name: cert-manager
+    - name: external-secrets
+  wait: false
+  timeout: 5m
