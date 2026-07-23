@@ -1,15 +1,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# NOTE: no top-level `namespace:` here on purpose.
-# In iaac-risingwave-onprem that transformer silently rewrote a Velero Schedule
-# out of the velero namespace, so it was created, reported no error, and would
-# never have backed anything up. Every resource below carries its own explicit
-# namespace instead.
+# NOTE: no top-level `namespace:` on purpose. In iaac-risingwave-onprem that
+# transformer silently rewrote a Velero Schedule out of the velero namespace -
+# created, no error, never backed anything up. Every resource carries its own.
 
 resources:
   - namespace.yaml
   - helmrepository.yaml
   - helmrelease.yaml
   - appprojects.yaml
-  - externalsecret-repo-creds.yaml
+
+# ExternalSecrets are NOT here. They are environment-specific (SM path) and the
+# existing per-env files in this repo are already correct for the cluster:
+#   ClusterSecretStore is `default` (there is no `aws-secretsmanager`), and only
+#   external-secrets.io/v1 is served (v1beta1 would not apply).

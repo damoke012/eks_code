@@ -3,22 +3,24 @@ kind: Kustomization
 
 resources:
   - ../base
+  - argocd-admin-externalsecret.yaml
+  - argocd-git-externalsecret.yaml
 
-patches:
-  - target:
-      kind: ExternalSecret
-      name: argocd-repo-creds
-    patch: |
-      - op: replace
-        path: /spec/data/0/remoteRef/key
-        value: op-usxpress-qa/argocd/deploy-key
+# DELIBERATELY ABSENT:
+#  application-risingwave.yaml - Argo CD Application targeting the risingwave
+#    namespace from the same path Flux reconciles, with prune+selfHeal+SSA.
+#    Two controllers self-healing the same objects fight indefinitely, and
+#    prune lets Argo delete resources in Tim's namespace. RisingWave is
+#    Flux-managed via clusters/<cluster>/flux-system/risingwave.yaml.
+#  service-nodeport.yaml - platform standard is Istio ingress; the NodePort
+#    also exposed :443 against a plain-HTTP targetPort 8080.
+#  raw install.yaml from raw.githubusercontent.com - replaced by the Helm
+#    chart in base, which takes values (nodeSelector, limits, params).
 
-# QA keeps base's `nodeSelector: {pool: platform}` - the pool labels exist here.
+# QA keeps base's nodeSelector: {pool: platform} - the labels exist here.
 #
-# TODO before QA rollout: add virtualservice.yaml (Istio Gateway name + hostname).
-# Confirm against the live cluster first, do not guess:
+# TODO before rollout: virtualservice.yaml (Istio Gateway + hostname).
+# Confirm against the live cluster, do not guess:
 #   kubectl -n istio-system get gateway
-#   kubectl -n istio-system get svc istio-ingressgateway
-# Until it exists, reach the UI with:
-#   kubectl -n argocd port-forward svc/argocd-server 8080:80
-# Do NOT add a NodePort as a shortcut (G5).
+# Until then: kubectl -n argocd port-forward svc/argocd-server 8080:80
+# Do NOT re-add a NodePort as a shortcut.
