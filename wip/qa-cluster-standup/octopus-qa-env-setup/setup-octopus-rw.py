@@ -136,7 +136,6 @@ for name, value in QA_VARS.items():
     if name in existing_qa:
         print(f"    skip (already QA-scoped): {name}")
         continue
-    sensitive = name in ("S3_BUCKET",) is False and False  # none here are secret
     to_add.append({
         "Id": "", "Name": name, "Value": value,
         "Description": "RisingWave QA deploy (INFRA-1624)",
