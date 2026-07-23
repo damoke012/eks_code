@@ -2,13 +2,15 @@
 # Argo CD installed BY FLUX (G6). Flux owns the controller; the controller owns
 # app-team Applications. One direction, no loop.
 #
-# ⚠️ CHART VERSION: verify the current stable release before merge --
-#   helm repo add argo https://argoproj.github.io/argo-helm && helm repo update
-#   helm search repo argo/argo-cd --versions | head
+# CHART VERSION: pinned to 10.2.0 = Argo CD v3.4.5, the newest patch on the 3.4
+# line the repo already targeted (a raw manifest pinned v3.4.3). Verified with
+#   helm search repo argo/argo-cd --versions
 # Pin it. An unpinned chart makes every reconcile a potential upgrade, which is
 # how QA's talosctl ended up on a version nobody chose.
-# NOTE: the repo previously installed Argo CD v3.4.3 from a raw manifest. Chart
-# 7.7.11 is a different Argo CD line entirely -- choose deliberately.
+#
+# VERIFIED by rendering `helm template` with these exact values against 10.2.0:
+#   server.insecure=true reaches argocd-cmd-params-cm; no NodePort; dex and
+#   notifications produce zero objects; global.nodeSelector propagates.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -19,7 +21,7 @@ spec:
   chart:
     spec:
       chart: argo-cd
-      version: "7.7.11" # TODO verify before merge
+      version: "10.2.0" # Argo CD v3.4.5
       sourceRef:
         kind: HelmRepository
         name: argo
@@ -180,8 +182,18 @@ spec:
         requests: { cpu: 100m, memory: 256Mi }
         limits: { cpu: 500m, memory: 1Gi }
 
+    # ApplicationSet ships as part of Argo CD 3.x and chart 10.x has NO
+    # `enabled` toggle -- it installs whether or not we use it. Harmless while
+    # no ApplicationSets exist (the controller idles), but it does add a CRD and
+    # a Deployment, so it is sized rather than assumed away.
+    #
+    # Do NOT re-add `applicationSet.enabled: false`. Helm silently ignores
+    # unknown values, so it reads as a guarantee while doing nothing -- the same
+    # trap as an alert carrying a label the ruleSelector does not match.
     applicationSet:
-      enabled: false # no use case yet (README: deferred)
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits: { cpu: 200m, memory: 256Mi }
 
     notifications:
       enabled: false
