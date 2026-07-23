@@ -18,12 +18,19 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: etcd-backup-staleness
-  namespace: etcd-backup
+  # namespace prometheus, NOT etcd-backup: every sibling rule lives here.
+  # (ruleNamespaceSelector is {} so any namespace would technically work, but
+  # matching the convention keeps them discoverable together.)
+  namespace: prometheus
   labels:
+    # VERIFIED against the live cluster 2026-07-23:
+    #   ruleSelector: {"matchLabels":{"release":"prometheus-stack"}}
+    # This label is load-bearing. With the wrong value the rule is created,
+    # reports no error, and Prometheus silently ignores it - the exact
+    # green-object/no-effect failure this alert exists to catch.
+    release: prometheus-stack
+    app.kubernetes.io/part-of: cluster-infra
     app.kubernetes.io/name: etcd-backup
-    # Match the label your Prometheus uses for ruleSelector. Verify with:
-    #   kubectl -n prometheus get prometheus -o yaml | grep -A5 ruleSelector
-    release: prometheus
 spec:
   groups:
     - name: etcd-backup.rules
