@@ -29,14 +29,14 @@
 // here fails regardless of the values being correct. Check the ESO role policy
 // in iaac-talos before merging.
 
-terraform {
-  required_providers {
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.6"
-    }
-  }
-}
+// NOTE: the `random` provider must be added to the EXISTING required_providers
+// block in main.tf (a module may declare only one). Do not add a `terraform {}`
+// block here:
+//
+//   random = {
+//     source  = "hashicorp/random"
+//     version = ">= 3.6"
+//   }
 
 locals {
   sm_prefix = "${var.cluster_name}/risingwave"
