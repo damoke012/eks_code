@@ -3,10 +3,12 @@
 # app-team Applications. One direction, no loop.
 #
 # ⚠️ CHART VERSION: verify the current stable release before merge --
-#   flux create source helm argo --url=https://argoproj.github.io/argo-helm --export
+#   helm repo add argo https://argoproj.github.io/argo-helm && helm repo update
 #   helm search repo argo/argo-cd --versions | head
 # Pin it. An unpinned chart makes every reconcile a potential upgrade, which is
 # how QA's talosctl ended up on a version nobody chose.
+# NOTE: the repo previously installed Argo CD v3.4.3 from a raw manifest. Chart
+# 7.7.11 is a different Argo CD line entirely -- choose deliberately.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -43,15 +45,119 @@ spec:
         # TLS terminates at the Istio gateway; running the server insecure
         # avoids the double-TLS redirect loop behind an ingress proxy.
         server.insecure: true
+
       cm:
         # Keep the admin account until Entra SSO lands (deferred, see README).
         admin.enabled: "true"
-        # Argo CD must not try to manage resources Flux owns, even if someone
-        # mis-scopes an Application. Belt-and-braces alongside the AppProject.
+
+        # ── resource.exclusions ─────────────────────────────────────────────
+        # MERGED from two sources - do not drop either half:
+        #  1. The Flux toolkit groups. Argo CD must never watch or act on Flux's
+        #     own CRs. Belt-and-braces alongside the AppProject destination
+        #     restriction; without it a mis-scoped Application could interfere
+        #     with the controller that installed Argo CD in the first place.
+        #  2. The high-churn kinds from the repo's original argocd-cm-patch.yaml.
+        #     Endpoints/EndpointSlice/Lease/CiliumIdentity/Kyverno reports update
+        #     constantly; watching them burns controller CPU and floods the UI.
         resource.exclusions: |
-          - apiGroups: ["kustomize.toolkit.fluxcd.io", "source.toolkit.fluxcd.io", "helm.toolkit.fluxcd.io", "notification.toolkit.fluxcd.io"]
-            kinds: ["*"]
-            clusters: ["*"]
+          - apiGroups:
+              - kustomize.toolkit.fluxcd.io
+              - source.toolkit.fluxcd.io
+              - helm.toolkit.fluxcd.io
+              - notification.toolkit.fluxcd.io
+            kinds:
+              - '*'
+            clusters:
+              - '*'
+          - apiGroups:
+              - ''
+              - discovery.k8s.io
+            kinds:
+              - Endpoints
+              - EndpointSlice
+          - apiGroups:
+              - coordination.k8s.io
+            kinds:
+              - Lease
+          - apiGroups:
+              - authentication.k8s.io
+              - authorization.k8s.io
+            kinds:
+              - SelfSubjectReview
+              - TokenReview
+              - LocalSubjectAccessReview
+              - SelfSubjectAccessReview
+              - SelfSubjectRulesReview
+              - SubjectAccessReview
+          - apiGroups:
+              - certificates.k8s.io
+            kinds:
+              - CertificateSigningRequest
+          - apiGroups:
+              - cert-manager.io
+            kinds:
+              - CertificateRequest
+          - apiGroups:
+              - cilium.io
+            kinds:
+              - CiliumIdentity
+              - CiliumEndpoint
+              - CiliumEndpointSlice
+          - apiGroups:
+              - kyverno.io
+              - reports.kyverno.io
+              - wgpolicyk8s.io
+            kinds:
+              - PolicyReport
+              - ClusterPolicyReport
+              - EphemeralReport
+              - ClusterEphemeralReport
+              - AdmissionReport
+              - ClusterAdmissionReport
+              - BackgroundScanReport
+              - ClusterBackgroundScanReport
+              - UpdateRequest
+
+        # ── ignoreResourceUpdates ───────────────────────────────────────────
+        # Carried over verbatim from argocd-cm-patch.yaml. These suppress
+        # no-op reconciles caused by controllers writing status and bookkeeping
+        # annotations, which otherwise show as permanent "OutOfSync" noise.
+        resource.customizations.ignoreResourceUpdates.all: |
+          jsonPointers:
+            - /status
+        resource.customizations.ignoreResourceUpdates.ConfigMap: |
+          jqPathExpressions:
+            - '.metadata.annotations."cluster-autoscaler.kubernetes.io/last-updated"'
+            - '.metadata.annotations."control-plane.alpha.kubernetes.io/leader"'
+        resource.customizations.ignoreResourceUpdates.Endpoints: |
+          jsonPointers:
+            - /metadata
+            - /subsets
+        resource.customizations.ignoreResourceUpdates.apps_ReplicaSet: |
+          jqPathExpressions:
+            - '.metadata.annotations."deployment.kubernetes.io/desired-replicas"'
+            - '.metadata.annotations."deployment.kubernetes.io/max-replicas"'
+            - '.metadata.annotations."rollout.argoproj.io/desired-replicas"'
+        resource.customizations.ignoreResourceUpdates.argoproj.io_Application: |
+          jqPathExpressions:
+            - '.metadata.annotations."notified.notifications.argoproj.io"'
+            - '.metadata.annotations."argocd.argoproj.io/refresh"'
+            - '.metadata.annotations."argocd.argoproj.io/hydrate"'
+            - '.operation'
+        resource.customizations.ignoreResourceUpdates.argoproj.io_Rollout: |
+          jqPathExpressions:
+            - '.metadata.annotations."notified.notifications.argoproj.io"'
+        resource.customizations.ignoreResourceUpdates.autoscaling_HorizontalPodAutoscaler: |
+          jqPathExpressions:
+            - '.metadata.annotations."autoscaling.alpha.kubernetes.io/behavior"'
+            - '.metadata.annotations."autoscaling.alpha.kubernetes.io/conditions"'
+            - '.metadata.annotations."autoscaling.alpha.kubernetes.io/metrics"'
+            - '.metadata.annotations."autoscaling.alpha.kubernetes.io/current-metrics"'
+        resource.customizations.ignoreResourceUpdates.discovery.k8s.io_EndpointSlice: |
+          jsonPointers:
+            - /metadata
+            - /endpoints
+            - /ports
 
     # G5 — no NodePort. Reached through Istio only.
     server:
@@ -60,19 +166,19 @@ spec:
       replicas: 1
       resources:
         requests: { cpu: 100m, memory: 128Mi }
-        limits:   { cpu: 500m, memory: 512Mi }
+        limits: { cpu: 500m, memory: 512Mi }
 
     controller:
       replicas: 1
       resources:
         requests: { cpu: 250m, memory: 512Mi }
-        limits:   { cpu: "1",  memory: 2Gi }
+        limits: { cpu: "1", memory: 2Gi }
 
     repoServer:
       replicas: 1
       resources:
         requests: { cpu: 100m, memory: 256Mi }
-        limits:   { cpu: 500m, memory: 1Gi }
+        limits: { cpu: 500m, memory: 1Gi }
 
     applicationSet:
       enabled: false # no use case yet (README: deferred)
@@ -87,4 +193,4 @@ spec:
       enabled: true
       resources:
         requests: { cpu: 50m, memory: 64Mi }
-        limits:   { cpu: 200m, memory: 256Mi }
+        limits: { cpu: 200m, memory: 256Mi }

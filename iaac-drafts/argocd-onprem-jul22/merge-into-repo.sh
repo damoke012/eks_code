@@ -55,17 +55,14 @@ for env in op-usxpress-dev op-usxpress-qa; do
 done
 
 # argocd-cm-patch.yaml patched the ConfigMap created by the raw install.yaml.
-# With the Helm chart, argocd-cm is rendered by Helm at runtime, so a kustomize
-# patch has no target and the build fails. Its settings belong in the
-# HelmRelease `configs.cm` values instead.
+# Under the Helm chart, argocd-cm is rendered by Helm at runtime, so a kustomize
+# patch has no target. Its settings are folded into base/helmrelease.yaml under
+# values.configs.cm (resource.exclusions MERGED with the Flux-CRD exclusion, plus
+# every ignoreResourceUpdates key), so the file is now redundant.
+echo "==> remove argocd-cm-patch.yaml (folded into helmrelease values)"
 for env in op-usxpress-dev op-usxpress-qa; do
-  if [[ -f "manifests/${env}/argocd-cm-patch.yaml" ]]; then
-    echo ""
-    echo "!! manifests/${env}/argocd-cm-patch.yaml still present."
-    echo "   Fold its settings into base/helmrelease.yaml under values.configs.cm,"
-    echo "   then delete it. Contents:"
-    sed 's/^/     /' "manifests/${env}/argocd-cm-patch.yaml"
-  fi
+  git rm -q --ignore-unmatch "manifests/${env}/argocd-cm-patch.yaml" 2>/dev/null || true
+  rm -f "manifests/${env}/argocd-cm-patch.yaml"
 done
 
 echo ""
@@ -92,6 +89,14 @@ if 'destinations: []' not in blocks[0]:
     print("  FAIL: default AppProject destinations not empty"); sys.exit(1)
 print("  default AppProject neutered: OK")
 PY
+  # The folded argocd-cm settings must be present, or the patch removal
+  # silently dropped them.
+  for key in 'cilium.io' 'notification.toolkit.fluxcd.io' 'ignoreResourceUpdates.all'; do
+    if ! grep -q "${key}" "/tmp/argocd-${env}.yaml"; then
+      echo "  FAIL: folded argocd-cm setting missing: ${key}"; FAIL=1
+    fi
+  done
+
   # ExternalSecrets must target the store that actually exists.
   if grep -q 'name: aws-secretsmanager' "/tmp/argocd-${env}.yaml"; then
     echo "  FAIL: references ClusterSecretStore aws-secretsmanager (cluster has 'default')"; FAIL=1
