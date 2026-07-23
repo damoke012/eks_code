@@ -1,0 +1,42 @@
+---
+# ==============================================================================
+# Argo CD platform stack — INFRA-1622. App-team self-service for ALL new apps
+# (cloud->onprem lift-and-shift stays on DX/MageRunner).
+# Split in two DELIBERATELY: on a greenfield cluster the argoproj.io CRDs don't
+# exist until the chart installs, so AppProjects must apply AFTER it. `wait: true`
+# on `argocd` makes the HelmRelease Ready (= CRDs present) gate `argocd-config`.
+# ==============================================================================
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/argocd
+  prune: true
+  wait: true
+  timeout: 10m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd-config
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/argocd-config
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+    - name: argocd
+    - name: external-secrets

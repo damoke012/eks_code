@@ -1,0 +1,97 @@
+---
+# Argo CD platform stack — op-usxpress-qa (GREENFIELD, INFRA-1622).
+# Chart 10.2.0 = Argo CD v3.4.5, same pin as dev.
+#
+# Differs from dev in exactly one way: QA has application/platform/system node
+# pools, so global.nodeSelector pins Argo CD to the platform pool. Dev has flat
+# workers and omits it (there, the selector would leave every pod Pending).
+#
+# NOTE: this Kustomization installs ONLY the chart. AppProjects live in
+# infrastructure/argocd-config, applied by a second Kustomization that dependsOn
+# this one with wait: true — on a greenfield cluster the argoproj.io CRDs do not
+# exist until the chart installs, and an AppProject in the same Kustomization
+# would fail its dry-run (the exact failure the RisingWave CR hit).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: argo-cd
+      version: "10.2.0"
+      sourceRef:
+        kind: HelmRepository
+        name: argo
+        namespace: argocd
+      interval: 12h
+  install:
+    crds: Create
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    global:
+      nodeSelector:
+        pool: platform
+    configs:
+      # Greenfield: let Helm create argocd-secret (nothing to preserve here,
+      # unlike dev where an existing server.secretkey had to survive).
+      params:
+        server.insecure: true
+      cm:
+        admin.enabled: "true"
+        resource.exclusions: |
+          - apiGroups:
+              - kustomize.toolkit.fluxcd.io
+              - source.toolkit.fluxcd.io
+              - helm.toolkit.fluxcd.io
+              - notification.toolkit.fluxcd.io
+            kinds: ['*']
+            clusters: ['*']
+          - apiGroups: ['', discovery.k8s.io]
+            kinds: [Endpoints, EndpointSlice]
+          - apiGroups: [coordination.k8s.io]
+            kinds: [Lease]
+          - apiGroups: [cilium.io]
+            kinds: [CiliumIdentity, CiliumEndpoint, CiliumEndpointSlice]
+          - apiGroups: [kyverno.io, reports.kyverno.io, wgpolicyk8s.io]
+            kinds: [PolicyReport, ClusterPolicyReport, EphemeralReport, ClusterEphemeralReport, AdmissionReport, ClusterAdmissionReport, BackgroundScanReport, ClusterBackgroundScanReport, UpdateRequest]
+        resource.customizations.ignoreResourceUpdates.all: |
+          jsonPointers:
+            - /status
+    server:
+      service:
+        type: ClusterIP
+      replicas: 1
+      resources:
+        requests: { cpu: 100m, memory: 128Mi }
+        limits: { cpu: 500m, memory: 512Mi }
+    controller:
+      replicas: 1
+      resources:
+        requests: { cpu: 250m, memory: 512Mi }
+        limits: { cpu: "1", memory: 2Gi }
+    repoServer:
+      replicas: 1
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits: { cpu: 500m, memory: 1Gi }
+    applicationSet:
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits: { cpu: 200m, memory: 256Mi }
+    notifications:
+      enabled: false
+    dex:
+      enabled: false
+    redis:
+      enabled: true
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits: { cpu: 200m, memory: 256Mi }
