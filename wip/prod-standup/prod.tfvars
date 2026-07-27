@@ -102,16 +102,20 @@ aws_region                = "us-east-2"                     # RESOLVED
 # create-secret --name op-usxpress-prod/talosconfig). ARN not known until then.
 talosconfig_secret_arn    = "arn:aws:secretsmanager:us-east-2:937464026810:secret:op-usxpress-prod/talosconfig-TBD"
 
-# ── vSphere placement — TBD FROM CAPACITY/NETWORK ALLOCATION ─────────────────
-# QA runs on datastore USXD1NTXPROD-SC1 / "10.10.82 (vLAN 82) Prod". Prod may use
-# the same physical vLAN or a dedicated one — do NOT assume. Fill from the plan.
-# datacenter                = "TBD-PROD"
-# datastore                 = "TBD-PROD"
-# vm_cluster_name           = "TBD-PROD"
-# vm_folder                 = "/KubernetesD1/TalosD1/op-usxpress-prod"
-# network_name              = "TBD-PROD"
-# content_library_name      = "TBD-PROD"
-# content_library_item_name = "talos-v1.11.1"
+# ── vSphere placement — prod-DESIGNATED infra (RESOLVED 2026-07-24) ──────────
+# The names say PROD: datastore USXD1NTXPROD-SC1, network "vLAN 82 Prod". These
+# are prod's own storage/network — QA is co-tenanting on them, not the reverse.
+# So prod belongs here; dedicated vm_folder gives clean inventory separation.
+# datacenter / vm_cluster_name are UNSCOPED (global) Octopus vars shared across
+# envs — QA didn't env-scope them and neither do we.
+# ⚠️ PRE-APPLY GATE: verify USXD1NTXPROD-SC1 has headroom for prod's ~5 TB ON TOP
+#    of QA's current usage. See RUNBOOK §pre-apply. Capacity is the one thing
+#    co-tenancy makes NOT automatically true.
+datastore                 = "USXD1NTXPROD-SC1"
+vm_folder                 = "/KubernetesD1/TalosD1/op-usxpress-prod"
+network_name              = "10.10.82 (vLAN 82) Prod"
+content_library_name      = "dev-cluster"
+content_library_item_name = "talos-v1.11.1"
 
 # ── Cilium (MIRRORED — same across all on-prem clusters) ─────────────────────
 cilium_chart_version      = "1.18.2"

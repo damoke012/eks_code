@@ -34,7 +34,8 @@ Nothing below can be guessed. Each blocks the build; each has a named owner.
 | State bucket | `lazy-tf-state-ipp58n854uhpw13x` | — | ✅ likely (QA scheme); confirm holds `iaac/talos` |
 | Prod VIP | **`10.10.82.52`** | Platform (us) | ✅ RESOLVED — self-assigned on vLAN 82 (dev .50/qa .51/prod .52), verified free. Notify networking, don't ask. |
 | Node IPs | DHCP | — | ✅ N/A — nodes DHCP on the vLAN (QA pattern); no static list |
-| **vSphere placement + capacity** | `TBD-PROD-*` | **Doke / infra** | ⛔ OPEN — the last decision. Same as QA (datastore `USXD1NTXPROD-SC1`, net `10.10.82 (vLAN 82) Prod`) or dedicated? |
+| **vSphere placement** | `USXD1NTXPROD-SC1` / `vLAN 82 Prod` / dedicated folder | Platform (us) | ✅ RESOLVED — prod-designated infra (names say PROD); QA co-tenants. See capacity gate below. |
+| Datastore capacity | — | Doke | ⚠️ PRE-APPLY GATE — QA squats on the same datastore; verify headroom for prod's ~5 TB before apply. |
 | Talosconfig ARN | `...talosconfig-TBD-PROD` | (build-time) | seeded during §3 |
 | IRSA role + OIDC bucket | empty | Cloud | phase 2 — greenfield, not blocking |
 | **Octopus prod environment** | MISSING | **Octopus admin (us)** | ⛔ OPEN — no `prod` env in Spaces-2; create it + add to `iaac-talos` lifecycle. Ours, not a team ask. |
@@ -53,6 +54,24 @@ register, re-run `--diff-qa` to sanity-check drift, then apply.
       phase (the QA phase was `Environments-602`; prod is a different id).
 - [ ] **`op-prod` branch** of iaac-talos-flux-platform exists (Flux bootstrap target).
 - [ ] **`clusters/op-usxpress-prod/`** in iaac-talos-flux-cluster.
+
+### Pre-apply gate — datastore capacity (NEW, prod-ready)
+
+Prod shares `USXD1NTXPROD-SC1` with QA (QA is co-tenanting on prod's datastore).
+Prod's footprint lands ON TOP of QA's, so confirm headroom before apply — a datastore
+that fills mid-provision leaves half-built VMs, the physical-layer version of the
+green-object/no-effect trap. Rough prod ask: 13 VMs, ~5 TB incl. Ceph
+(app pool 5×(300+500) = 4 TB dominates).
+
+```bash
+# If govc is available on WSL (vSphere creds are already in Octopus):
+export GOVC_URL=... GOVC_USERNAME=... GOVC_INSECURE=1   # from Octopus vsphere vars
+govc datastore.info USXD1NTXPROD-SC1        # Free vs Capacity — need >~5 TB free
+# No govc? Read it from the vSphere UI: Datastores → USXD1NTXPROD-SC1 → Free space.
+```
+
+If headroom is tight, either free space, resize the application pool's Ceph disks
+down for the first cut, or place prod on a different datastore with room.
 
 ---
 

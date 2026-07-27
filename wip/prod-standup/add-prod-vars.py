@@ -97,11 +97,14 @@ PROD_VARS = {
     # Storage
     "TF_VAR_disk_size_gb":              "100",
 
-    # vSphere placement (TBD — from capacity plan; do NOT copy QA's blindly)
-    "TF_VAR_datastore":                 "TBD-PROD-DATASTORE",
-    "TF_VAR_network_name":              "TBD-PROD-NETWORK",
+    # vSphere placement — prod-DESIGNATED infra (names say PROD). QA is
+    # co-tenanting on these; prod belongs here. Dedicated vm_folder for clean
+    # inventory separation. ⚠️ VERIFY datastore capacity headroom before apply
+    # (QA already consumes USXD1NTXPROD-SC1 — see RUNBOOK pre-apply gate).
+    "TF_VAR_datastore":                 "USXD1NTXPROD-SC1",
+    "TF_VAR_network_name":              "10.10.82 (vLAN 82) Prod",
     "TF_VAR_vm_folder":                 "/KubernetesD1/TalosD1/op-usxpress-prod",
-    "TF_VAR_content_library_name":      "TBD-PROD-CONTENT-LIB",
+    "TF_VAR_content_library_name":      "dev-cluster",
     "TF_VAR_content_library_item_name": "talos-v#{TF_VAR_talos_version}",
     "TF_VAR_talos_version":             "1.11.1",
 
