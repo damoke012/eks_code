@@ -41,9 +41,19 @@ SPACE_ID = "Spaces-2"                     # DevOps space
 PROJECT_SLUG = "iaac-talos"
 PROD_ENV_NAME = "prod"                    # verified below; aborts if absent
 QA_ENV_NAME = "qa"                        # for --diff-qa
+# resolved after arg parse (see below), so --env-name can override
+
 
 APPLY = "--apply" in sys.argv
 DIFF_QA = "--diff-qa" in sys.argv
+LIST_ENVS = "--list-envs" in sys.argv
+
+# --env-name X overrides the prod environment name to match (default "prod").
+# Use after --list-envs reveals the real name (e.g. "Production", "op-prod").
+if "--env-name" in sys.argv:
+    PROD_ENV_NAME_OVERRIDE = sys.argv[sys.argv.index("--env-name") + 1]
+else:
+    PROD_ENV_NAME_OVERRIDE = None
 
 CLI_CONFIG_CANDIDATES = [
     Path.home() / ".config" / "octopus" / "cli_config.json",
@@ -161,10 +171,29 @@ print(f"Project:  {project['Id']}  ({project['Name']})")
 print(f"VarSet:   {varset_id}")
 
 envs = api("GET", f"/api/{SPACE_ID}/environments?take=200")["Items"]
-prod_env = next((e for e in envs if e["Name"].lower() == PROD_ENV_NAME.lower()), None)
+
+# --list-envs: dump every environment in the space, read-only, then exit.
+# Use this to find whether prod already exists under a different name before
+# concluding one must be created.
+if LIST_ENVS:
+    print(f"\n=== all environments in {SPACE_ID} ===")
+    for e in sorted(envs, key=lambda x: x["Name"].lower()):
+        print(f"  {e['Id']:20} {e['Name']}")
+    print("\nIf a prod-like env exists above, re-run with --env-name '<its name>'.")
+    print("If not, an Octopus admin must create a prod environment and add it to the")
+    print("iaac-talos lifecycle before prod vars can be scoped.")
+    sys.exit(0)
+
+prod_match_name = PROD_ENV_NAME_OVERRIDE or PROD_ENV_NAME
+prod_env = next((e for e in envs if e["Name"].lower() == prod_match_name.lower()), None)
 if not prod_env:
-    sys.exit(f"ERROR: environment '{PROD_ENV_NAME}' not found. The iaac-talos "
-             f"lifecycle needs a prod phase before prod vars can be scoped.")
+    existing = ", ".join(sorted(e["Name"] for e in envs)) or "(none)"
+    sys.exit(f"ERROR: environment '{prod_match_name}' not found.\n"
+             f"  Environments that DO exist: {existing}\n"
+             f"  → If prod is one of the above under another name, re-run with "
+             f"--env-name '<name>'.\n"
+             f"  → Otherwise an Octopus admin must create a prod environment and add "
+             f"it to the iaac-talos lifecycle first. Run --list-envs to see them all.")
 prod_env_id = prod_env["Id"]
 qa_env = next((e for e in envs if e["Name"].lower() == QA_ENV_NAME.lower()), None)
 qa_env_id = qa_env["Id"] if qa_env else None
