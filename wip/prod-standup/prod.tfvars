@@ -77,17 +77,24 @@ control_plane_vip         = "TBD-PROD-VIP"                 # e.g. 10.10.8X.XX
 endpoint                  = "https://TBD-PROD-VIP:6443"
 talos_version             = "1.11.1"                        # MIRRORED — confirm target
 
-# ── AWS — RESOLVED via "on-prem reuses the cloud per-env account" ────────────
+# ── AWS — VERIFIED 2026-07-24 via sts get-caller-identity ────────────────────
 # op-dev→700736442855, op-qa→527101283767, op-prod→937464026810 (ops-controller
-# / usxpress-prod). ⚠️ CONFIRM 937464026810 before first apply — a wrong account
-# ID is the single most expensive value in this file to get wrong.
+# / usxpress-prod). Account is CONFIRMED, not inferred — validate-register.sh
+# ran get-caller-identity on all three profiles, prod returned 937464026810.
 aws_region                = "us-east-2"                     # RESOLVED
 
-# State backend — the state bucket is per-account. QA's is in the QA account;
-# prod needs its own in 937464026810. Name unknown until the bucket exists.
+# State backend — per-account. Prod account has two candidate buckets:
+#   lazy-tf-state-ipp58n854uhpw13x   ← matches QA's lazy-tf-state-* scheme (likely)
+#   usxpress-tf-state-25cypfeqq8xpf582
+# CONFIRM which holds iaac/talos state (s3 ls .../iaac/talos/), then set below.
 # (Set via Octopus TF_VAR/backend flags, mirrored here for local plan only.)
-# tf_state_bucket         = "TBD-PROD-STATE-BUCKET"         # in acct 937464026810
+# tf_state_bucket         = "lazy-tf-state-ipp58n854uhpw13x"   # CONFIRM
 # TF_STATE_KEY            = "iaac/talos/op-usxpress-prod.tfstate"
+
+# ── DNS — RESOLVED 2026-07-24 via Route53 in the prod account ────────────────
+# Public hosted zone usxpress-prod.com exists in 937464026810. That's the prod
+# domain: external-dns --domain-filter=usxpress-prod.com, ingress hosts under it,
+# --txt-owner-id=op-usxpress-prod (NOT op-usxpress-dev — that's the QA bug).
 
 # Talosconfig SM secret — created DURING the build (talosctl gen → aws sm
 # create-secret --name op-usxpress-prod/talosconfig). ARN not known until then.

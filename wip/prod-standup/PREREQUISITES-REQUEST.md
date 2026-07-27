@@ -1,36 +1,20 @@
 # op-usxpress-prod — prerequisite requests (INFRA-1621)
 
-Four teams own the values that block the prod build. Each section below is written to
-be pasted straight into a ticket or Teams thread. The prod scaffolding (tfvars, Octopus
-var script, runbook, gates) is already built and validated against QA — these values are
-the only thing standing between us and a first apply.
+**Updated 2026-07-24 after self-validation (`validate-register.sh`).** Three of the
+original five blockers were confirmed directly from the prod AWS account and are now
+CLOSED — no ask needed:
 
-**Why this format:** every one of these is a value that, if guessed wrong, deploys clean
-and fails invisibly (INFRA-1623 cost us 13 silent days on exactly this class). So I'm not
-inferring any of them — I'm asking the owner and gating the apply until they answer.
+- ✅ **AWS account = `937464026810`** — verified via `sts get-caller-identity`, not inferred.
+- ✅ **DNS domain = `usxpress-prod.com`** — public Route53 zone confirmed in the prod account.
+- ✅ **State bucket** — `lazy-tf-state-ipp58n854uhpw13x` exists (QA's naming scheme);
+  confirming it holds `iaac/talos` state. No cloud request unless the confirm fails.
 
----
-
-## 1 → Cloud team — AWS account + state bucket + IRSA
-
-**What I need:**
-1. **Confirm the prod AWS account is `937464026810`** (ops-controller / usxpress-prod).
-   I've inferred this from the established pattern — op-dev uses the dev cloud account
-   `700736442855`, op-qa uses the qa account `527101283767`, so op-prod should reuse the
-   prod cloud account. **Confirm or correct before we bake it into IAM and the backend.**
-2. **A Terraform state bucket in that account** for `iaac/talos/op-usxpress-prod.tfstate`
-   (per-account, same shape as QA's `lazy-tf-state-425rbol87rmn6c7m`). Name it and grant
-   the Octopus worker role write.
-3. **IRSA (phase 2, not blocking first apply):** `ONPREM_BOOTSTRAP_ROLE_ARN_PROD` and the
-   OIDC bucket name, same as you dropped for QA. We stand up with IRSA off and flip it on
-   once these exist.
-
-**Why it blocks:** without the account + bucket, `terraform init` can't even resolve the
-backend. This is the first thing the build touches.
+**Two genuinely external asks remain** — values that must be *allocated*, not looked up.
+Both are of the class that, guessed wrong, deploys clean and fails invisibly (INFRA-1623).
 
 ---
 
-## 2 → Networking — prod VIP + node IP plan
+## 1 → Networking — prod VIP + node IP plan  *(CRITICAL PATH)*
 
 **What I need:** the IP allocation for op-usxpress-prod —
 - **Control-plane VIP** (single address, the API endpoint)
@@ -46,19 +30,7 @@ For reference, QA's VIP is `10.10.82.51` on vLAN 82. Is prod on the same vLAN or
 
 ---
 
-## 3 → Networking / CySec — DNS domain
-
-**What I need:** the DNS domain/zone for prod ingress and service hostnames.
-
-**Why it blocks:** external-dns `txt-owner-id`, all ingress hostnames, and the OIDC
-CloudFront issuer for IRSA all derive from this. Related live issue you should know about:
-QA's external-dns is currently writing TXT records owned by `op-usxpress-dev` (a
-branch-copy bug we're fixing this week) — I want prod's ownership id correct from birth,
-not corrected after an incident.
-
----
-
-## 4 → Infra / vSphere — capacity + placement
+## 2 → Infra / vSphere — capacity + placement
 
 **What I need:** vSphere placement for the prod VMs —
 - **datacenter / vm_cluster_name**
@@ -85,8 +57,12 @@ provider needs every one of these by name.
 
 ## Turnaround
 
-§1 (account + bucket) and §2 (VIP) are the two on the true critical path — nothing inits
-without §1, nothing backs up correctly without §2. §3 and §4 are needed before Flux
-bootstrap and VM creation respectively, a step later. If we get §1 and §2 back this week,
-the parallel QA-hardening track (E2/E3) finishes in the same window and prod can cut a
-clean branch immediately after.
+Only two asks remain, and **§1 (VIP) is the true critical path** — it's the field that
+broke QA's etcd backups for 13 silent days, and the whole build is parameterised around it.
+§2 (vSphere) is needed a step later, at VM creation. If both come back this week, the
+parallel QA-hardening track (E2/E3) finishes in the same window and prod cuts a clean
+branch immediately after.
+
+**Not on this list anymore** (self-resolved): AWS account, DNS domain, state bucket, and
+IRSA (phase 2). Also outstanding but ours, not a team ask: create the `prod` environment in
+Octopus and add it to the `iaac-talos` lifecycle.

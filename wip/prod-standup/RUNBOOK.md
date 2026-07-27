@@ -25,15 +25,18 @@ Artifacts produced this session (in `wip/prod-standup/`):
 
 Nothing below can be guessed. Each blocks the build; each has a named owner.
 
-| Key | Placeholder | Owner | Notes |
+**Updated 2026-07-24 after `validate-register.sh` — 3 of 5 self-resolved.**
+
+| Key | Value / Placeholder | Owner | Status |
 |---|---|---|---|
-| Prod AWS account | `937464026810` **(inferred — CONFIRM)** | Cloud | "on-prem reuses cloud per-env account": dev→700736442855, qa→527101283767. Consistent, but confirm before it's baked into IAM/backend. |
-| Prod VIP + node IPs | `TBD-PROD-VIP` | Networking | THE dev-VIP-in-QA field. One wrong digit = 13 silent days. |
-| State bucket | `TBD-PROD-STATE-BUCKET` | Cloud | Per-account; prod needs its own in 937464026810. |
-| DNS domain | (external-dns/ingress/OIDC) | Networking / CySec | Needed for external-dns txtOwnerId, ingress hosts, OIDC CloudFront. |
-| vSphere placement | `TBD-PROD-DATASTORE` / `-NETWORK` / `-CONTENT-LIB` | Infra | QA rides vLAN 82; prod may be dedicated — do NOT assume. |
-| Talosconfig ARN | `...talosconfig-TBD-PROD` | (build-time) | Created during §3; ARN known only after seeding. |
-| IRSA role ARN + OIDC bucket | empty | Cloud | `ONPREM_BOOTSTRAP_ROLE_ARN_PROD`. Starts false; flip true phase 2. |
+| Prod AWS account | **`937464026810`** | — | ✅ VERIFIED via `sts get-caller-identity` |
+| DNS domain | **`usxpress-prod.com`** | — | ✅ RESOLVED — Route53 zone in prod acct |
+| State bucket | `lazy-tf-state-ipp58n854uhpw13x` | — | ✅ likely (QA scheme); confirm holds `iaac/talos` |
+| **Prod VIP + node IPs** | `TBD-PROD-VIP` | **Networking** | ⛔ OPEN — critical path, the dev-VIP-in-QA field |
+| **vSphere placement + capacity** | `TBD-PROD-*` | **Infra** | ⛔ OPEN — ~13 VMs; same vLAN or dedicated? |
+| Talosconfig ARN | `...talosconfig-TBD-PROD` | (build-time) | seeded during §3 |
+| IRSA role + OIDC bucket | empty | Cloud | phase 2 — greenfield, not blocking |
+| **Octopus prod environment** | MISSING | **Octopus admin (us)** | ⛔ OPEN — no `prod` env in Spaces-2; create it + add to `iaac-talos` lifecycle. Ours, not a team ask. |
 
 **`add-prod-vars.py --apply` refuses to run while any `TBD-PROD` remains.** Fill the
 register, re-run `--diff-qa` to sanity-check drift, then apply.
