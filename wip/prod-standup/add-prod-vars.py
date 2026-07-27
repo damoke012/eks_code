@@ -111,30 +111,27 @@ PROD_VARS = {
     "TF_VAR_content_library_item_name": "talos-v#{TF_VAR_talos_version}",
     "TF_VAR_talos_version":             "1.11.1",
 
-    # Talos secret (created during build; ARN known only after seeding)
-    "TF_VAR_talosconfig_secret_arn":
-        f"arn:aws:secretsmanager:us-east-2:{PROD_ACCOUNT}:secret:op-usxpress-prod/talosconfig-TBD-PROD",
+    # ── Platform secrets — PHASE 1 = EMPTY (confirmed from the module) ──────────
+    # secrets-values.tf gates ALL secret seeding on `enable_irsa && manage_...`,
+    # and the talosconfig import block is `for_each = var.enable_irsa ? ... : {}`.
+    # module.irsa is count=0 when enable_irsa=false, so with IRSA OFF these ARNs
+    # are NEVER consumed — import is a no-op, no value-write, no grafana resource.
+    # The cluster bootstraps from TF-generated talos_machine_secrets internally.
+    #   PHASE 1 (now): empty. Nothing to seed. No guard block, no cloud dep.
+    #   PHASE 2 (after cloud IRSA bootstrap): seed placeholder SM secrets at
+    #     op-usxpress-prod/{talosconfig, platform/grafana, platform/grafana/azure-ad},
+    #     set these ARNs, flip enable_irsa=true + manage_platform_secret_values=true;
+    #     TF then imports the wrappers and writes the real values on apply.
+    "TF_VAR_talosconfig_secret_arn":       "",
+    "TF_VAR_grafana_admin_secret_arn":     "",
+    "TF_VAR_grafana_azure_ad_secret_arn":  "",
+    "TF_VAR_manage_platform_secret_values": "false",   # -> true in phase 2
 
-    # ── Platform secrets — surfaced by --diff-qa (QA had these, prod set didn't) ──
-    # Same build-time class as talosconfig: the SM secret is seeded during the
-    # build, so the ARN carries TBD-PROD until it exists (guard blocks apply).
-    # manage_platform_secret_values=true → Terraform writes the platform secret
-    # VALUES (grafana admin password etc.), mirrored from QA.
-    # ⚠️ Without grafana_admin_secret_arn, prod Grafana comes up with NO admin
-    # credential — deploys "successfully", nobody can log in. The diff caught it.
-    "TF_VAR_grafana_admin_secret_arn":
-        f"arn:aws:secretsmanager:us-east-2:{PROD_ACCOUNT}:secret:op-usxpress-prod/platform/grafana-TBD-PROD",
-    # Entra SSO secret (A1) — cross-team, Doke has no Azure access. Grafana boots
-    # WITHOUT it via admin login; seed a placeholder wrapper + ignore_changes so
-    # the ARN resolves, real client_id/secret dropped by the Entra team later.
-    "TF_VAR_grafana_azure_ad_secret_arn":
-        f"arn:aws:secretsmanager:us-east-2:{PROD_ACCOUNT}:secret:op-usxpress-prod/platform/grafana/azure-ad-TBD-PROD",
-    "TF_VAR_manage_platform_secret_values": "true",
-
-    # IRSA — starts false on a greenfield (resources don't exist yet); flip true
-    # in phase 2, then NEVER back to false (false = DESTROY once state has them).
+    # IRSA — OFF for phase 1 (no prod OIDC bootstrap yet). Flip true in phase 2
+    # once cloud delivers it, then NEVER back to false (false = DESTROY once
+    # state has the IRSA resources).
     "TF_VAR_enable_irsa":               "false",
-    "TF_VAR_irsa_oidc_bucket_name":     "",     # TBD-PROD when enable_irsa=true
+    "TF_VAR_irsa_oidc_bucket_name":     "",     # -> op-usxpress-prod-irsa-oidc-v2 in phase 2
 
     # Flux
     "TF_VAR_flux_target_path":          "clusters/op-usxpress-prod",
