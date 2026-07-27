@@ -1,2 +1,3 @@
 scripts/push-to-confluence.sh
 wip/prod-standup/__pycache__/
+__pycache__/

@@ -53,9 +53,10 @@ register, re-run `--diff-qa` to sanity-check drift, then apply.
       NOT `prod` (discovered 2026-07-24 via `--list-envs`; script default updated).
 - [ ] **iaac-talos lifecycle includes a `production` phase.** The env existing ≠ the
       project deploys to it. Variable scoping works either way, but the deploy step needs
-      the lifecycle to have a `production` phase (QA phase = `Environments-602`). Check the
-      `iaac-talos` project's lifecycle in Octopus before the step-6 deploy; add the phase
-      if absent. This is config we own, not a team ask.
+      the lifecycle to have a `production` phase (QA phase = `Environments-602`). Add the
+      phase if absent. This is config we own, not a team ask.
+      → checked automatically by `preflight-deploy.py` (§3.5), along with whether an
+      earlier REQUIRED phase would block promotion to prod.
 - [ ] **`op-prod` branch** of iaac-talos-flux-platform exists (Flux bootstrap target).
 - [ ] **`clusters/op-usxpress-prod/`** in iaac-talos-flux-cluster.
 
@@ -98,6 +99,44 @@ down for the first cut, or place prod on a different datastore with room.
 6. `TfApply=true` → Octopus applies. Watch the task log: confirm the worker role
    authenticates and every `TF_VAR_*` lands (not defaulted/blank).
 7. Flux bootstrap against `op-prod` → platform stack reconciles.
+
+---
+
+## 3.5 Deploy gate — run before creating the release
+
+Steps 1–3 of the build order are DONE (vars applied 2026-07-27, `clusters/op-usxpress-prod/`
+merged via PR #28, `op-prod` platform branch cut). What stands between here and step 6 is
+the gate below.
+
+```bash
+# On WSL — the codespace has no Octopus credential (deliberate token isolation).
+python3 preflight-deploy.py        # read-only; exit 0 = automated gates pass
+```
+
+| Gate | Check | Why it matters |
+|---|---|---|
+| P1 | `TfApply` not already `true` for prod | `deploy.ps1:113` gates apply on the literal string; a stale `true` = ungated prod apply |
+| P2 | lifecycle reaches `production` | env exists ≠ project deploys there; also flags a REQUIRED earlier phase blocking promotion |
+| P3 | no step env-scoped to exclude prod | a skipped step reports SUCCESS — the invisible failure |
+| P4 | 29 prod vars present, no `TBD-PROD`, `enable_irsa=false` | proves what `--apply` actually wrote |
+| P5 | no dev/qa literal in a prod value | gate B5, applied to Octopus instead of git |
+| — | **datastore headroom** | MANUAL, vSphere UI — see §2 pre-apply gate |
+
+**`TfApply` blast radius.** The variable is *unscoped* (all environments), so flipping it
+true to apply prod also arms dev and qa for that window. Prefer: **add a `production`-scoped
+`TfApply=true`** (most specific scope wins), apply, then **delete that scoped entry** — the
+global stays `false` throughout and no other env is ever armed. Either way it must not be
+left armed. Re-deploys read variables fresh at deploy time (not snapshotted at release
+creation), so flip-then-redeploy works without cutting a new release.
+
+**Then, in order:** create release off `op-prod` → deploy to `production` with `TfApply`
+not true → read the plan (expect **all creates, 0 destroys**; any destroy = stop) → arm
+`TfApply` → redeploy → cluster up → disarm `TfApply` → §4 gates.
+
+Phase 1 needs **no secrets and no IRSA bootstrap**. It delivers *a cluster that exists*
+(Talos + Flux + AWS-free core). It does **not** deliver a functional platform — everything
+AWS-dependent waits on the cloud IRSA ask (`CLOUD-IRSA-ASK.md`). Do not let a green phase-1
+deploy be read as "prod is up".
 
 ---
 
