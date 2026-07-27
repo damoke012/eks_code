@@ -1,0 +1,220 @@
+# ==============================================================================
+# op-usxpress-prod — Flux infra wiring.  INFRA-1589.
+#
+# PHASED like QA was actually built (INFRA-1585 Tier-2, INFRA-1589 Tier-3), NOT
+# a single parity copy. The dividing line is IRSA: every AWS-touching component
+# (ESO/SM, external-dns/Route53, velero+etcd-backup/S3) authenticates via the
+# CloudFront-fronted OIDC provider. Prod has NO OIDC provider yet
+# (validate-register.sh, 2026-07-24), so those components CANNOT function until
+# cloud provisions the prod IRSA bootstrap (ONPREM_BOOTSTRAP_ROLE_ARN_PROD +
+# OIDC bucket) and enable_irsa flips true.
+#
+#   PHASE 1 (below, ACTIVE): AWS-free base platform. Brings the cluster up —
+#     certs, policy, CNI plumbing, IRSA webhook (idle until bootstrap). No SM,
+#     no S3, no Route53. Safe to reconcile the moment Talos+Flux are up.
+#   PHASE 2 (commented appendix): everything AWS-dependent + argocd. Uncomment
+#     and reconcile AFTER the prod IRSA bootstrap lands and enable_irsa=true.
+#   RisingWave: deliberately absent — ./manifests/op-usxpress-prod does not
+#     exist in iaac-risingwave-onprem yet; wiring it = the 17-day "path not
+#     found" failure. Add when Tim + prod RW manifests are ready.
+# ==============================================================================
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/cert-manager
+  prune: true
+  wait: true
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: trust-manager
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/trust-manager
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: trust-manager-bundle
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/trust-manager-bundle
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: trust-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: gateway-api
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: gateway-api-upstream
+  path: ./config/crd/standard
+  prune: false
+  wait: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: keda
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/keda
+  prune: true
+  wait: true
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/kyverno
+  prune: true
+  wait: true
+  timeout: 10m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno-policies
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/kyverno-policies
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: kyverno
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: reloader
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/reloader
+  prune: true
+  wait: true
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cilium-lb
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/cilium-lb
+  prune: true
+  wait: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cilium-hygiene
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/cilium-hygiene
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 5m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: pod-identity-webhook
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/pod-identity-webhook
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager
+
+# ==============================================================================
+# PHASE 2 — ADD AFTER PROD IRSA BOOTSTRAP LANDS (cloud) + enable_irsa=true.
+# Copied verbatim from op-qa infra.yaml (INFRA-1585 Tier-2 + INFRA-1589 Tier-3 +
+# INFRA-1622 argocd), MINUS the RisingWave block. Uncomment as a unit once ESO
+# can read SM. Order/dependsOn already correct — external-secrets underpins the
+# rest, so verify `external-secrets-config` (ClusterSecretStore) goes Ready and
+# the grafana/argocd admin ExternalSecrets sync BEFORE trusting anything above it.
+#
+# Components (see op-qa for exact specs):
+#   istio-namespace, external-secrets, cert-manager-issuers,
+#   external-secrets-config, istio-csr, istio-base, istio-istiod, istio-cni,
+#   istiod-health, istio-ztunnel, istio-ingress, prometheus, external-dns,
+#   grafana, prometheus-rules, velero, etcd-backup, local-path-storage,
+#   rook-ceph-operator, rook-ceph-cluster, argocd, argocd-config
+#
+# Build-time SM secrets these need (seed in acct 937464026810 first — RUNBOOK §5):
+#   op-usxpress-prod/platform/grafana          (grafana admin)
+#   op-usxpress-prod/platform/grafana/azure-ad (Entra SSO placeholder + ignore_changes)
+#   op-usxpress-prod/platform/argocd           (argocd admin)
+#
+# etcd-backup REMINDER (INFRA-1623): its CronJob endpoints MUST be 10.10.82.52
+# (prod VIP), not a copied .50/.51. The op-prod branch cut from op-qa inherits
+# op-qa's value — the E2 fix / ${cluster_vip} substituteFrom must land first.
+# The etcd-snapshot-age alert (wip/qa-cluster-standup/alerts) comes in with
+# prometheus-rules and is the thing that catches a wrong endpoint.
+# ==============================================================================

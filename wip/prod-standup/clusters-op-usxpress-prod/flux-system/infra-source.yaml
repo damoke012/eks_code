@@ -1,0 +1,32 @@
+---
+# Prod cluster's view of the platform repo. Identical to op-qa EXCEPT the branch:
+# platform repo is branch-per-env (op-dev/op-qa/op-prod). op-prod is cut from
+# op-qa after the E2 foreign-env fixes land (see E2-op-qa-commands.md), so this
+# branch must exist before Flux bootstrap can reconcile it.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: infra
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  url: https://github.com/variant-inc/iaac-talos-flux-platform
+  ref:
+    branch: op-prod
+  secretRef:
+    name: flux-system
+---
+# Upstream Gateway API CRDs — pinned tag, identical across all clusters.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: gateway-api-upstream
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://github.com/kubernetes-sigs/gateway-api
+  ref:
+    tag: v1.4.0
+  ignore: |
+    /*
+    !/config/crd
