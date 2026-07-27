@@ -231,7 +231,10 @@ if DIFF_QA:
         print(f"        qa:   {q[:90]}")
     only_qa = sorted(set(qa_vals) - set(PROD_VARS))
     if only_qa:
-        print(f"\n  In QA but NOT in prod set (intentional? verify): {only_qa}")
+        print(f"\n  In QA but NOT in prod set — VALUES (to derive prod equivalents):")
+        for n in only_qa:
+            print(f"      {n}")
+            print(f"        qa: {qa_vals[n][:110]}")
     sys.exit(0)
 
 # ---- Backup -----------------------------------------------------------------
