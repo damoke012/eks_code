@@ -49,9 +49,13 @@ register, re-run `--diff-qa` to sanity-check drift, then apply.
 
 - [ ] **E2 done on op-qa** — foreign-env literals fixed BEFORE cutting op-prod from
       that branch, or prod inherits every one. See `wip/prod-standup/E2-op-qa-commands.md`.
-- [ ] **Octopus prod environment + lifecycle phase exists.** `add-prod-vars.py` aborts
-      if `environment 'prod'` is absent. Confirm the iaac-talos lifecycle has a prod
-      phase (the QA phase was `Environments-602`; prod is a different id).
+- [x] **Octopus prod environment exists** — it's named **`production`** (`Environments-41`),
+      NOT `prod` (discovered 2026-07-24 via `--list-envs`; script default updated).
+- [ ] **iaac-talos lifecycle includes a `production` phase.** The env existing ≠ the
+      project deploys to it. Variable scoping works either way, but the deploy step needs
+      the lifecycle to have a `production` phase (QA phase = `Environments-602`). Check the
+      `iaac-talos` project's lifecycle in Octopus before the step-6 deploy; add the phase
+      if absent. This is config we own, not a team ask.
 - [ ] **`op-prod` branch** of iaac-talos-flux-platform exists (Flux bootstrap target).
 - [ ] **`clusters/op-usxpress-prod/`** in iaac-talos-flux-cluster.
 

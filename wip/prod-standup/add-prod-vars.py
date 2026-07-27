@@ -39,8 +39,11 @@ except ImportError:
 OCTO_URL = "https://octopus.usxpress.io"
 SPACE_ID = "Spaces-2"                     # DevOps space
 PROJECT_SLUG = "iaac-talos"
-PROD_ENV_NAME = "prod"                    # verified below; aborts if absent
-QA_ENV_NAME = "qa"                        # for --diff-qa
+PROD_ENV_NAME = "production"              # DISCOVERED 2026-07-24 via --list-envs:
+                                          # the prod env is named "production"
+                                          # (Environments-41), NOT "prod". Override
+                                          # with --env-name if this ever changes.
+QA_ENV_NAME = "qa"                        # for --diff-qa (Environments-602)
 # resolved after arg parse (see below), so --env-name can override
 
 
