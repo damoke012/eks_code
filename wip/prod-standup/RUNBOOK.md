@@ -32,8 +32,9 @@ Nothing below can be guessed. Each blocks the build; each has a named owner.
 | Prod AWS account | **`937464026810`** | — | ✅ VERIFIED via `sts get-caller-identity` |
 | DNS domain | **`usxpress-prod.com`** | — | ✅ RESOLVED — Route53 zone in prod acct |
 | State bucket | `lazy-tf-state-ipp58n854uhpw13x` | — | ✅ likely (QA scheme); confirm holds `iaac/talos` |
-| **Prod VIP + node IPs** | `TBD-PROD-VIP` | **Networking** | ⛔ OPEN — critical path, the dev-VIP-in-QA field |
-| **vSphere placement + capacity** | `TBD-PROD-*` | **Infra** | ⛔ OPEN — ~13 VMs; same vLAN or dedicated? |
+| Prod VIP | **`10.10.82.52`** | Platform (us) | ✅ RESOLVED — self-assigned on vLAN 82 (dev .50/qa .51/prod .52), verified free. Notify networking, don't ask. |
+| Node IPs | DHCP | — | ✅ N/A — nodes DHCP on the vLAN (QA pattern); no static list |
+| **vSphere placement + capacity** | `TBD-PROD-*` | **Doke / infra** | ⛔ OPEN — the last decision. Same as QA (datastore `USXD1NTXPROD-SC1`, net `10.10.82 (vLAN 82) Prod`) or dedicated? |
 | Talosconfig ARN | `...talosconfig-TBD-PROD` | (build-time) | seeded during §3 |
 | IRSA role + OIDC bucket | empty | Cloud | phase 2 — greenfield, not blocking |
 | **Octopus prod environment** | MISSING | **Octopus admin (us)** | ⛔ OPEN — no `prod` env in Spaces-2; create it + add to `iaac-talos` lifecycle. Ours, not a team ask. |

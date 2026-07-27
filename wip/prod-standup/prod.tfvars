@@ -70,11 +70,13 @@ worker_name_prefix        = "talos-wk-op-prod"
 # ── Env-gated modules ────────────────────────────────────────────────────────
 enable_rw2_imports        = false     # RW-2 is dev-only; never goes to prod.
 
-# ── Cluster identity — TBD FROM NETWORKING ───────────────────────────────────
-# This is the exact field that carried dev's VIP into QA for 13 days. Do NOT
-# copy a dev/qa VIP here. It must come from the prod IP allocation.
-control_plane_vip         = "TBD-PROD-VIP"                 # e.g. 10.10.8X.XX
-endpoint                  = "https://TBD-PROD-VIP:6443"
+# ── Cluster identity — VIP SELF-ASSIGNED on vLAN 82, same as dev/qa ──────────
+# dev=.50, qa=.51, prod=.52. Verified free 2026-07-24 (silent to ping, no
+# kubeconfig references it). Networking is NOTIFIED of the reservation, not
+# asked to allocate — matches how dev/qa were built. Node IPs are DHCP on the
+# vLAN (like QA's scattered .25/.24/.177 CPs), so there is NO per-node IP list.
+control_plane_vip         = "10.10.82.52"                   # RESOLVED
+endpoint                  = "https://10.10.82.52:6443"
 talos_version             = "1.11.1"                        # MIRRORED — confirm target
 
 # ── AWS — VERIFIED 2026-07-24 via sts get-caller-identity ────────────────────

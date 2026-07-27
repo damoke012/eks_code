@@ -72,7 +72,9 @@ PROD_ACCOUNT = "937464026810"             # CONFIRM — ops-controller / usxpres
 PROD_VARS = {
     # Cluster identity + state
     "TF_STATE_KEY":                     "iaac/talos/op-usxpress-prod.tfstate",
-    "TF_VAR_tf_state_bucket":           "TBD-PROD-STATE-BUCKET",   # bucket in prod acct
+    # Confirmed 2026-07-24 in the prod account (matches QA's lazy-tf-state-*
+    # scheme). Final key-confirm: s3 ls .../iaac/talos/ — init fails LOUD if wrong.
+    "TF_VAR_tf_state_bucket":           "lazy-tf-state-ipp58n854uhpw13x",
     "TF_VAR_cluster_name":              "op-usxpress-prod",
     "TF_VAR_aws_region":                "us-east-2",
 
@@ -80,8 +82,10 @@ PROD_VARS = {
     "TF_VAR_cp_cpus":                   "4",
     "TF_VAR_cp_memory_mb":              "16384",
     "TF_VAR_control_plane_name_prefix": "talos-cp-op-prod",
-    "TF_VAR_control_plane_vip":         "TBD-PROD-VIP",            # from networking
-    "TF_VAR_endpoint":                  "https://TBD-PROD-VIP:6443",
+    # VIP self-assigned on vLAN 82 (dev .50, qa .51, prod .52), verified free
+    # 2026-07-24. Networking notified, not asked. Nodes are DHCP — no IP list.
+    "TF_VAR_control_plane_vip":         "10.10.82.52",
+    "TF_VAR_endpoint":                  "https://10.10.82.52:6443",
 
     # Workers
     "TF_VAR_worker_count":              "0",
