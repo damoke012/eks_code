@@ -86,8 +86,15 @@ down for the first cut, or place prod on a different datastore with room.
 3. `python3 add-prod-vars.py --apply` → writes prod-scoped Octopus vars (backs up first).
 4. **`TfApply` stays FALSE for the first Octopus run** — get a real plan gate on prod
    even though QA runs applies ungated. Read the plan before flipping it true.
-5. talosctl gen config → seed `op-usxpress-prod/talosconfig` in SM (acct 937464026810)
-   → put the real ARN into the tfvar/Octopus var.
+5. **Seed the build-time SM secrets** in acct 937464026810, then put each real ARN
+   (with AWS's random suffix) into its Octopus var — this clears the last guards:
+   - `op-usxpress-prod/talosconfig` — from `talosctl gen config`
+   - `op-usxpress-prod/platform/grafana` — grafana admin (generate a password)
+   - `op-usxpress-prod/platform/grafana/azure-ad` — PLACEHOLDER wrapper + ignore_changes
+     (Entra SSO, A1; Grafana boots without it, real value dropped by Entra team later)
+   ⚠️ CONFIRM against the actual iaac-talos TF module whether these three are
+   *created by* Terraform (ARN would be computed, not an input) or seeded first and
+   passed in. QA passes them as input ARNs → seed-first is the working assumption.
 6. `TfApply=true` → Octopus applies. Watch the task log: confirm the worker role
    authenticates and every `TF_VAR_*` lands (not defaulted/blank).
 7. Flux bootstrap against `op-prod` → platform stack reconciles.

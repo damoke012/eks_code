@@ -115,6 +115,22 @@ PROD_VARS = {
     "TF_VAR_talosconfig_secret_arn":
         f"arn:aws:secretsmanager:us-east-2:{PROD_ACCOUNT}:secret:op-usxpress-prod/talosconfig-TBD-PROD",
 
+    # ── Platform secrets — surfaced by --diff-qa (QA had these, prod set didn't) ──
+    # Same build-time class as talosconfig: the SM secret is seeded during the
+    # build, so the ARN carries TBD-PROD until it exists (guard blocks apply).
+    # manage_platform_secret_values=true → Terraform writes the platform secret
+    # VALUES (grafana admin password etc.), mirrored from QA.
+    # ⚠️ Without grafana_admin_secret_arn, prod Grafana comes up with NO admin
+    # credential — deploys "successfully", nobody can log in. The diff caught it.
+    "TF_VAR_grafana_admin_secret_arn":
+        f"arn:aws:secretsmanager:us-east-2:{PROD_ACCOUNT}:secret:op-usxpress-prod/platform/grafana-TBD-PROD",
+    # Entra SSO secret (A1) — cross-team, Doke has no Azure access. Grafana boots
+    # WITHOUT it via admin login; seed a placeholder wrapper + ignore_changes so
+    # the ARN resolves, real client_id/secret dropped by the Entra team later.
+    "TF_VAR_grafana_azure_ad_secret_arn":
+        f"arn:aws:secretsmanager:us-east-2:{PROD_ACCOUNT}:secret:op-usxpress-prod/platform/grafana/azure-ad-TBD-PROD",
+    "TF_VAR_manage_platform_secret_values": "true",
+
     # IRSA — starts false on a greenfield (resources don't exist yet); flip true
     # in phase 2, then NEVER back to false (false = DESTROY once state has them).
     "TF_VAR_enable_irsa":               "false",
