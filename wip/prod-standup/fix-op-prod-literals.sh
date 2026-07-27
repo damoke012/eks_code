@@ -37,12 +37,22 @@ QA_VIP="10.10.82.51"
 DEV_VIP="10.10.82.50"
 PROD_VIP="10.10.82.52"
 
-# Paths where a QA/dev literal may legitimately point at a shared resource.
-# ECR in particular is commonly centralised — rewriting the registry account
-# would break image pulls in a way that looks like a broken cluster, not a
-# broken edit. arc-runner-rw-pipeline is RisingWave tooling, and RW is
-# deliberately OMITTED from prod, so those files may not belong here at all.
-REVIEW_PATHS='ecr-credentials|registry|arc-runner-rw-pipeline'
+# Docs are HISTORICAL RECORDS, not config. design_doc_* and the ADRs describe
+# decisions made for op-usxpress-dev; rewriting the cluster name inside them
+# falsifies the record rather than fixing anything. They also never reconcile —
+# Flux doesn't read them. Skipped outright.
+SKIP_PATHS='\.md$|^op-dev/'
+
+# RisingWave is deliberately OMITTED from prod (its manifest path doesn't exist
+# → the 17-day "path not found" failure). These files should be DELETED from
+# op-prod, not rewritten to point at prod resources that will never exist.
+DELETE_PATHS='arc-runner-rw-pipeline|risingwave'
+
+# ECR may pull from a CENTRAL registry account. The IRSA role name is this
+# cluster's identity and should be rewritten, but the registry account it reads
+# from may legitimately stay — and getting that backwards breaks image pulls in
+# a way that looks like a broken cluster, not a broken edit.
+REVIEW_PATHS='ecr-credentials|registry'
 
 cd "$REPO"
 git fetch origin --quiet
@@ -64,24 +74,42 @@ fi
 
 echo "=== ${#HITS[@]} hit(s) ==="
 auto_files=()
-review_count=0
+declare -A auto_lines=()
+skip_n=0 del_n=0 rev_n=0 com_n=0 auto_n=0
+
 for hit in "${HITS[@]}"; do
   file="${hit%%:*}"
-  if [[ "$file" =~ $REVIEW_PATHS ]]; then
-    echo "  REVIEW  $hit"
-    review_count=$((review_count + 1))
+  rest="${hit#*:}"
+  lineno="${rest%%:*}"
+  text="${rest#*:}"
+
+  if [[ "$file" =~ $SKIP_PATHS ]]; then
+    skip_n=$((skip_n + 1)); continue
+  elif [[ "$file" =~ $DELETE_PATHS ]]; then
+    echo "  DELETE? $hit"; del_n=$((del_n + 1))
+  elif [[ "$file" =~ $REVIEW_PATHS ]]; then
+    echo "  REVIEW  $hit"; rev_n=$((rev_n + 1))
+  elif [[ "$text" =~ ^[[:space:]]*# ]]; then
+    # A comment may describe THIS cluster (rewrite) or state a fact about
+    # another one (rewriting makes it a lie). Not decidable mechanically.
+    echo "  COMMENT $hit"; com_n=$((com_n + 1))
   else
-    echo "  AUTO    $hit"
+    echo "  AUTO    $hit"; auto_n=$((auto_n + 1))
     auto_files+=("$file")
+    auto_lines["$file"]+="$lineno "
   fi
 done
 
-# dedupe
-mapfile -t auto_files < <(printf '%s\n' "${auto_files[@]}" | sort -u)
+if [[ ${#auto_files[@]} -gt 0 ]]; then
+  mapfile -t auto_files < <(printf '%s\n' "${auto_files[@]}" | sort -u)
+fi
 
 echo
-echo "AUTO   : ${#auto_files[@]} file(s) will be rewritten"
-echo "REVIEW : $review_count hit(s) left alone — decide each by hand"
+echo "AUTO    : $auto_n line(s) in ${#auto_files[@]} file(s) — functional config, rewritten"
+echo "COMMENT : $com_n line(s) — read them; rewrite only those describing THIS cluster"
+echo "REVIEW  : $rev_n line(s) — ECR; role name is ours, registry account may be central"
+echo "DELETE? : $del_n line(s) — RisingWave, omitted from prod; remove the files instead"
+echo "SKIPPED : $skip_n line(s) in docs/ADRs — historical records, never rewritten"
 
 cat <<'NOTE'
 
@@ -104,16 +132,21 @@ if [[ $APPLY != true ]]; then
 fi
 
 echo
+# Line-scoped, not file-scoped: several files hold BOTH a functional literal and
+# a comment describing another cluster. A whole-file sed would rewrite the
+# comment too and turn it into a false statement.
 for f in "${auto_files[@]}"; do
-  sed -i \
-    -e "s/$QA_CLUSTER/$PROD_CLUSTER/g" \
-    -e "s/$DEV_CLUSTER/$PROD_CLUSTER/g" \
-    -e "s/$QA_ACCT/$PROD_ACCT/g" \
-    -e "s/$DEV_ACCT/$PROD_ACCT/g" \
-    -e "s/$QA_VIP/$PROD_VIP/g" \
-    -e "s/$DEV_VIP/$PROD_VIP/g" \
-    "$f"
-  echo "  rewrote $f"
+  for ln in ${auto_lines[$f]}; do
+    sed -i "${ln}{
+      s/$QA_CLUSTER/$PROD_CLUSTER/g
+      s/$DEV_CLUSTER/$PROD_CLUSTER/g
+      s/$QA_ACCT/$PROD_ACCT/g
+      s/$DEV_ACCT/$PROD_ACCT/g
+      s/$QA_VIP/$PROD_VIP/g
+      s/$DEV_VIP/$PROD_VIP/g
+    }" "$f"
+  done
+  echo "  rewrote $f (lines: ${auto_lines[$f]})"
 done
 
 echo
