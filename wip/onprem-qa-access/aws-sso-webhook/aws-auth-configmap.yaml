@@ -1,0 +1,45 @@
+---
+# kube-system/aws-auth — the SAME ConfigMap, in the SAME format, as EKS.
+# Read by aws-iam-authenticator's `EKSConfigMap` backend. If you have read prod's
+# aws-auth, you have read this file.
+#
+# ⚠️ THE ARN MUST HAVE ITS PATH STRIPPED.
+# `aws iam list-roles` returns the SSO role with a path:
+#   arn:aws:iam::527101283767:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_op-qa-platform-admin_abc123
+# The authenticator canonicalises assumed-role ARNs WITHOUT the path, so write:
+#   arn:aws:iam::527101283767:role/AWSReservedSSO_op-qa-platform-admin_abc123
+# Getting this wrong does not error — the caller authenticates as system:anonymous and
+# every request comes back `forbidden`, which reads exactly like an RBAC bug.
+#
+# ⚠️ NEVER hand-edit this on a cluster where it is the only path in. It is the
+# highest-blast-radius object in the cluster; a malformed edit locks everyone out.
+# Here the x509 admin kubeconfig is an independent way back in — keep it open.
+#
+# `groups` are the SAME groups already bound in ../rbac/. This ConfigMap grants nothing
+# by itself; the ClusterRoleBindings do.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-auth
+  namespace: kube-system
+data:
+  mapRoles: |
+    # Platform Admin — cluster-admin via the onprem-platform-admins binding.
+    # SessionNameRaw keeps the email verbatim in audit logs (SessionName would render
+    # idris.fagbemi@usxpress.com as idris.fagbemi-usxpress.com). Needs authenticator >= v0.5.0.
+    # The sso: prefix keeps these usernames from colliding with cert CNs.
+    - rolearn: arn:aws:iam::527101283767:role/AWSReservedSSO_op-qa-platform-admin_<FILL>
+      username: "sso:{{SessionNameRaw}}"
+      groups:
+        - onprem-platform-admins
+
+    # Uncomment as the tiers are needed. The permission sets do not exist yet.
+    # - rolearn: arn:aws:iam::527101283767:role/AWSReservedSSO_op-qa-platform-operator_<FILL>
+    #   username: "sso:{{SessionNameRaw}}"
+    #   groups:
+    #     - onprem-platform-operators
+    #
+    # - rolearn: arn:aws:iam::527101283767:role/AWSReservedSSO_op-qa-platform-reader_<FILL>
+    #   username: "sso:{{SessionNameRaw}}"
+    #   groups:
+    #     - onprem-platform-users

@@ -1,0 +1,33 @@
+---
+# kube-apiserver: enable the token webhook and mount the file it reads.
+#
+# ⚠️ THIS BELONGS IN TERRAFORM, NOT IN A talosctl PATCH.
+# iaac-talos is deployed through Octopus only. The machineconfig is rendered by
+# `modules/talos`, so a `talosctl patch machineconfig` applied by hand is DRIFT and will
+# be reverted by the next Octopus deploy — the exact class of problem INFRA-1589 exists
+# to eliminate. Land this in the module (or the env tfvars, if the module exposes
+# apiserver extraArgs/extraVolumes as variables) and deploy the normal way.
+#
+# A hand patch is acceptable for ONE thing: a throwaway validation spike on dev, knowing
+# it will be reverted. If you do that, `talosctl patch machineconfig -n <cp-ip> --patch @<this file>`
+# — and re-apply it after any deploy until the terraform change merges.
+#
+# ⚠️ ORDERING: the DaemonSet (README § B1) must already have written
+# /var/lib/aws-iam-authenticator/kubeconfig.yaml on EVERY control-plane node before this
+# lands. kube-apiserver will NOT START if the file named below does not exist. Verify all
+# three CPs first (README § B2), then apply and watch the roll node by node.
+#
+# Safety property: this needs the FILE, not a running server. If the authenticator is
+# down, webhook auth fails but x509 auth is unaffected — the tfstate-derived
+# system:masters kubeconfig remains a way in. Keep it open in another terminal.
+cluster:
+  apiServer:
+    extraArgs:
+      authentication-token-webhook-config-file: /var/lib/aws-iam-authenticator/kubeconfig.yaml
+      # How long a successful authentication is cached. Shorter = faster propagation of
+      # an aws-auth change, at the cost of more calls to the webhook. 2m is the k8s default.
+      authentication-token-webhook-cache-ttl: 2m0s
+    extraVolumes:
+      - hostPath: /var/lib/aws-iam-authenticator
+        mountPath: /var/lib/aws-iam-authenticator
+        readonly: true

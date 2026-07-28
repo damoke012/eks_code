@@ -1,5 +1,20 @@
 # On-prem QA cluster access — group-based model (Idris → Platform Admin)
 
+> **2026-07-28 — direction changed. Read `aws-sso-webhook/` first.**
+> The decision is to mimic the cloud model properly: run `aws-iam-authenticator` on the Talos control plane,
+> which is the component EKS runs for you, and grant access by assigning an AWS SSO permission set. Idris
+> then does `aws sso login` and nothing else — no CSR, no cert, no key.
+>
+> **What survives from this document:** the three group-keyed ClusterRoleBindings in `rbac/` are the target
+> of both models and are unchanged — `aws-auth` maps the SSO role to the same groups these bind. Land them
+> either way.
+>
+> **What this document becomes:** the break-glass path. One cert-based admin kubeconfig kept offline for
+> when AWS SSO or the webhook is unavailable. The 90-day admin-cert expiry in § 6 was only ever
+> compensating for the lack of per-person revocation on a group binding — SSO removes that need.
+>
+> Still the fastest way to unblock one person *today* if the webhook build slips and Idris is waiting.
+
 **Cluster:** `op-usxpress-qa` — Talos, `https://10.10.82.51:6443` (vLAN 82; dev `.50` / qa `.51` / prod `.52`)
 **Ask:** give Idris Platform Admin on QA, mirroring how Timothy Preble got AWS prod EKS access on 2026-07-27.
 **Status:** drafted 2026-07-28 — nothing applied. All execution is on WSL (corp VPN required).

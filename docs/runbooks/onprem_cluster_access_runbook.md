@@ -12,8 +12,20 @@ per-user bindings this runbook describes.
 | Cluster | Endpoint | Flux platform branch | Access model |
 |---|---|---|---|
 | `op-usxpress-dev` | `https://10.10.82.50:6443` | `op-dev` | per-user certs + per-user bindings (this runbook) |
-| `op-usxpress-qa` | `https://10.10.82.51:6443` | `op-qa` | per-user certs + **group-keyed** bindings |
+| `op-usxpress-qa` | `https://10.10.82.51:6443` | `op-qa` | → **AWS SSO** (see below); certs are break-glass |
 | `op-usxpress-prod` | `https://10.10.82.52:6443` | `op-prd` | TBD — do not provision standing admin |
+
+> **2026-07-28 — the target changed from Azure AD OIDC to AWS SSO.** The
+> [§ Target state](#target-state--azure-ad-oidc-the-ideal-process) below is still a correct description of
+> OIDC, but it is no longer the plan for *cluster access*: it needs an Entra app registration and we have no
+> Azure access, so it is blocked on IT. The AWS path is one we own end to end.
+>
+> The mechanism is the same one cloud EKS already uses — `aws-iam-authenticator`, which AWS runs as part of
+> the managed control plane and which we self-host on Talos. It reads `kube-system/aws-auth` in *exactly* the
+> EKS format. Granting access becomes "assign a permission set in Identity Center", identical to how cloud
+> EKS access is granted. Build: `wip/onprem-qa-access/aws-sso-webhook/`.
+>
+> Everything below stays valid as the **break-glass** path — keep one cert-based admin kubeconfig offline.
 
 A cert signed by one cluster's CA is **worthless on another** — each Talos cluster has its own CA. The user
 reuses their private key and gets a new CSR signed per cluster.

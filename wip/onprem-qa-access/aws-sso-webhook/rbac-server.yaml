@@ -1,0 +1,39 @@
+---
+# RBAC for the authenticator server itself. It reads kube-system/aws-auth and nothing else.
+# Note what is NOT here: no AWS credentials, no secret access, no write anywhere.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-iam-authenticator
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aws-iam-authenticator
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["aws-auth"]
+    verbs: ["get", "list", "watch"]
+  # list/watch cannot be restricted by resourceName, so the collection verbs need their
+  # own rule. Scoped to the kube-system-only binding below.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["list", "watch"]
+---
+# RoleBinding, not ClusterRoleBinding — the server only ever reads in kube-system, so the
+# unrestricted list/watch above cannot reach configmaps in any other namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aws-iam-authenticator
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: aws-iam-authenticator
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: aws-iam-authenticator
+  apiGroup: rbac.authorization.k8s.io

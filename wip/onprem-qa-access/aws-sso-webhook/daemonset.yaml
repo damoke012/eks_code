@@ -1,0 +1,99 @@
+---
+# aws-iam-authenticator server — control-plane nodes only, host network.
+#
+# kube-apiserver reaches it over 127.0.0.1:21362 on the same node, which is why this is a
+# DaemonSet on the CPs with hostNetwork rather than a Deployment behind a Service: the
+# authentication path must not depend on cluster networking (CNI, kube-proxy, DNS). If it
+# did, a Cilium problem would become a "nobody can log in" problem.
+#
+# Deploy this BEFORE the apiserver flag (README § B1). The init container writes the
+# webhook kubeconfig that the flag will point at; if the flag lands first, apiserver will
+# not start.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: aws-iam-authenticator
+  namespace: kube-system
+  labels:
+    k8s-app: aws-iam-authenticator
+spec:
+  selector:
+    matchLabels:
+      k8s-app: aws-iam-authenticator
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1 # one CP at a time; never lose the auth path on a majority
+  template:
+    metadata:
+      labels:
+        k8s-app: aws-iam-authenticator
+    spec:
+      serviceAccountName: aws-iam-authenticator
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: system-node-critical # auth is not evictable
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        # Must be able to start on a node that is not yet Ready — otherwise a cluster
+        # that comes up without a working auth path cannot recover it.
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoSchedule
+      initContainers:
+        # Generates the server cert/key and the webhook kubeconfig the apiserver reads.
+        # Idempotent: re-running leaves existing material alone. The cluster ID is baked
+        # into the cert, and must match the client's `token -i` value.
+        - name: init
+          image: public.ecr.aws/eks-distro/kubernetes-sigs/aws-iam-authenticator:<FILL>
+          args:
+            - init
+            - -i
+            - op-usxpress-qa
+          volumeMounts:
+            - name: state
+              mountPath: /var/aws-iam-authenticator
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 0 # writes to a hostPath owned by root
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: aws-iam-authenticator
+          image: public.ecr.aws/eks-distro/kubernetes-sigs/aws-iam-authenticator:<FILL>
+          args:
+            - server
+            - --backend-mode=EKSConfigMap # reads kube-system/aws-auth, EKS format
+            - --cluster-id=op-usxpress-qa # anti-replay: a token for another cluster is rejected
+            - --generate-kubeconfig=/var/aws-iam-authenticator/kubeconfig.yaml
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 21362
+              scheme: HTTPS
+            initialDelaySeconds: 30
+          volumeMounts:
+            - name: state
+              mountPath: /var/aws-iam-authenticator
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 0
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        # Talos: /var is the writable, persistent host path. NOT /etc/kubernetes — that
+        # is managed by Talos and is not ours to write into.
+        - name: state
+          hostPath:
+            path: /var/lib/aws-iam-authenticator
+            type: DirectoryOrCreate
