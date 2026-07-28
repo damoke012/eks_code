@@ -1,24 +1,29 @@
 # ==============================================================================
 # op-usxpress-prod — Flux infra wiring.  INFRA-1589.
 #
-# PHASED like QA was actually built (INFRA-1585 Tier-2, INFRA-1589 Tier-3), NOT
-# a single parity copy. The dividing line is IRSA: every AWS-touching component
-# (ESO/SM, external-dns/Route53, velero+etcd-backup/S3) authenticates via the
-# CloudFront-fronted OIDC provider. Prod has NO OIDC provider yet
-# (validate-register.sh, 2026-07-24), so those components CANNOT function until
-# cloud provisions the prod IRSA bootstrap (ONPREM_BOOTSTRAP_ROLE_ARN_PROD +
-# OIDC bucket) and enable_irsa flips true.
+# SELF-CONTAINED BY DESIGN. op-prod owns every resource it depends on:
+#   * Secrets Manager  op-usxpress-prod/*            (account 937464026810)
+#   * S3               etcd-snapshots-op-usxpress-prod, velero-op-usxpress-prod
+#   * IRSA roles       op-usxpress-prod-<workload>   (own OIDC provider)
+#   * Route53          usxpress-prod.com, txtOwnerId iaac-talos/us-east-2/op-usxpress-prod
+# No cross-cluster bridge, no dependency on dev/QA accounts, buckets or secrets.
+# The ONE deliberate exception is the shared ECR registry 064859874041, which is
+# central for every cluster (see ecr-credentials/cronjob.yaml).
 #
-#   PHASE 1 (below, ACTIVE): AWS-free base platform. Brings the cluster up —
-#     certs, policy, CNI plumbing, IRSA webhook (idle until bootstrap). No SM,
-#     no S3, no Route53. Safe to reconcile the moment Talos+Flux are up.
-#   PHASE 2 (commented appendix): everything AWS-dependent + argocd. Uncomment
-#     and reconcile AFTER the prod IRSA bootstrap lands and enable_irsa=true.
-#   RisingWave: deliberately absent — ./manifests/op-usxpress-prod does not
-#     exist in iaac-risingwave-onprem yet; wiring it = the 17-day "path not
-#     found" failure. Add when Tim + prod RW manifests are ready.
+# NOT PHASED — every Kustomization is active. Flux's dependsOn graph handles
+# ordering, and anything AWS-touching simply retries until IRSA is up, then goes
+# Ready on its own. A commented "phase 2" appendix would require a human to come
+# back and uncomment it, which is precisely the manual step we are removing.
+#
+# cross-cluster-eso is intentionally ABSENT — retired (qa-tier2-additions.yaml).
+# It is what required the manual "Seed Cross-Cluster ESO Token" Octopus runbook
+# in the QA bootstrap checklist (Phase 7/8). Prod never adopts it.
+#
+# RisingWave: deliberately absent — ./manifests/op-usxpress-prod does not exist
+# in iaac-risingwave-onprem yet; wiring it = the 17-day "path not found" failure.
 # ==============================================================================
 
+# ------------------------------------------------------------------ base ----
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -191,30 +196,412 @@ spec:
   timeout: 5m
   dependsOn:
   - name: cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-namespace
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio
+  prune: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: local-path-storage
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/local-path-storage
+  prune: true
+  wait: true
+  timeout: 5m
 
-# ==============================================================================
-# PHASE 2 — ADD AFTER PROD IRSA BOOTSTRAP LANDS (cloud) + enable_irsa=true.
-# Copied verbatim from op-qa infra.yaml (INFRA-1585 Tier-2 + INFRA-1589 Tier-3 +
-# INFRA-1622 argocd), MINUS the RisingWave block. Uncomment as a unit once ESO
-# can read SM. Order/dependsOn already correct — external-secrets underpins the
-# rest, so verify `external-secrets-config` (ClusterSecretStore) goes Ready and
-# the grafana/argocd admin ExternalSecrets sync BEFORE trusting anything above it.
-#
-# Components (see op-qa for exact specs):
-#   istio-namespace, external-secrets, cert-manager-issuers,
-#   external-secrets-config, istio-csr, istio-base, istio-istiod, istio-cni,
-#   istiod-health, istio-ztunnel, istio-ingress, prometheus, external-dns,
-#   grafana, prometheus-rules, velero, etcd-backup, local-path-storage,
-#   rook-ceph-operator, rook-ceph-cluster, argocd, argocd-config
-#
-# Build-time SM secrets these need (seed in acct 937464026810 first — RUNBOOK §5):
-#   op-usxpress-prod/platform/grafana          (grafana admin)
-#   op-usxpress-prod/platform/grafana/azure-ad (Entra SSO placeholder + ignore_changes)
-#   op-usxpress-prod/platform/argocd           (argocd admin)
-#
-# etcd-backup REMINDER (INFRA-1623): its CronJob endpoints MUST be 10.10.82.52
-# (prod VIP), not a copied .50/.51. The op-prod branch cut from op-qa inherits
-# op-qa's value — the E2 fix / ${cluster_vip} substituteFrom must land first.
-# The etcd-snapshot-age alert (wip/qa-cluster-standup/alerts) comes in with
-# prometheus-rules and is the thing that catches a wrong endpoint.
-# ==============================================================================
+# -------------------------------------------------------------- secrets ----
+# ESO reads op-usxpress-prod/* from Secrets Manager in 937464026810 via the
+# prod IRSA role. Retries until enable_irsa=true has built the OIDC provider,
+# then goes Ready without intervention.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-secrets
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/external-secrets
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-secrets-config
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/external-secrets-config
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: external-secrets
+
+# ------------------------------------------------------- mesh + ingress ----
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager-issuers
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/cert-manager-issuers
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager
+  - name: istio-namespace
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-csr
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio-csr
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: cert-manager-issuers
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-base
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/base
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: istio-csr
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-istiod
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/istiod
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: istio-base
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-cni
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/cni
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: istio-istiod
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istiod-health
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: istio-istiod
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/istiod-health
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 5m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-ztunnel
+  namespace: flux-system
+spec:
+  interval: 5m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/istio/ztunnel
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+  - name: istio-cni
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: istio-ingress
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: istio-istiod
+  - name: istio-ztunnel
+  - name: istio-cni
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/istio-ingress
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+
+# --------------------------------------------------------- observability ----
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: prometheus
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/prometheus
+  prune: true
+  wait: true
+  timeout: 5m
+---
+# NOTE: dependsOn inferred (prometheus) — QA's exact spec for this one was not in
+# the local artifacts. Confirm against op-qa infra.yaml before merging.
+# Carries the etcd-snapshot-age alert, which is what catches a wrong etcd-backup
+# endpoint (INFRA-1623). Do not drop it.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: prometheus-rules
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/prometheus-rules
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: prometheus
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: external-secrets
+    - name: prometheus
+    - name: istio-ingress
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/grafana
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+
+# ------------------------------------------------------------------ dns ----
+# --domain-filter=usxpress-prod.com, --txt-owner-id=iaac-talos/us-east-2/op-usxpress-prod
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: external-dns
+  namespace: flux-system
+spec:
+  dependsOn:
+  - name: pod-identity-webhook
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/external-dns
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
+
+# -------------------------------------------------------------- backups ----
+# velero  -> s3://velero-op-usxpress-prod
+# etcd    -> s3://etcd-snapshots-op-usxpress-prod, endpoints MUST be 10.10.82.52
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: velero
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/velero
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+  - name: external-secrets-config
+  - name: pod-identity-webhook
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: etcd-backup
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/etcd-backup
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+  - name: external-secrets-config
+  - name: pod-identity-webhook
+
+# -------------------------------------------------------------- storage ----
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-operator
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/rook-ceph-operator
+  prune: true
+  wait: true
+  timeout: 10m
+  dependsOn:
+  - name: external-secrets
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rook-ceph-cluster
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/rook-ceph-cluster
+  prune: true
+  wait: true
+  timeout: 30m
+  dependsOn:
+  - name: rook-ceph-operator
+  - name: local-path-storage
+
+# --------------------------------------------------------------- argocd ----
+# Split deliberately: on a greenfield cluster the argoproj.io CRDs do not exist
+# until the chart installs, so AppProjects must apply AFTER it. `wait: true` on
+# `argocd` makes the HelmRelease Ready (= CRDs present) gate `argocd-config`.
+# argocd-config's admin ExternalSecret reads op-usxpress-prod/platform/argocd —
+# that SM secret must hold a REAL value. A PLACEHOLDER syncs GREEN and leaves
+# Argo CD with an unusable credential.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/argocd
+  prune: true
+  wait: true
+  timeout: 10m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd-config
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/argocd-config
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+    - name: argocd
+    - name: external-secrets
