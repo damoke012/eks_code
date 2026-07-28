@@ -279,6 +279,43 @@ else:
                        f"to development first — with TfApply=false that is a plan "
                        f"against dev's state and changes nothing.")
 
+# ---- P2b: does the channel a release lands in even reach production? --------
+# The project's default lifecycle is NOT the whole story. A release belongs to a
+# CHANNEL, and the channel's lifecycle is what gates its deployments. CI puts
+# every branch build in `feature`, whose lifecycle stops at qa — so a
+# branch-built release can never reach production no matter what P2 says.
+
+print("\n[P2b] Channels — can the channel a release lands in reach production?")
+chans = api(f"/api/{SPACE_ID}/projects/{project['Id']}/channels?take=50").get("Items", [])
+chan_reaches_prod = {}
+for c in chans:
+    lid = c.get("LifecycleId") or project.get("LifecycleId")
+    clc = api(f"/api/{SPACE_ID}/lifecycles/{lid}")
+    reach = any(
+        prod_env_id in (ph.get("AutomaticDeploymentTargets") or [])
+                     + (ph.get("OptionalDeploymentTargets") or [])
+        for ph in clc.get("Phases") or []
+    )
+    chan_reaches_prod[c["Id"]] = (c["Name"], reach)
+    mark = "reaches production" if reach else "STOPS SHORT of production"
+    print(f"      channel {c['Name']!r}: lifecycle {clc.get('Name')} — {mark}")
+
+recent = api(f"/api/{SPACE_ID}/projects/{project['Id']}/releases?take=5").get("Items", [])
+if recent:
+    top = recent[0]
+    name, reach = chan_reaches_prod.get(top.get("ChannelId"), ("<unknown>", False))
+    print(f"      newest release {top.get('Version')} is in channel {name!r}")
+    if not reach:
+        blocker("P2b", f"the newest release sits in channel {name!r}, whose lifecycle "
+                       f"cannot reach production — it will not appear in the deploy "
+                       f"dropdown. Create a release in a channel that does (CI puts "
+                       f"branch builds in the feature channel), pinning the same "
+                       f"package version.")
+    else:
+        ok(f"newest release is in a channel that reaches production.")
+if not any(r for _, r in chan_reaches_prod.values()):
+    blocker("P2b", "NO channel on this project has a lifecycle reaching production.")
+
 # ---- P3: no deploy step silently skips production ---------------------------
 
 print("\n[P3] Deployment process — does any step exclude production?")
