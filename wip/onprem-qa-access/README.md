@@ -63,28 +63,44 @@ Files:
 
 ## 3. Order of operations
 
-**Preflight (read-only, on WSL — do this first, it changes the plan if it fails):**
+**Getting a QA kubeconfig.** `op-usxpress-qa` has **no context in the default kubeconfig and never has** —
+`kubectl config use-context op-usxpress-qa` fails, and with `KUBECONFIG` unset kubectl silently falls back to
+`localhost:8080`. Derive it from tfstate; stream the state, never save it (plaintext secrets):
 
 ```bash
-kubectl config use-context op-usxpress-qa
-kubectl config current-context                      # confirm QA, not dev, not cloud
-kubectl cluster-info | head -2                      # expect https://10.10.82.51:6443
+nc -vz -w 5 10.10.82.51 6443            # corp VPN
 
-# Does QA already have any of this? Dev's one-time setup was imperative and may not have been repeated.
+# Skip if a file already serves .51 — resolve by endpoint, never by filename
+for f in ~/.kube/*.yaml; do printf '%-45s %s\n' "$(basename $f)" \
+  "$(kubectl --kubeconfig=$f config view -o jsonpath='{.clusters[*].cluster.server}')"; done
+
+aws sso login --profile usx-qa
+aws s3 cp s3://lazy-tf-state-425rbol87rmn6c7m/iaac/talos/op-usxpress-qa.tfstate - --profile usx-qa \
+  | jq -r '.outputs.kubeconfig.value' > ~/.kube/op-usxpress-qa.yaml && chmod 600 ~/.kube/op-usxpress-qa.yaml
+
+export KUBECONFIG=~/.kube/op-usxpress-qa.yaml
+kubectl cluster-info | head -1          # READ IT: .51, not dev's .50
+```
+
+That kubeconfig's identity is in `system:masters` — it is what gives you the right to sign CSRs at all.
+
+**Preflight (read-only):**
+
+```bash
 kubectl get clusterrole onprem-platform-reader onprem-platform-operator 2>&1
 kubectl get clusterrolebindings -o json | jq -r \
-  '.items[] | select(.metadata.name|test("onprem-platform")) | "\(.metadata.name)\t\(.subjects[]?.kind):\(.subjects[]?.name)"'
-
-# Who already has cluster-admin on QA (baseline before adding a subject)
-kubectl get clusterrolebindings -o json | jq -r \
   '.items[] | select(.roleRef.name=="cluster-admin") | "\(.metadata.name)\t\(.subjects[]?.kind):\(.subjects[]?.name)"'
-
-# Does Idris already have a QA cert/CSR from an earlier session?
 kubectl get csr | grep -i idris
 ```
 
-If `onprem-platform-reader` already exists on QA as a hand-applied object, Flux will adopt it on first
-reconcile (same name, no immutable fields) — expected, not a conflict.
+**Run 2026-07-28 — clean start, no surprises:**
+
+- Neither ClusterRole exists on QA. Nothing hand-applied to adopt; Flux creates all five objects fresh.
+  (Had `onprem-platform-reader` existed, Flux would have adopted it — same name, no immutable fields.)
+- cluster-admin on QA is held only by ServiceAccounts (`cilium-install`, both flux controllers,
+  `magerunner-deploy`, `velero`) plus `Group:system:masters`. **No human binding exists.** So
+  `onprem-platform-admins` is the first human cluster-admin path into QA — a new door, not a second key.
+- No outstanding Idris CSR.
 
 1. **Preflight** above.
 2. **Send Idris block 1** from `IDRIS-MESSAGE.md`. He generates key + CSR locally; key never leaves his laptop.

@@ -16,7 +16,10 @@ USER_CN="${1:?usage: sign-csr-qa.sh <USER_CN> <PATH_TO_CSR> [admin|operator|read
 CSR_PATH="${2:?usage: sign-csr-qa.sh <USER_CN> <PATH_TO_CSR> [admin|operator|reader]}"
 TIER="${3:-reader}"
 
-QA_CONTEXT="op-usxpress-qa"
+# op-usxpress-qa has no context in the default kubeconfig and never has. The working
+# config is derived from tfstate (see wip/onprem-qa-access/README.md § 3), so its context
+# NAME comes from Terraform and is not a stable thing to guard on. Guard on the endpoint.
+#   export KUBECONFIG=~/.kube/op-usxpress-qa.yaml
 QA_SERVER="https://10.10.82.51:6443"
 
 case "$TIER" in
@@ -30,14 +33,18 @@ esac
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# --- Guard 1: right cluster. Signing dev's CSR against QA silently issues a useless cert.
-CURRENT_CTX="$(kubectl config current-context)"
-[[ "$CURRENT_CTX" == "$QA_CONTEXT" ]] || die "context is '$CURRENT_CTX', expected '$QA_CONTEXT'"
-
+# --- Guard 1: right cluster. Signing against dev (.50 — ONE DIGIT OFF) issues a cert that
+# looks fine and works nowhere. The endpoint is the only thing worth trusting here.
 LIVE_SERVER="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.server}')"
-[[ "$LIVE_SERVER" == "$QA_SERVER" ]] || die "context '$QA_CONTEXT' points at '$LIVE_SERVER', expected '$QA_SERVER'"
+[[ "$LIVE_SERVER" == "$QA_SERVER" ]] || die "kubectl points at '$LIVE_SERVER', expected '$QA_SERVER' — export KUBECONFIG=~/.kube/op-usxpress-qa.yaml"
+echo "Cluster:  $LIVE_SERVER  (context '$(kubectl config current-context)', KUBECONFIG=${KUBECONFIG:-~/.kube/config})"
 
-# --- Guard 2: the CSR is a CSR, and its subject is what we expect.
+# --- Guard 2: we can actually sign. Without this the CSR gets created and then the approve
+# fails, leaving a dangling CSR to clean up by hand.
+kubectl auth can-i approve certificatesigningrequests.certificates.k8s.io/kubernetes.io/kube-apiserver-client >/dev/null \
+  || die "this identity cannot approve kube-apiserver-client CSRs — need the system:masters kubeconfig from tfstate"
+
+# --- Guard 3: the CSR is a CSR, and its subject is what we expect.
 [[ -f "$CSR_PATH" ]] || die "no CSR at $CSR_PATH"
 openssl req -in "$CSR_PATH" -noout -verify >/dev/null 2>&1 || die "$CSR_PATH is not a valid CSR (paste mangled?)"
 
@@ -47,14 +54,14 @@ grep -q "CN *= *${USER_CN}\b"    <<<"$SUBJECT" || die "CSR CN does not match '$U
 grep -q "O *= *${REQUIRED_O}\b"  <<<"$SUBJECT" || die "CSR lacks O=${REQUIRED_O} for tier '$TIER' — have them regenerate"
 grep -q "O *= *onprem-platform-users\b" <<<"$SUBJECT" || die "CSR lacks the baseline O=onprem-platform-users"
 
-# --- Guard 3: the group-keyed binding must already exist, or the cert grants nothing.
+# --- Guard 4: the group-keyed binding must already exist, or the cert grants nothing.
 kubectl get clusterrolebinding "$REQUIRED_O" >/dev/null 2>&1 \
   || die "ClusterRoleBinding '$REQUIRED_O' not found — land infrastructure/rbac via Flux first"
 
 WORKDIR="$HOME/onprem-access/$USER_CN"
 mkdir -p "$WORKDIR"
 
-echo "Signing $USER_CN as '$TIER' ($((EXPIRY / 86400)) days) on $QA_CONTEXT ..."
+echo "Signing $USER_CN as '$TIER' ($((EXPIRY / 86400)) days) on $LIVE_SERVER ..."
 kubectl delete csr "$USER_CN" --ignore-not-found
 
 kubectl apply -f - <<EOF
