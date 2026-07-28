@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - clusterrole-onprem-platform-reader.yaml
+  - clusterrole-onprem-platform-operator.yaml
+  - clusterrolebindings-groups.yaml

@@ -1,0 +1,25 @@
+# Append this block to:
+#   iaac-talos-flux-cluster/clusters/op-usxpress-qa/flux-system/infra.yaml
+# Branch: master
+# It wires Flux to reconcile infrastructure/rbac from the `infra` GitRepository
+# (iaac-talos-flux-platform, branch op-qa).
+#
+# No dependsOn — human RBAC has no prerequisite in the platform stack and should come
+# up even if the rest of the stack is broken. That is exactly when someone needs to log
+# in and look at it.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rbac
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/rbac
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 2m0s

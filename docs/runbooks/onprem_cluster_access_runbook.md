@@ -1,8 +1,37 @@
 # On-Prem Cluster Access — Provisioning Runbook
 
-**Cluster:** op-usxpress-dev (Talos, https://10.10.82.50:6443)
 **Audience:** Cluster admins onboarding new users (engineers, contractors, vendors)
-**Last revised:** 2026-04-28
+**Last revised:** 2026-07-28
+
+## Which cluster
+
+Every command below is written against **dev**. For QA or prod, substitute the endpoint — and re-read
+[§ Group-based bindings](#group-based-bindings-qa-onward) first, because QA onward does **not** use the
+per-user bindings this runbook describes.
+
+| Cluster | Endpoint | Flux platform branch | Access model |
+|---|---|---|---|
+| `op-usxpress-dev` | `https://10.10.82.50:6443` | `op-dev` | per-user certs + per-user bindings (this runbook) |
+| `op-usxpress-qa` | `https://10.10.82.51:6443` | `op-qa` | per-user certs + **group-keyed** bindings |
+| `op-usxpress-prod` | `https://10.10.82.52:6443` | `op-prd` | TBD — do not provision standing admin |
+
+A cert signed by one cluster's CA is **worthless on another** — each Talos cluster has its own CA. The user
+reuses their private key and gets a new CSR signed per cluster.
+
+<a name="group-based-bindings-qa-onward"></a>
+### Group-based bindings (QA onward)
+
+The per-user `ClusterRoleBinding` flow below — one binding object per person — does not scale and is the same
+anti-pattern this runbook rejects for `aws-auth` `mapUsers`. From QA onward, bindings are keyed on the **group
+carried in the cert subject's `O=` field**, which kube-apiserver maps to K8s groups. Onboarding is then a
+signed cert and zero cluster changes, matching how an AWS SSO permission set maps to an `aws-auth` group — and
+the same bindings pick up an `oidc:` subject when [§ Target state](#target-state--azure-ad-oidc-the-ideal-process)
+lands, so nobody re-onboards.
+
+The trade-off: a group binding gives no per-person revocation — pulling the binding cuts off everyone in the
+tier. Until OIDC, **expiry is the revocation control**, so admin-tier certs are issued for 90 days, not a year.
+
+Manifests, signing script and the messages to send the user: `wip/onprem-qa-access/`.
 
 ---
 
@@ -347,7 +376,7 @@ Permissions are layered via additive bindings. To upgrade a user, add a new Clus
 
 ### Reader → Operator
 
-The operator role is read+write cluster-wide except secrets, RBAC, CRDs. See `onprem-platform-operator` ClusterRole earlier in this runbook.
+The operator role is read+write cluster-wide except secrets, RBAC, CRDs. The `onprem-platform-operator` ClusterRole is defined below in [§ Pattern 1](#pattern-1--tiered-cluster-wide-access-the-basic-three-roles) (not above — it is not part of the one-time setup).
 
 ```bash
 # Optionally remove the reader binding for cleanliness
@@ -363,6 +392,9 @@ kubectl create clusterrolebinding onprem-platform-operator-<USER_CN> \
 ### Operator → Admin (cluster-admin)
 
 When the user needs to install operators (CRDs), modify cluster-wide RBAC, or operate as a platform engineer. Reserved for the on-prem platform team.
+
+> **QA and later: do not run this.** The tier is carried by the cert, not by a per-user binding — re-issue the
+> user's cert with `O=onprem-platform-admins` instead. See [§ Group-based bindings](#group-based-bindings-qa-onward).
 
 ```bash
 kubectl create clusterrolebinding cluster-admin-<USER_CN> \

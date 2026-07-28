@@ -1,0 +1,41 @@
+---
+# Read everything the reader can, plus write on non-cluster-destructive resources.
+# Explicitly NOT granted: secrets, RBAC, CRDs, nodes — those require the admin tier.
+#
+# This role is additive to onprem-platform-reader: an operator is expected to carry
+# BOTH O=onprem-platform-operators and O=onprem-platform-users in their cert, so the
+# read surface comes from the reader binding and this role only adds the writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: onprem-platform-operator
+  labels:
+    purpose: per-user-cluster-access
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - services
+      - pods
+      - pods/exec
+      - pods/portforward
+      - events
+      - namespaces
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["*"]
+  # Flux: let an operator force a reconcile without handing them cluster-admin.
+  # Annotating a Kustomization/HelmRelease is a patch on the object.
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - helm.toolkit.fluxcd.io
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "patch", "update"]

@@ -1,0 +1,63 @@
+---
+# Group-keyed bindings. NOTHING here names an individual.
+#
+# The group comes from the X.509 subject's O= field: kube-apiserver maps every O in a
+# client cert to a K8s group. A cert issued as
+#   /CN=idris-fagbemi/O=onprem-platform-admins/O=onprem-platform-users
+# lands in both groups, so onboarding the next admin needs a signed cert and no cluster
+# change at all. This is the on-prem equivalent of an AWS SSO permission set mapping to
+# an aws-auth group.
+#
+# WHEN OIDC LANDS: do not rewrite these. Add a second subject to each binding,
+#   - kind: Group
+#     name: oidc:<ENTRA_GROUP_OBJECT_ID>
+#     apiGroup: rbac.authorization.k8s.io
+# and cert users and OIDC users are served by the same binding through the migration.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onprem-platform-admins
+  labels:
+    purpose: per-user-cluster-access
+    tier: admin
+subjects:
+  - kind: Group
+    name: onprem-platform-admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin # built-in
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onprem-platform-operators
+  labels:
+    purpose: per-user-cluster-access
+    tier: operator
+subjects:
+  - kind: Group
+    name: onprem-platform-operators
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: onprem-platform-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onprem-platform-users
+  labels:
+    purpose: per-user-cluster-access
+    tier: reader
+subjects:
+  - kind: Group
+    name: onprem-platform-users
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: onprem-platform-reader
+  apiGroup: rbac.authorization.k8s.io

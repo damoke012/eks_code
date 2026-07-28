@@ -1,0 +1,75 @@
+---
+# Read-only cluster-wide. Secrets intentionally omitted.
+#
+# RBAC is allow-only — there is no deny rule. To exclude secrets we must enumerate
+# resources explicitly within the core ("") API group. Wildcards are safe for the
+# other groups because none of them contain secrets.
+#
+# Adding a resource later: append to the appropriate rule. Re-apply is idempotent.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: onprem-platform-reader
+  labels:
+    purpose: per-user-cluster-access
+rules:
+  - apiGroups: [""]
+    resources:
+      - bindings
+      - configmaps
+      - endpoints
+      - events
+      - limitranges
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - pods
+      - pods/log
+      - pods/status
+      - replicationcontrollers
+      - resourcequotas
+      - serviceaccounts
+      - services
+      - componentstatuses
+    verbs: ["get", "list", "watch"]
+  - apiGroups:
+      - apps
+      - autoscaling
+      - batch
+      - certificates.k8s.io
+      - coordination.k8s.io
+      - discovery.k8s.io
+      - events.k8s.io
+      - networking.k8s.io
+      - node.k8s.io
+      - policy
+      - rbac.authorization.k8s.io
+      - scheduling.k8s.io
+      - storage.k8s.io
+      - apiextensions.k8s.io
+      - admissionregistration.k8s.io
+      # CRDs present on op-usxpress-qa
+      - cert-manager.io
+      - external-secrets.io
+      - source.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - helm.toolkit.fluxcd.io
+      - notification.toolkit.fluxcd.io
+      - image.toolkit.fluxcd.io
+      - security.istio.io
+      - networking.istio.io
+      - telemetry.istio.io
+      - extensions.istio.io
+      - install.istio.io
+      - monitoring.coreos.com
+      - keda.sh
+      - cilium.io
+      - gateway.networking.k8s.io
+      # QA-specific vs. the dev runbook's list
+      - ceph.rook.io
+      - objectbucket.io
+      - kyverno.io
+      - risingwave.risingwavelabs.com
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
