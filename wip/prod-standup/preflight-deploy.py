@@ -57,12 +57,16 @@ EXPECTED_PROD_VARS = {
     "TF_VAR_flux_target_path", "TF_VAR_worker_pools",
 }
 
-# Phase 1 deliberately ships these empty — enable_irsa=false means the module
-# never consumes them (secrets-values.tf gates on it). Empty here is CORRECT;
-# empty anywhere else is a defaulted-to-blank variable, which is a blocker.
+# These three stay empty in Octopus PERMANENTLY. deploy.ps1's ensure-and-export
+# step describes-or-creates each SM wrapper and exports the real ARN as the
+# matching TF_VAR at deploy time, so a value stored here would be stale the
+# moment a secret is recreated. Empty is correct; anything else is a blocker.
+#
+# irsa_oidc_bucket_name is NOT in this set — it is a deliberate input and is
+# validated by the IRSA consistency block further down.
 EXPECTED_EMPTY = {
     "TF_VAR_talosconfig_secret_arn", "TF_VAR_grafana_admin_secret_arn",
-    "TF_VAR_grafana_azure_ad_secret_arn", "TF_VAR_irsa_oidc_bucket_name",
+    "TF_VAR_grafana_azure_ad_secret_arn",
 }
 
 # Gate B5, applied to variable values instead of git. A prod-scoped variable
