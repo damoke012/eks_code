@@ -57,7 +57,20 @@ Grafana, all nine Istio components, Rook-Ceph.
 
 ---
 
-## B. Manual steps the QA checklist documents as REQUIRED
+## B. ~~Manual steps the QA checklist documents as REQUIRED~~ — RESOLVED 2026-07-29
+
+**Both interactive steps below are obsolete.** `qa-tier2-additions.yaml` (line 6) records
+`cross-cluster-eso` as **RETIRED**. It is the only thing that needed the `cloud-eks`
+ClusterSecretStore, which is the only thing the Octopus seeding runbook existed to feed.
+The QA bootstrap checklist predates that retirement.
+
+Prod reads its own Secrets Manager through its own IRSA role — no bridge, no token to seed,
+nothing to uncomment. **Phase 7 and Phase 8 do not apply to op-prod**, and prod's
+`infra.yaml` deliberately omits `cross-cluster-eso` so it never acquires the dependency.
+
+Kept below for the historical record of what QA needed.
+
+### (historical) Manual steps the QA checklist documents as REQUIRED
 
 The checklist's own mission statement is *"Cluster comes up automatically from IaC **+ a
 single planned Octopus runbook sequence**"* — so a hands-off run was never the design.
