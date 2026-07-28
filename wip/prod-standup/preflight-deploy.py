@@ -108,6 +108,8 @@ def api(path):
     return r.json() if r.text else {}
 
 
+RELEASES = "--releases" in sys.argv
+
 blockers, warnings = [], []
 
 
@@ -144,6 +146,45 @@ print(f"  git-backed : {project.get('IsVersionControlled')}")
 if not prod_env_id:
     sys.exit(f"\nERROR: no environment named '{PROD_ENV_NAME}'. Run "
              f"add-prod-vars.py --list-envs.")
+
+# ---- --releases: what ref does a release actually get built from? -----------
+# The project is NOT git-backed, so a release pins PACKAGE versions rather than
+# a git ref. The branch/commit behind a package lives in Octopus build
+# information, published by whatever CI built it. This answers "if I cut a prod
+# release today, does it contain the multi-env work or master's older code?"
+
+if RELEASES:
+    rels = api(f"/api/{SPACE_ID}/projects/{project['Id']}/releases?take=10")
+    items = rels.get("Items", [])
+    if not items:
+        sys.exit("No releases found for this project.")
+    print(f"\n=== last {len(items)} release(s) ===")
+    for r in items:
+        print(f"\n  release {r.get('Version')}   assembled {r.get('Assembled')}")
+        for sp in r.get("SelectedPackages") or []:
+            pkg_ref = sp.get("PackageReferenceName") or sp.get("ActionName")
+            ver = sp.get("Version")
+            print(f"    package {pkg_ref} @ {ver}")
+            bi = api(f"/api/{SPACE_ID}/build-information?packageId={pkg_ref}&filter={ver}&take=5")
+            for b in (bi.get("Items") or [])[:2]:
+                if b.get("Version") != ver:
+                    continue
+                commits = b.get("Commits") or []
+                sha = (commits[0].get("Id") or "")[:8] if commits else "?"
+                print(f"      branch : {b.get('Branch') or '(none recorded)'}")
+                print(f"      commit : {sha}")
+                print(f"      build  : {b.get('BuildUrl') or '(none)'}")
+        deps = api(f"/api/{SPACE_ID}/releases/{r['Id']}/deployments?take=30")
+        seen = []
+        for d in deps.get("Items") or []:
+            n = envs.get(d.get("EnvironmentId"), d.get("EnvironmentId"))
+            if n not in seen:
+                seen.append(n)
+        print(f"    deployed to: {', '.join(seen) or '(never deployed)'}")
+    print("\nIf 'branch' is empty everywhere, the CI publishing these packages does not")
+    print("send build information — check the GitHub Actions workflow in iaac-talos, or")
+    print("read the package version scheme (it usually encodes the branch or run id).")
+    sys.exit(0)
 
 varset = api(f"/api/{SPACE_ID}/variables/{project['VariableSetId']}")
 variables = varset.get("Variables", [])
