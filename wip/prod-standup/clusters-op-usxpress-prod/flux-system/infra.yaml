@@ -426,8 +426,7 @@ spec:
   wait: true
   timeout: 5m
 ---
-# NOTE: dependsOn inferred (prometheus) — QA's exact spec for this one was not in
-# the local artifacts. Confirm against op-qa infra.yaml before merging.
+# Confirmed against op-qa infra.yaml:425-437 — identical spec.
 # Carries the etcd-snapshot-age alert, which is what catches a wrong etcd-backup
 # endpoint (INFRA-1623). Do not drop it.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
