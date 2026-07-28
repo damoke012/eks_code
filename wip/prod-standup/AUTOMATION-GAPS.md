@@ -80,11 +80,19 @@ or that block `exit 1`s a healthy cluster for a second reason.
 
 ---
 
-## G4 — SM secret wrappers must pre-exist ⚠️ NEEDS VERIFICATION
+## G4 — SM secret wrappers must pre-exist ✅ CONFIRMED, and it is a documented manual step
 
-`talosconfig-secret-import.tf` uses `import { for_each = var.enable_irsa ? {...} : {} }`.
-A Terraform `import` block against a secret that does not exist **fails the plan**.
-Greenfield prod has none of:
+`talosconfig-secret-import.tf` imports `var.talosconfig_secret_arn` into
+`module.irsa[0].aws_secretsmanager_secret.talosconfig` whenever `enable_irsa=true`. Its own
+comment states the requirement:
+
+> *NEW CLUSTERS (QA/prod): seed the placeholder SM secret via
+> `aws secretsmanager create-secret --name <cluster>/talosconfig --secret-string
+> PLACEHOLDER_POPULATED_BY_TERRAFORM_ON_FIRST_APPLY`. Set `var.talosconfig_secret_arn` to
+> that ARN. TF's talos_machine_secrets populates the real content on first apply.*
+
+So the first IRSA-enabled apply needs all three to already exist, with their ARNs (including
+AWS's random suffix) in Octopus variables:
 
 ```
 op-usxpress-prod/talosconfig
@@ -92,18 +100,37 @@ op-usxpress-prod/platform/grafana
 op-usxpress-prod/platform/grafana/azure-ad
 ```
 
-If import is unconditional on `enable_irsa`, the first IRSA-enabled apply fails until the
-three secrets exist. Automating means either creating them in a pre-step or making the
-import conditional on their existence.
+**This is a hand step by design — the file even calls it "replaces the previous manual
+'REMOVE this file before first apply' workflow", i.e. less manual, not zero.** For a
+hands-off rebuild it has to go.
 
-**Verify before planning any of this:**
-```bash
-git show refactor/multi-env-parameterization:deploy/terraform/talosconfig-secret-import.tf
-git show refactor/multi-env-parameterization:deploy/terraform/modules/irsa/grafana-secret.tf
-git show refactor/multi-env-parameterization:deploy/terraform/modules/irsa/talosconfig-secret.tf
-aws secretsmanager list-secrets --profile ops-controller --region us-east-2 \
-  --query "SecretList[?starts_with(Name,'op-usxpress-prod')].Name"
+### Fix — ensure-and-export in `deploy.ps1`, before terraform
+
+The ARNs are TF *inputs*, so nothing stops `deploy.ps1` from computing them. Ahead of
+`terraform init`, for each of the three secrets: describe it; create it with the placeholder
+if absent; restore it if scheduled for deletion; then export the ARN as the matching
+`TF_VAR_*`. The Octopus variables for those three ARNs become unnecessary.
+
+```powershell
+foreach ($s in @(
+    @{ Name = "$env:TF_VAR_cluster_name/talosconfig";                 Var = "TF_VAR_talosconfig_secret_arn" },
+    @{ Name = "$env:TF_VAR_cluster_name/platform/grafana";            Var = "TF_VAR_grafana_admin_secret_arn" },
+    @{ Name = "$env:TF_VAR_cluster_name/platform/grafana/azure-ad";   Var = "TF_VAR_grafana_azure_ad_secret_arn" })) {
+  $arn = aws secretsmanager describe-secret --secret-id $s.Name --query ARN --output text 2>$null
+  if (-not $arn -or $arn -eq "None") {
+    $arn = aws secretsmanager create-secret --name $s.Name `
+             --secret-string "PLACEHOLDER_POPULATED_BY_TERRAFORM_ON_FIRST_APPLY" `
+             --query ARN --output text
+  }
+  [Environment]::SetEnvironmentVariable($s.Var, $arn)
+}
 ```
+
+⚠️ **Teardown→rebuild trap:** `terraform destroy` schedules these secrets for deletion with
+a 7-30 day recovery window. A rebuild inside that window gets
+`InvalidRequestException: scheduled for deletion` from `create-secret` — the ensure step
+must call `restore-secret` first. This is precisely the kind of thing only a real
+destroy→rebuild cycle surfaces.
 
 ---
 
