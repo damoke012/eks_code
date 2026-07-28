@@ -382,12 +382,38 @@ for n in sorted(EXPECTED_EMPTY):
         warn("P4", f"{n} is NOT empty ({prod_vars[n]!r}). Phase 1 expects empty — a "
                    f"real ARN here means someone started phase 2.")
 
+# enable_irsa drives the whole AWS-facing half of the platform. Either state is
+# valid; what matters is that the variables that depend on it AGREE. A partial
+# flip is the dangerous case: IRSA on with value-seeding off imports the SM
+# wrappers and never populates them, so talosconfig stays PLACEHOLDER and
+# etcd-backup's ExternalSecret syncs GREEN against a useless value.
 irsa = str(prod_vars.get("TF_VAR_enable_irsa", "")).strip().lower()
-if irsa != "false":
-    blocker("P4", f"TF_VAR_enable_irsa is {irsa!r}, expected 'false' for phase 1. "
-                  f"True without the prod OIDC bootstrap gives a broken platform.")
+manage = str(prod_vars.get("TF_VAR_manage_platform_secret_values", "")).strip().lower()
+bucket = str(prod_vars.get("TF_VAR_irsa_oidc_bucket_name", "")).strip()
+
+if irsa == "true":
+    ok("enable_irsa=true — full platform: ESO, external-dns, velero, etcd-backup.")
+    if manage != "true":
+        blocker("P4", f"enable_irsa=true but manage_platform_secret_values={manage!r}. "
+                      f"seed_secret_values = enable_irsa && manage_platform_secret_values, "
+                      f"so the SM wrappers get imported and NEVER populated — "
+                      f"talosconfig stays PLACEHOLDER and etcd-backup syncs green "
+                      f"against it. Set both true.")
+    else:
+        ok("manage_platform_secret_values=true — TF will write real secret values.")
+    if not bucket:
+        blocker("P4", "enable_irsa=true but irsa_oidc_bucket_name is EMPTY — "
+                      "modules/irsa would build its OIDC discovery bucket unnamed.")
+    else:
+        ok(f"irsa_oidc_bucket_name={bucket}")
+elif irsa == "false":
+    ok("enable_irsa=false — AWS-free core only; nothing seeds, no cloud dependency.")
+    if manage == "true":
+        warn("P4", "manage_platform_secret_values=true while enable_irsa=false. "
+                   "Harmless (the AND gate is false either way) but misleading.")
 else:
-    ok("enable_irsa=false — phase 1 seeds nothing, no cloud dependency.")
+    blocker("P4", f"TF_VAR_enable_irsa is {irsa!r} — expected 'true' or 'false'. "
+                  f"deploy.ps1 and the module compare it as a string.")
 
 if not missing and not tbd and not blank:
     ok("variable set matches the phase-1 model.")
