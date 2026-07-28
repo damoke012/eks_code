@@ -96,14 +96,21 @@ kubectl -n kube-system rollout status ds/aws-iam-authenticator
 The DaemonSet's `init` container generates the server cert and writes the webhook kubeconfig to
 `/var/lib/aws-iam-authenticator/` on each control-plane node.
 
-**B2. Verify the file exists on *every* control-plane node.** QA has 3 (`10.10.82.25/.24/.177`). If it is
-missing on one, that node's apiserver will not come back in B3.
+**B2. Verify the file exists on *every* control-plane node.** QA has 3. If it is missing on one, that node's
+apiserver will not come back in B3.
+
+⚠️ **The image is distroless — no `ls`, `cat`, `wget`, no shell.** `kubectl exec` fails with
+`executable file not found in $PATH`. Verify from the logs instead, which is per-pod and therefore per-node:
 
 ```bash
-for n in 10.10.82.25 10.10.82.24 10.10.82.177; do
-  echo "== $n"; talosctl -n $n ls /var/lib/aws-iam-authenticator/
+for p in $(kubectl -n kube-system get po -l k8s-app=aws-iam-authenticator -o name); do
+  echo "== $(kubectl -n kube-system get $p -o jsonpath='{.spec.nodeName}')"
+  kubectl -n kube-system logs $p | grep -E "writing webhook kubeconfig|listening on"
 done
 ```
+
+Both lines, on all three nodes. Verified working on op-usxpress-qa 2026-07-28 (authenticator v0.7.18,
+nodes `talos-cp-op-qa-1/2/3`).
 
 **B3. Only then** apply `talos-machineconfig-patch.yaml` (adds the flag + the hostPath mount) and let the
 control plane roll. Watch node-by-node; stop if the first apiserver does not come back.
@@ -125,12 +132,27 @@ Worth stating because it removes a whole class of plumbing people expect: the to
 `sts:GetCallerIdentity` URL**. The server executes the caller's own signed request — it does not need its
 own IAM identity, so **no IRSA, no node role, no secret**. It only needs egress to STS.
 
-```bash
-# from a CP node, before B3
-curl -sS -o /dev/null -w '%{http_code}\n' https://sts.us-east-2.amazonaws.com/
+(The `{{EC2PrivateDNSName}}` template *would* need credentials. We don't use it — these are vSphere nodes.)
+
+**Expected log line, not an error:**
+
+```
+failed to get region from IMDS for handler configuration, defaulting to us-east-1
+Starting the h.ec2Provider.startEc2DescribeBatchProcessing
 ```
 
-(The `{{EC2PrivateDNSName}}` template *would* need credentials. We don't use it — these are vSphere nodes.)
+These are vSphere VMs with no EC2 metadata service, so the EC2 provider cannot self-locate. It initialises
+regardless and is unused. The side effect is that the server's default region is `us-east-1` while QA's AWS
+is `us-east-2`; v0.7.x accepts regional STS hosts, so this is normally fine. **If** token validation fails in
+§ E with an STS/endpoint complaint, add to the server container:
+
+```yaml
+          env:
+            - name: AWS_REGION
+              value: us-east-2
+```
+
+Do not reach for that pre-emptively — confirm the symptom first.
 
 ---
 
