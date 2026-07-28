@@ -268,10 +268,17 @@ else:
         ]
         if earlier_required:
             names = ", ".join(f"{i+1}.{ph.get('Name')!r}" for i, ph in earlier_required)
-            warn("P2", f"phase(s) {names} are REQUIRED and sit before production. "
-                       f"Octopus will not promote a release to prod until they have "
-                       f"succeeded for that release — so the op-prod release may need "
-                       f"a dev/qa deploy first. Plan for it or make them optional.")
+            # NOT treated as a blocker: observed behaviour on this project is that
+            # releases .201/.202/.207 all deployed straight to qa having never
+            # touched development, so the flag does not gate promotion here. The
+            # environments sit in OptionalDeploymentTargets. Verify with
+            # --releases rather than restructuring the lifecycle on a guess.
+            print(f"      phase(s) {names} are flagged REQUIRED and sit before "
+                  f"production.\n            Release history shows this project "
+                  f"promotes without them — confirm with\n            --releases. "
+                  f"Do not restructure the lifecycle preemptively; if Octopus\n"
+                  f"            does refuse, it refuses at release time and costs "
+                  f"nothing.")
 
 # ---- P3: no deploy step silently skips production ---------------------------
 
