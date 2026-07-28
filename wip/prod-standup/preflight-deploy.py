@@ -268,17 +268,16 @@ else:
         ]
         if earlier_required:
             names = ", ".join(f"{i+1}.{ph.get('Name')!r}" for i, ph in earlier_required)
-            # NOT treated as a blocker: observed behaviour on this project is that
-            # releases .201/.202/.207 all deployed straight to qa having never
-            # touched development, so the flag does not gate promotion here. The
-            # environments sit in OptionalDeploymentTargets. Verify with
-            # --releases rather than restructuring the lifecycle on a guess.
-            print(f"      phase(s) {names} are flagged REQUIRED and sit before "
-                  f"production.\n            Release history shows this project "
-                  f"promotes without them — confirm with\n            --releases. "
-                  f"Do not restructure the lifecycle preemptively; if Octopus\n"
-                  f"            does refuse, it refuses at release time and costs "
-                  f"nothing.")
+            # CONFIRMED IN THE UI 2026-07-28: the deploy dropdown for a fresh
+            # release offers dpl/development/qa and NOT production. Release
+            # history showing .207 deployed to qa without development does NOT
+            # disprove this — qa sits in an OPTIONAL phase, so it is reachable
+            # early. production sits in REQUIRED phase 4 and is not.
+            warn("P2", f"phase(s) {names} are REQUIRED and sit before production. "
+                       f"production will NOT appear in the deploy dropdown until "
+                       f"this release has a successful deployment to them. Deploy "
+                       f"to development first — with TfApply=false that is a plan "
+                       f"against dev's state and changes nothing.")
 
 # ---- P3: no deploy step silently skips production ---------------------------
 
