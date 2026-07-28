@@ -98,7 +98,19 @@ down for the first cut, or place prod on a different datastore with room.
    passed in. QA passes them as input ARNs → seed-first is the working assumption.
 6. `TfApply=true` → Octopus applies. Watch the task log: confirm the worker role
    authenticates and every `TF_VAR_*` lands (not defaulted/blank).
-7. Flux bootstrap against `op-prod` → platform stack reconciles.
+7. **Bootstrap Flux MANUALLY — Terraform no longer does it.** See
+   `PHASE1-FLUX-BOOTSTRAP-GAP.md`. `modules/flux` was reduced to a wait-loop plus two
+   `removed` blocks by PR #27 (Option B), which are no-ops on greenfield. Terraform
+   applies green and leaves a bare Talos cluster with no Flux. Apply the committed
+   manifests instead of running `flux bootstrap` — bootstrap is what rewrote
+   `kustomization.yaml` and caused the original drift cascade:
+   ```bash
+   terraform output -raw kubeconfig > /tmp/prod.kubeconfig
+   export KUBECONFIG=/tmp/prod.kubeconfig
+   cd ~/work/iaac-talos-flux-cluster && git checkout master && git pull --ff-only
+   kubectl apply -k clusters/op-usxpress-prod/flux-system/
+   flux get sources git && flux get kustomizations
+   ```
 
 ---
 
