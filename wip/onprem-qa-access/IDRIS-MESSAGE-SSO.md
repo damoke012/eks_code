@@ -1,8 +1,8 @@
 # Message to Idris — op-usxpress-qa access via AWS SSO
 
-⚠️ **Do not send until the QA Octopus deploy has landed and your own
-`kubectl auth whoami` returns `sso:doke@usxpress.com`.** Until the apiserver has the webhook flag, every
-step below fails with `Unauthorized` and he'll (reasonably) think it's broken.
+✅ **LIVE 2026-07-28.** `kubectl auth whoami` returns `sso:doke@usxpress.com` with groups
+`[onprem-platform-admins system:authenticated]`; authenticator 3/3 Running, 0 restarts, Flux-managed.
+Safe to send.
 
 Attach `wip/onprem-qa-access/aws-sso-webhook/client-kubeconfig-template.yaml`. Nothing in it is secret — no
 key, no cert, no token — so Teams/Slack/email are all fine.
@@ -32,7 +32,7 @@ aws-iam-authenticator version
 **2. Add the AWS profile** — append to `~/.aws/config`:
 
 ```ini
-[profile usx-qa]
+[profile op-qa]
 sso_start_url  = https://usxpress.awsapps.com/start
 sso_region     = us-east-1
 sso_account_id = 527101283767
@@ -40,11 +40,11 @@ sso_role_name  = op-qa-platform-admin
 region         = us-east-2
 ```
 
-⚠️ **`sso_role_name` must be exactly `op-qa-platform-admin`.** The cluster maps *that specific role*, not
-your user. If you sign in under a different permission set (AWSAdministratorAccess, v-dev, whatever) the
-cluster won't recognise you, and the error looks like a permissions bug rather than a wrong-profile problem.
-If you already have a `usx-qa` profile pointing at a different role, add this one under a new name
-(e.g. `op-qa`) and use that instead.
+⚠️ **Use a NEW profile name (`op-qa`), not your existing `usx-qa`** — and `sso_role_name` must be exactly
+`op-qa-platform-admin`. The cluster maps *that specific role*, not your user. This caught me: my `usx-qa`
+profile assumes `AWSAdministratorAccess`, so `aws sso login` succeeded, `sts get-caller-identity` looked
+perfectly fine, and the cluster returned `Unauthorized` — which reads like a permissions bug and isn't one.
+Check with `aws sts get-caller-identity --profile op-qa`; the ARN must contain `op-qa-platform-admin`.
 
 **3. Save the kubeconfig** I've attached to `~/.kube/op-usxpress-qa-sso.yaml`, then:
 
@@ -58,7 +58,7 @@ If you're already juggling kubeconfigs, keep it as its own file and colon-join r
 ## Daily use
 
 ```bash
-aws sso login --profile usx-qa    # once per 8 hours
+aws sso login --profile op-qa    # once per 8 hours
 kubectl get pods -A
 ```
 

@@ -76,12 +76,17 @@ spec:
               memory: 32Mi
             limits:
               memory: 128Mi
+          # The server binds 127.0.0.1 ONLY. With hostNetwork the kubelet probes the
+          # NODE ip unless host is set explicitly, so an httpGet without it fails
+          # forever — this CrashLooped all three pods ~140 times in 8h before it was
+          # spotted, presenting as intermittent "connection refused" auth failures.
+          # tcpSocket, not httpGet: /healthz is unverified on this build.
           livenessProbe:
-            httpGet:
-              path: /healthz
+            tcpSocket:
+              host: 127.0.0.1
               port: 21362
-              scheme: HTTPS
             initialDelaySeconds: 30
+            periodSeconds: 30
           volumeMounts:
             - name: state
               mountPath: /var/aws-iam-authenticator
