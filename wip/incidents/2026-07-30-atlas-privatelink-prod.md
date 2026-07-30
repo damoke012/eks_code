@@ -21,9 +21,13 @@ Escalate to MongoDB Atlas — there is no cluster-side fix.
 | Subnet NACLs | ✅ allow all, both directions |
 | Cilium network policy | ✅ none exist in the cluster |
 | Istio | ✅ test ran as UID 1337 (excluded from redirection) — still fails |
+| Node SG `eks-cluster-sg-usxpress-prod-…` | ✅ egress `0.0.0.0/0` all traffic |
+| Node subnet | ⚠️ `subnet-0f854a974f2658c9d` — **the same subnet as one endpoint ENI**, so this is local traffic: no routing, NAT or gateway involved |
 | **TCP from pod netns** | ❌ timeout on all 3 ENIs, port 1025 |
 | **TCP from node/host netns** | ❌ timeout — so not pod networking, policy, or masquerade |
 | **TCP ports 1024 / 1025 / 1026 / 27017** | ❌ all timeout — endpoint blackholes entirely |
+| **9 distinct nodes + a Connect pod + both Orders replicas** | ❌ all timeout — not node-specific |
+| Method control: same test → `172.20.0.10:53` | ✅ `OPEN` — the `/dev/tcp` probe is sound |
 
 **Atlas itself is UP.** All 27 Kafka Connect Mongo connectors report `READY=True`, and there is only one
 Atlas VPC endpoint in the account — so Connect reaches Atlas over the public path via NAT. Mongo is serving;
@@ -60,13 +64,20 @@ breaks reads outright.
 Note `PrivateDnsEnabled: false` on the VPC endpoint — Atlas is advertising the private hostnames from the
 replica-set config, not via a DNS override on our side.
 
-## Blast radius — CONFIRMED narrow
+## Blast radius — WIDER than first assessed
 
-Two separate Mongo estates:
+Two Mongo estates, and **Kafka Connect is on the Atlas one**:
 
-- **Atlas** (`*.1cr18.mongodb.net`) — `orders/order-api`. **Affected.**
+- **Atlas** (`mongodb.1cr18.mongodb.net`) — `orders/order-api` **and** all 27 `kafka` Mongo
+  source/sink connectors (`connect-secrets:Mongo_Enterprise_Connection_Uri` →
+  `mongodb+srv://…@mongodb.1cr18.mongodb.net/`). **All affected.**
 - **Self-hosted on-prem** (`USXMONGODB1/2/3.usxpress.com:27000`, `replicaSet=prod1`) —
-  `enterprise/ingestor-chart`. **Not affected** — different estate entirely, reached over corporate DNS.
+  `enterprise/ingestor-chart` only. **Not affected.**
+
+⚠️ **`KafkaConnector READY=True` / task `RUNNING` is NOT proof of connectivity.** A Connect task stays
+RUNNING on an idle or stale connection and only fails once it tries and exhausts retries. `connect-connect-0`
+itself cannot open TCP to the endpoint — so the Mongo CDC pipeline is very likely stalled even though every
+connector reports healthy. **Check topic lag / last committed offsets before telling anyone data is flowing.**
 
 The Mongo connection strings come from the Helm chart secrets, **not** from ExternalSecrets (the only ESO
 objects in `orders` are Kafka and Azure AD, all `SecretSynced`). So credential rotation is ruled out as a
@@ -105,7 +116,25 @@ moves the traffic out of the VPC and over NAT — a security-posture change that
 - **`rabbitmq-system`** — 4 pods in `ImagePullBackOff`.
 - **`wiz/wiz-sensor`** — stuck `Terminating` 11h.
 
-## Method note
+## Method note — wrong turns, and what corrected them
+
+1. **CoreDNS `i/o timeout` to the corp forwarders** — read as current, were **historical** (`--tail` surfaces
+   old lines). Zero in the last 30 min; the forwarders answer fine when queried directly. Nearly escalated a
+   corp-DNS outage that did not exist.
+2. **Connect rebalance churn** — disproved: `connect-connect-0` logged zero rebalances.
+3. **"Pods are on a VPC secondary CIDR so the endpoint SG blocks them"** — wrong: `172.24.0.0/16` is a Cilium
+   overlay, the VPC is only `10.16.0.0/20`, and traffic is masqueraded to the node IP.
+4. **"Kafka Connect proves Atlas is up"** — wrong twice. Connect uses the **same** Atlas cluster, and
+   `RUNNING` connectors prove nothing; `connect-connect-0` cannot reach the endpoint either.
+5. **"Node-specific egress fault"** — wrong: nine nodes fail identically and node SG egress is wide open.
+6. **Ad-hoc `kubectl run` probe pods in prod** — called out and stopped. Everything after that used existing
+   containers (`istio-proxy`, `cilium`) or the AWS API. See memory `no-test-pods-in-prod`.
+
+**What actually cut through:** the app's own stack trace (`connection pool is in paused state for
+pl-0-…:1025`), and validating the probe against a known-good target before trusting its failures. Triage
+started from cluster symptoms instead of the reported error, and that cost most of the session.
+
+
 
 Two dead ends were chased before the real error text arrived: CoreDNS `i/o timeout` lines to the corp
 resolvers (**historical** — `--tail` surfaced old entries; zero in the last 30 min, and the forwarders answer
