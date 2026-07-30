@@ -32,6 +32,46 @@ only the private path is broken.
 `10.16.6.113` is in the same `/20` as the node that tested it (`10.16.6.218`), so this isn't even a routing
 question — SG open, ENI present, nothing answering.
 
+## The mechanism (why there is no client-side workaround)
+
+Orders' connection string is the **standard SRV**, not a private-endpoint one:
+
+```
+mongodb+srv://***@mongodb.1cr18.mongodb.net/enterprise?maxPoolSize=300&readPreference=secondary&appName=orders-api-poc
+```
+
+DNS resolves correctly and publicly:
+
+```
+_mongodb._tcp.mongodb.1cr18.mongodb.net → mongodb-shard-00-0{0,1,2}.1cr18.mongodb.net:27017
+TXT                                     → authSource=admin&replicaSet=atlas-qy8w3t-shard-0
+mongodb-shard-00-00.1cr18.mongodb.net   → 89.194.134.107  (PUBLIC — same answer from inside the cluster)
+pl-0-us-east-2.1cr18.mongodb.net        → 10.16.6.113 / 10.16.8.87 / 10.16.11.221  (the VPC endpoint)
+```
+
+So the driver reaches a **public** seed, runs `hello`, and the replica-set members **advertise themselves as
+`pl-0-us-east-2.1cr18.mongodb.net:1024/1025/1026`**. The driver then abandons the public names for the
+advertised private ones — which blackhole. The pool for `:1025` pauses, and no client configuration can
+route around it, because the member list comes from Atlas, not from us.
+
+`readPreference=secondary` makes it worse: reads only ever target secondaries, so losing those members
+breaks reads outright.
+
+Note `PrivateDnsEnabled: false` on the VPC endpoint — Atlas is advertising the private hostnames from the
+replica-set config, not via a DNS override on our side.
+
+## Blast radius — CONFIRMED narrow
+
+Two separate Mongo estates:
+
+- **Atlas** (`*.1cr18.mongodb.net`) — `orders/order-api`. **Affected.**
+- **Self-hosted on-prem** (`USXMONGODB1/2/3.usxpress.com:27000`, `replicaSet=prod1`) —
+  `enterprise/ingestor-chart`. **Not affected** — different estate entirely, reached over corporate DNS.
+
+The Mongo connection strings come from the Helm chart secrets, **not** from ExternalSecrets (the only ESO
+objects in `orders` are Kafka and Azure AD, all `SecretSynced`). So credential rotation is ruled out as a
+cause.
+
 ## What to give MongoDB support
 
 - VPC endpoint: `vpce-06e6cad5b697c515a`
