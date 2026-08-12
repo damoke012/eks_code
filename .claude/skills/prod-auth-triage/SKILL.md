@@ -154,8 +154,14 @@ kubectl -n <ns> get cm <app>-chart -o jsonpath='{.data.VITE_AUTH_CLIENT_ID}{"\n"
 az ad app list --all --query "[?displayName=='dx-<env>-usxpress-<app>'].appId | [0]" -o tsv
 ```
 
-Different → the frontend is announcing an identity that no longer exists. **Fix is a redeploy of the
-UI**, which re-renders the ConfigMap. Sweep every SPA at once:
+Different → the frontend is announcing an identity that no longer exists. **The ConfigMap is
+generated from a hand-maintained Octopus project variable** (`VITE_AUTH_CLIENT_ID: '#{...}'` in
+`ui.yaml`) — nothing derives it from Terraform, so a redeploy just rewrites the stale value.
+Fix the Octopus variable per environment, then **create a NEW release**: Octopus snapshots variables
+at release creation, so re-deploying an existing release replays the old value and goes green having
+changed nothing. Proof it landed = a **new ReplicaSet** plus the corrected ID.
+
+Sweep every SPA at once:
 
 ```bash
 kubectl get cm -A -o json | jq -r '.items[] | .metadata.namespace as $ns | .metadata.name as $n |

@@ -46,19 +46,51 @@ authorization-code + PKCE — it is never assigned an **app role**. So
 That error sent everyone (including me) looking at role assignments that were never supposed to
 exist.
 
+## The redeploy didn't work — and that revealed the actual root cause
+
+Giovanni redeployed at 14:27. Octopus reported Success in 4 minutes. Nothing changed:
+
+```
+ConfigMap:   09df24f3…   unchanged
+ReplicaSet:  746ccc8ccd  same hash — nothing rolled
+Entra:       no activity that day
+```
+
+**Because the ConfigMap is generated from an Octopus project variable that is maintained by hand.**
+`ui.yaml` has `VITE_AUTH_CLIENT_ID: '#{VITE_AUTH_CLIENT_ID}'`, and `Projects-9242`'s variables held:
+
+```
+VITE_AUTH_CLIENT_ID   09df24f3-…   development
+VITE_AUTH_CLIENT_ID   09df24f3-…   qa          ← identical, which cannot be correct
+```
+
+Dev and QA have different registrations (`9fba6c78…`, `d099089a…`), so this had been wrong since it
+was first typed in. It only became visible when QA's registration was recreated on 10 August.
+Nothing derives it from Terraform, so **no redeploy could ever have fixed it.**
+
+`customer-profile-ui` and `xra-ui` matched their registrations — not because they're wired
+correctly, but because theirs have never been recreated.
+
 ## Fix
 
-**Redeploy `edi-management-ui`** — re-renders the ConfigMap from the live registration.
+1. Correct `VITE_AUTH_CLIENT_ID` in Octopus, per environment (done 2026-08-12).
+2. **Create a new release** — Octopus snapshots variables at release creation, so re-deploying the
+   existing release replays the old value and goes green having changed nothing.
+3. Verify a **new ReplicaSet** and the corrected ID in the ConfigMap.
+4. Test by signing in via the browser in a private window — not Postman.
 
-A `rollout restart` does **not** work: the wrong value is persisted in the ConfigMap, so restarted
-pods mount the same ConfigMap and read the same dead ID.
+`rollout restart` does not work either: the wrong value is persisted, not in memory.
 
 ## Follow-up
 
-1. **Bug:** a deploy can destroy an app registration and leave the SPA's ConfigMap pointing at the
-   destroyed identity. `customer-profile-ui` and `xra-ui` stayed in sync, so this isn't systemic —
-   worth finding what differed in the `edi-management-ui` run.
-2. Check dev — its UI was recreated the same afternoon (17:56 UTC).
+1. **Bug — SPA client IDs are hand-maintained.** Service-to-service scopes are generated from
+   Terraform (`AUTH__ApiAppScopes__*`); SPA `VITE_AUTH_CLIENT_ID` is not. Any app-registration
+   recreation therefore breaks a SPA silently and permanently, and no redeploy recovers it.
+   **This is the durable fix.**
+2. **`VITE_TASK_API_SCOPES` is also wrong** — `28af4f9d…` is QA's `edi-api`, scoped to *both*
+   development and qa, so dev points at QA's API identity.
+3. Check dev — its UI was recreated the same afternoon (17:56 UTC).
+4. Audit the other SPAs' Octopus variables before their registrations get recreated.
 
 ## Lesson
 

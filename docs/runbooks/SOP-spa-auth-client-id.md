@@ -36,24 +36,70 @@ az rest --method GET \
 
 ---
 
-## Step 2 — Fix
+## Step 2 — Find the source: it is an Octopus variable, NOT the ConfigMap
 
-**Redeploy the UI through Octopus.** That re-renders the ConfigMap from the live registration.
+**The ConfigMap is generated. Fixing it, or redeploying, will not help on its own.**
 
-### ⚠️ `rollout restart` does NOT fix this
+`ui.yaml` declares:
 
-The wrong value is **persisted in the ConfigMap**. Restarted pods mount the same ConfigMap and read
+```yaml
+configVars:
+  VITE_AUTH_CLIENT_ID: '#{VITE_AUTH_CLIENT_ID}'
+```
+
+That `#{...}` is substituted from an **Octopus project variable that is maintained by hand**. It is
+*not* generated from Terraform, so nothing updates it when an app registration is recreated. Every
+deploy faithfully writes the stale value back.
+
+```
+https://octopus.usxpress.io/app#/Spaces-245/projects/<project>/variables
+```
+
+Check `VITE_AUTH_CLIENT_ID` — there is one row per environment. Compare each against its live
+registration (`dx-<env>-usxpress-<app>`).
+
+> On 2026-08-12 both dev and QA held the *same* value, which cannot be correct — the two
+> environments have different registrations. It had been wrong since it was first typed in and only
+> surfaced when QA's registration was recreated.
+
+## Step 3 — Fix
+
+1. **Correct the Octopus variable**, per environment. Save.
+2. **Create a NEW release**, then deploy.
+
+### ⚠️ Octopus snapshots variables at release creation
+
+**Re-deploying an existing release replays the variable values from when that release was cut.** It
+will go green and change nothing — same ReplicaSet, same ConfigMap. This wasted a cycle on
+2026-08-12.
+
+Either create a new release, or on the existing release use **⋮ → Update Variables** before
+deploying.
+
+### ⚠️ `rollout restart` does NOT fix this either
+
+The wrong value is **persisted**, not in memory. Restarted pods mount the same ConfigMap and read
 the same dead ID.
 
 | Situation | Action |
 |---|---|
 | Config is right, process is stuck (e.g. Mongo pool paused) | `rollout restart` |
-| **Config itself is wrong** (this case) | **Redeploy** |
+| **Config value is wrong** (this case) | Fix the Octopus variable → **new release** |
 
 ### Do not use a Clean release
 
 It rebuilds the app registration again, breaking anything that consumes this app. See
 [SOP-mongo-connection-pool-paused](SOP-mongo-connection-pool-paused.md).
+
+## Step 4 — Verify it actually landed
+
+```bash
+kubectl -n <ns> get cm <app>-chart -o jsonpath='{.data.VITE_AUTH_CLIENT_ID}{"\n"}'
+kubectl -n <ns> get rs -o custom-columns=NAME:.metadata.name,CREATED:.metadata.creationTimestamp,REPLICAS:.status.replicas
+```
+
+**A new ReplicaSet plus the corrected ID is the proof.** The same ReplicaSet hash means nothing
+rolled, regardless of what Octopus reported.
 
 ---
 
@@ -96,8 +142,10 @@ Then it's not this. Check in order:
 | | |
 |---|---|
 | **First check** | ConfigMap `VITE_AUTH_CLIENT_ID` vs live app registration |
-| **Fix** | Redeploy the UI |
-| **Won't work** | `rollout restart` — the bad value is on disk, not in memory |
+| **Real source** | Octopus **project variable** — hand-maintained, not generated |
+| **Fix** | Correct the variable → **new release** (not a re-deploy) |
+| **Won't work** | `rollout restart`; re-deploying an existing release (stale variable snapshot) |
 | **Never** | Clean release; or judging a SPA by a `client_credentials` test |
+| **Proof** | New ReplicaSet **and** the corrected ID in the ConfigMap |
 
 Incident: `wip/incidents/2026-08-12-edi-spa-stale-client-id.md`
