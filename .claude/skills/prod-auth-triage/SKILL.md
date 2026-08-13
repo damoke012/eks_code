@@ -18,6 +18,25 @@ Most prod apps here run with `otel.logging.enabled: false` and **log no HTTP req
 App logs going quiet is NOT recovery. The only reliable source is the istio-proxy access log, which
 is **JSON** — `grep ' 401 '` silently returns zero.
 
+Access logging is already on mesh-wide (`accessLogFile: /dev/stdout`, `accessLogEncoding: JSON` in
+`istio-system/istio`; `mesh-default` Telemetry configures **tracing only**). So a namespace
+Telemetry to "enable" it is a no-op — don't add one. Verified 2026-08-13.
+
+**An empty access log is ambiguous**, and three things cause it. Rule them out in order:
+
+```bash
+kubectl -n <ns> get pods                      # logs deploy/X reads ONE pod — check each
+kubectl -n <ns> logs <pod> -c istio-proxy --since=30m --tail=30000 | wc -l
+kubectl -n <other-ns> logs deploy/<busy-app> -c istio-proxy --since=5m | wc -l   # known-good control
+```
+
+1. **No traffic.** Confirm from the caller's side before concluding anything.
+2. **Wrong pod** — `logs deploy/X` picks the first pod only.
+3. **~1 hour retention** — a 12h query returns the same lines as a 60m one.
+
+The sidecar may be a **native sidecar** under `initContainers`, so `.spec.containers[*]` shows only
+the app. `kubectl logs -c istio-proxy` still works.
+
 ```bash
 export KUBECONFIG=$HOME/.kube/prod.yaml
 kubectl cluster-info | head -1          # MUST read BF7BD089…
@@ -39,6 +58,28 @@ aws secretsmanager describe-secret --secret-id azure-app-dx-prod-usxpress-<app> 
 
 `Created` == `LastChanged` == today (seconds apart) → **destroyed and recreated**, new client ID.
 `recovery_window_in_days = 0`, so there is no version history and the old credential is gone.
+
+**This is the best fleet-wide fingerprint of a clean release** — independent of Octopus and Entra,
+and it works historically. Two shapes:
+
+| Shape | Meaning |
+|---|---|
+| `Created` old, `LastChanged` recent | **ordinary deploy** — secret rotated in place, registration untouched |
+| `Created` == `LastChanged`, both recent | **destroyed and rebuilt** — new client ID |
+
+`freight-allocation-api` created 2024-07-29 and still deploying 2026-07-16 is the first shape.
+`orders-api` created 2026-08-10T18:35 after years of existence is the second. Sweep the fleet:
+
+```bash
+for s in $(aws secretsmanager list-secrets --profile usx-prod \
+    --query 'SecretList[?starts_with(Name,`azure-app-dx-prod-usxpress`)].Name' --output text); do
+  aws secretsmanager describe-secret --secret-id "$s" --profile usx-prod \
+    --query '[Name,CreatedDate,LastChangedDate]' --output text
+done | sort -k2
+```
+
+A third witness: a clean release destroys the **Deployment object**, so all its ReplicaSets share
+one `creationTimestamp`. `kubectl -n <ns> get rs -o custom-columns=NAME:.metadata.name,CREATED:.metadata.creationTimestamp`
 
 ```bash
 aws cloudtrail lookup-events \
