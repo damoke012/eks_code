@@ -50,13 +50,21 @@ Every DX app's Entra identity is created by Terraform. There are two ways it rea
 | After the registration is recreated | Next release repairs it automatically | Stale forever |
 
 A browser cannot hold a client secret, so a SPA cannot read from the ESO-synced Secret the way a
-service does — its ID must arrive as plain build config, and nothing wires Terraform into
-`configVars`.
+service does — its ID arrives as plain build config instead.
 
-**Consequence:** an environment only needs a manual variable edit if the app that was rebuilt is a
-UI. Prod's August 2026 clean releases were all services (`orders-api`, `graphql-gateway`, `mosh`,
-…) so they self-healed; QA's was `edi-management-ui`, so it did not. Prod is not protected — it has
-simply never had a UI clean-released.
+**DX does supply that value.** The deploy runs Terraform, emits `client_id` as an output, and logs
+`Updating manifest with output variables`. Correctly-wired UIs (`fade-ui`, `ocs-ui`, `pam-ui`)
+declare **no auth entries** in `ui.configVars` — only API URLs — and self-heal when a registration
+is recreated.
+
+**The fault is an app-side override.** `edi-management-ui`, `customer-profile-ui` and `xra-ui`
+declare `VITE_AUTH_CLIENT_ID` in `configVars`, wired to a hand-maintained Octopus variable. That
+entry wins over DX's output, so the app keeps announcing whatever a human last typed.
+
+**Consequence:** a manual variable edit is only ever needed for an app that overrides DX. Prod's
+August 2026 clean releases were all services, so they self-healed; QA's was `edi-management-ui`,
+which overrides. `customer-profile-ui` and `xra-ui` carry the same override in **prod** and will
+fail identically the first time their registrations are rebuilt.
 
 Durable fix tracked in `wip/incidents/2026-08-13-bug-spa-client-id-hand-maintained.md`.
 

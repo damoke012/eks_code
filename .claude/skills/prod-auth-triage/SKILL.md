@@ -154,9 +154,22 @@ kubectl -n <ns> get cm <app>-chart -o jsonpath='{.data.VITE_AUTH_CLIENT_ID}{"\n"
 az ad app list --all --query "[?displayName=='dx-<env>-usxpress-<app>'].appId | [0]" -o tsv
 ```
 
-Different → the frontend is announcing an identity that no longer exists. **The ConfigMap is
-generated from a hand-maintained Octopus project variable** (`VITE_AUTH_CLIENT_ID: '#{...}'` in
-`ui.yaml`) — nothing derives it from Terraform, so a redeploy just rewrites the stale value.
+Different → the frontend is announcing an identity that no longer exists.
+
+**DX generates this value** — the deploy emits `client_id` from Terraform and logs `Updating
+manifest with output variables`. Healthy UIs (`fade-ui`, `ocs-ui`, `pam-ui`) declare no auth entry
+in `ui.configVars` and self-heal. The broken ones (`edi-management-ui`, `customer-profile-ui`,
+`xra-ui`) declare `VITE_AUTH_CLIENT_ID: '#{...}'`, which **overrides DX's output** with a
+hand-maintained Octopus variable — so a redeploy just rewrites the stale value.
+Confirm which pattern an app uses from its deploy manifest:
+
+```bash
+T=$(curl -s -H "X-Octopus-ApiKey: $K" "$O/api/$SP/deployments/<Deployments-N>" | jq -r .TaskId)
+curl -s -H "X-Octopus-ApiKey: $K" "$O/api/tasks/$T/details?verbose=true" \
+  | jq -r '[.. | objects | select(has("LogElements")) | .LogElements[]] | .[] | .MessageText' \
+  | grep -o 'ctx={.*}' | head -1 | sed 's/^ctx=//' | jq -r '.ui.configVars'
+```
+
 Fix the Octopus variable per environment, then **create a NEW release**: Octopus snapshots variables
 at release creation, so re-deploying an existing release replays the old value and goes green having
 changed nothing. Proof it landed = a **new ReplicaSet** plus the corrected ID.
