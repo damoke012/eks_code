@@ -81,6 +81,44 @@ correctly, but because theirs have never been recreated.
 
 `rollout restart` does not work either: the wrong value is persisted, not in memory.
 
+## Status as of 2026-08-13 — variable fixed, still not deployed
+
+Verified from four independent sources:
+
+| Source | Value |
+|---|---|
+| Entra live `dx-qa-usxpress-edi-management-ui` | `d099089a…` ✅ |
+| Octopus variable, qa scope (`Environments-941`) | `d099089a…` ✅ |
+| Release `97125` variable snapshot (assembled 08-10T17:41) | `09df24f3…` ❌ |
+| QA cluster ConfigMap | `09df24f3…` ❌ |
+
+Dev is now correctly scoped separately (`9fba6c78…`), so the shared-value defect is fixed.
+
+**No release has been assembled since 2026-08-10T17:41.** Every deployment since — including
+Giovanni's on 08-12 at 20:27 — replayed `Releases-97125` and its frozen snapshot. ReplicaSet
+`746ccc8ccd` has been unchanged since 2026-08-10T18:07:46Z.
+
+The team asked for the old client ID so they could "set it back and retry". **QA is already
+running the old ID** — it never changed — which is itself the proof that reverting cannot help.
+`09df24f3…` returns `Request_ResourceNotFound` from Graph; Microsoft deleted it on 10 August.
+
+Remaining action: ⋮ → **Update Variables** on `Releases-97125`, deploy to qa. Proof = new
+ReplicaSet hash + `d099089a…` in the ConfigMap.
+
+## Also found — dev EDI points at QA for everything except auth
+
+```
+VITE_API_GATEWAY                 dev + qa   https://api.edi.qa.usxpress.io/v1/
+VITE_TASK_API_SCOPES             dev + qa   28af4f9d-…/.default        ← QA's edi-api
+VITE_COMMITMENTS_API_BASE_URL    dev, qa    both → …qa.usxpress.io
+VITE_CONFIG_EDI_AUTO_ACCEPTANCE… dev, qa    both → …qa.usxpress.io
+VITE_API_BASE_URL                ALL        …/EnterpriseWebAPI_QA/api
+```
+
+Only `VITE_AUTH_CLIENT_ID` and `VITE_ENV` are genuinely per-environment. Dev testing therefore
+exercises QA's APIs and QA's data. May be deliberate if dev has no EDI backends — needs confirming
+with the team, and is a separate class of problem from the client-ID defect.
+
 ## Follow-up
 
 1. **Bug — SPA client IDs are hand-maintained.** Service-to-service scopes are generated from

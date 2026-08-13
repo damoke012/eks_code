@@ -36,6 +36,30 @@ az rest --method GET \
 
 ---
 
+## Why this only happens to UIs, never to APIs
+
+This is the question application teams push back on — *"why should we ever hand-edit a variable?"*
+They are right that they shouldn't. Here is why the two behave differently today.
+
+Every DX app's Entra identity is created by Terraform. There are two ways it reaches the app:
+
+| | Service (`-api`, `-handler`, `-cron`) | SPA (`-ui`, `type: spa`) |
+|---|---|---|
+| Path | Terraform → Secrets Manager → ESO → Secret → `envFrom` | Octopus variable → `#{VITE_AUTH_CLIENT_ID}` → ConfigMap |
+| Written by | Terraform, on every deploy | A person, once |
+| After the registration is recreated | Next release repairs it automatically | Stale forever |
+
+A browser cannot hold a client secret, so a SPA cannot read from the ESO-synced Secret the way a
+service does — its ID must arrive as plain build config, and nothing wires Terraform into
+`configVars`.
+
+**Consequence:** an environment only needs a manual variable edit if the app that was rebuilt is a
+UI. Prod's August 2026 clean releases were all services (`orders-api`, `graphql-gateway`, `mosh`,
+…) so they self-healed; QA's was `edi-management-ui`, so it did not. Prod is not protected — it has
+simply never had a UI clean-released.
+
+Durable fix tracked in `wip/incidents/2026-08-13-bug-spa-client-id-hand-maintained.md`.
+
 ## Step 2 — Find the source: it is an Octopus variable, NOT the ConfigMap
 
 **The ConfigMap is generated. Fixing it, or redeploying, will not help on its own.**
@@ -75,6 +99,32 @@ will go green and change nothing — same ReplicaSet, same ConfigMap. This waste
 
 Either create a new release, or on the existing release use **⋮ → Update Variables** before
 deploying.
+
+**Prove it from the API before arguing about it.** If the newest release's `Assembled` timestamp
+predates the variable correction, no deploy can have carried the new value:
+
+```bash
+: "${O:?}"; : "${K:?}"; : "${SP:=Spaces-245}"; P=Projects-9242   # <- the UI's project
+
+VL=$(curl -s -H "X-Octopus-ApiKey: $K" "$O/api/$SP/projects/$P" | jq -r '.Links.Variables')
+curl -s -H "X-Octopus-ApiKey: $K" "$O$VL" | jq -r '.Variables[]
+  | select(.Name|test("VITE_";"i"))
+  | "\(.Name)\t\((.Scope.Environment // ["ALL"])|join(","))\t\(.Value)"' | sort
+curl -s -H "X-Octopus-ApiKey: $K" "$O$VL" | jq -r '.ScopeValues.Environments[] | "\(.Id)\t\(.Name)"'
+
+curl -s -H "X-Octopus-ApiKey: $K" "$O/api/$SP/projects/$P/releases?take=6" \
+  | jq -r '.Items[] | "\(.Version)\t\(.Assembled)\t\(.Id)"'
+curl -s -H "X-Octopus-ApiKey: $K" "$O/api/$SP/deployments?projects=$P&take=6" \
+  | jq -r '.Items[] | "\(.Created)\t\(.EnvironmentId)\t\(.ReleaseId)\t\(.Id)"'
+```
+
+2026-08-12 EDI: variable correct, newest release assembled 08-10T17:41 — twenty-one minutes *before*
+the registration was destroyed — and every deployment since replayed that same `Releases-97125`.
+Variable right, snapshot stale, cluster unchanged.
+
+Also check the **scoping**, not just the value. EDI held one `VITE_AUTH_CLIENT_ID` row scoped to
+*both* development and qa, which cannot be correct — the two environments have different
+registrations. Look for any auth variable whose scope covers more than one environment.
 
 ### ⚠️ `rollout restart` does NOT fix this either
 
