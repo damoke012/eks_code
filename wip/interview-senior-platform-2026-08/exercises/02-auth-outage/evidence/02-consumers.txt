@@ -1,0 +1,13 @@
+# Every ConfigMap in the cluster carrying an AUTH__ApiAppScopes__* entry.
+# Format: namespace/configmap <TAB> scope-name <TAB> value
+#
+#   kubectl get cm -A -o json | jq -r '...'
+
+billing/billing-api-chart           orders     1a2b3c4d-0000-4aaa-8bbb-000000000001/.default
+routing/routing-gateway-chart       orders     1a2b3c4d-0000-4aaa-8bbb-000000000001/.default
+shipments/shipments-api-chart       orders     1a2b3c4d-0000-4aaa-8bbb-000000000001/.default
+notify/notify-handler-chart         orders     1a2b3c4d-0000-4aaa-8bbb-000000000001/.default
+pricing/pricing-api-chart           orders     1a2b3c4d-0000-4aaa-8bbb-000000000001/.default
+tenders/tender-api-chart            orders     1a2b3c4d-0000-4aaa-8bbb-000000000001/.default
+billing/billing-api-chart           shipments  7c3f0b18-2222-4eee-9fff-000000000003/.default
+routing/routing-gateway-chart       pricing    2e6a9d44-3333-4111-8222-000000000004/.default

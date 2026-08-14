@@ -1,0 +1,15 @@
+# Response codes served by missions-api, from the service mesh.
+#   sum by (response_code) (increase(http_requests_total{workload="missions-api"}[15m]))
+
+response_code   count
+200             1174
+400                0
+404                0
+5xx                0
+
+#   ...and the same query over 24h
+response_code   count
+200            98431
+400               12
+404              903
+5xx                0

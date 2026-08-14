@@ -1,0 +1,24 @@
+# Go
+bin/
+specguard
+*.test
+*.out
+
+# local kube state
+.kube/
+kubeconfig*
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+!exercises/**/state/*.tfstate.json
+
+# editor / OS
+.DS_Store
+.idea/
+*.swp
+
+# candidate scratch — never commit answers back to the template
+scratch/
+NOTES.md

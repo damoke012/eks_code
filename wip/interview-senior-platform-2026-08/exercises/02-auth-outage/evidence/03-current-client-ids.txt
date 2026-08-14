@@ -1,0 +1,12 @@
+# The client ID each application is CURRENTLY running with, read from the
+# platform's own secret store. Format: client-id <TAB> application
+#
+#   for s in $(aws secretsmanager list-secrets --query '...'); do ... done
+
+9f8e7d6c-1111-4ccc-9ddd-000000000002    orders-api
+7c3f0b18-2222-4eee-9fff-000000000003    shipments-api
+2e6a9d44-3333-4111-8222-000000000004    pricing-api
+5b81c7a0-4444-4222-9333-000000000005    billing-api
+c4d2f6e9-5555-4333-8444-000000000006    routing-gateway
+a7e3b1d8-6666-4444-9555-000000000007    notify-handler
+f2a8c05b-7777-4555-8666-000000000008    tender-api

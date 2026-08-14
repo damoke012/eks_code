@@ -1,0 +1,11 @@
+$ kubectl -n missions get pods
+NAME                            READY   STATUS    RESTARTS   AGE
+missions-api-6c4f9b7d55-4nqzk   2/2     Running   0          31m
+missions-api-6c4f9b7d55-9wxvt   2/2     Running   0          31m
+missions-api-6c4f9b7d55-lp2mr   2/2     Running   0          30m
+
+$ kubectl -n missions top pods
+NAME                            CPU(cores)   MEMORY(bytes)
+missions-api-6c4f9b7d55-4nqzk   41m          212Mi
+missions-api-6c4f9b7d55-9wxvt   38m          205Mi
+missions-api-6c4f9b7d55-lp2mr   44m          219Mi

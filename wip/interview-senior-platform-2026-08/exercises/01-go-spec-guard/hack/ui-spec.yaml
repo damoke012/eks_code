@@ -1,0 +1,16 @@
+# A browser application. Everything under configVars is served to the browser
+# as runtime configuration.
+name: orders-admin-ui
+octopus:
+  space: Acme
+  group: orders
+service:
+  targetPort: 9090
+ui:
+  type: spa
+  configVars:
+    VITE_API_GATEWAY: https://api.orders.example.internal/v1/
+    VITE_ENV: production
+    VITE_AUTH_CLIENT_ID: 4f1c8a92-77b3-4e50-9a61-0c2de5b71f38
+    VITE_AUTH_TENANT_ID: 8d2b6e14-59af-42c7-b0d3-71e4a9c58260
+    VITE_TASK_API_SCOPES: 6a90d3f5-1b27-4c88-9e4f-3d05b7a26c41/.default

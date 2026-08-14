@@ -1,0 +1,14 @@
+# A colleague ran a client-credentials token request from billing-api's
+# credentials against the orders API, and pasted the result.
+
+$ curl -s -X POST "https://login.example.com/<tenant>/oauth2/v2.0/token" \
+    -d "client_id=5b81c7a0-4444-4222-9333-000000000005" \
+    -d "client_secret=***" \
+    -d "grant_type=client_credentials" \
+    -d "scope=1a2b3c4d-0000-4aaa-8bbb-000000000001/.default"
+
+{"error":"invalid_scope",
+ "error_description":"AADSTS500011: The resource principal named
+  1a2b3c4d-0000-4aaa-8bbb-000000000001 was not found in the tenant.
+  This can happen if the application has not been installed by the
+  administrator of the tenant."}

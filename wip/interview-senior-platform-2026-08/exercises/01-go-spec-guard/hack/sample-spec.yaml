@@ -1,0 +1,6 @@
+name: orders-api
+octopus:
+  space: Acme
+  group: orders
+service:
+  targetPort: 8080
