@@ -1,7 +1,7 @@
-# kubectl -n missions logs -l app=missions-api --prefix --since=15m
+# kubectl -n sbx-missions logs -l app=sbx-missions-api --prefix --since=15m
 # (trimmed; one representative request shown end to end)
 
-[23:04:18 INF] Request starting POST /v1/missions/patch
+[23:04:18 INF] Request starting POST /v1/sbx-missions/patch
 [23:04:18 INF] Executing selected strategy: OutboundLegPatchStrategy for Order 8814402
 [23:04:18 INF] Need to create leg for Order 8814402
 [23:04:18 ERR] An error occurred while trying to execute a strategy: OutboundLegPatchStrategy for Order 8814402
@@ -11,12 +11,12 @@ System.NullReferenceException: Object reference not set to an instance of an obj
    at Missions.Application.Services.Strategies.OutboundLegPatchStrategy.Execute(Patch patch)
       in /src/Application/Services/Strategies/IOutboundLegPatchStrategy.cs:line 88
 [23:04:18 INF] Strategy execution completed for Order 8814402
-[23:04:18 INF] Request finished POST /v1/missions/patch - 200 - 41.8ms
+[23:04:18 INF] Request finished POST /v1/sbx-missions/patch - 200 - 41.8ms
 
-[23:04:31 INF] Request starting POST /v1/missions/patch
+[23:04:31 INF] Request starting POST /v1/sbx-missions/patch
 [23:04:31 INF] Executing selected strategy: OutboundLegPatchStrategy for Order 8814571
 [23:04:31 ERR] An error occurred while trying to execute a strategy: OutboundLegPatchStrategy for Order 8814571
 System.NullReferenceException: Object reference not set to an instance of an object.
    at Missions.Application.Services.LegService.CreateLeg(OrderInfo order, ILogger logger)
       in /src/Application/Services/LegService.cs:line 1209
-[23:04:31 INF] Request finished POST /v1/missions/patch - 200 - 38.2ms
+[23:04:31 INF] Request finished POST /v1/sbx-missions/patch - 200 - 38.2ms

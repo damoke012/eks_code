@@ -5,7 +5,7 @@
   "lineage": "b0c4a7de-51f2-4e19-9a8c-2f7d61b4e330",
   "outputs": {
     "config_maps": {
-      "value": ["missions-api-m-u"],
+      "value": ["sbx-missions-api-m-u"],
       "type": ["list", "string"]
     }
   },
@@ -19,26 +19,26 @@
         {
           "schema_version": 0,
           "attributes": {
-            "id": "missions/missions-api-m-u",
+            "id": "sbx-missions/sbx-missions-api-m-u",
             "metadata": [
               {
                 "annotations": null,
                 "generation": 0,
                 "labels": {
-                  "app": "missions-api",
+                  "app": "sbx-missions-api",
                   "platform.example.io/environment": "production",
-                  "platform.example.io/project": "missions-api",
+                  "platform.example.io/project": "sbx-missions-api",
                   "platform.example.io/revision": "0.4.12"
                 },
-                "name": "missions-api-m-u",
-                "namespace": "missions",
+                "name": "sbx-missions-api-m-u",
+                "namespace": "sbx-missions",
                 "resource_version": "3990951131",
                 "uid": "64bc0bec-9cbe-4eeb-be1e-1784cc0fecb2"
               }
             ],
             "data": {
               "DATASTORE__CLUSTER__SERVER": "datastore-pl-0.internal.example.net",
-              "DATASTORE__CLUSTER__CONNECTION_STRING": "mongodb+srv://datastore-pl-0.internal.example.net/?authSource=%24external&authMechanism=MONGODB-X509&retryWrites=true&w=majority&readPreference=secondaryPreferred&appName=missions-api",
+              "DATASTORE__CLUSTER__CONNECTION_STRING": "mongodb+srv://datastore-pl-0.internal.example.net/?authSource=%24external&authMechanism=MONGODB-X509&retryWrites=true&w=majority&readPreference=secondaryPreferred&appName=sbx-missions-api",
               "DATASTORE__CLUSTER__TLS_CRT_KEY_FILE": "/etc/certs/tls-combined.pem"
             }
           }

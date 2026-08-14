@@ -1,6 +1,6 @@
 # Exercise 03 — A production deploy that cannot finish
 
-**Time:** ~20 minutes · **Cluster:** local k3d, namespace `missions`
+**Time:** ~20 minutes · **Cluster:** local k3d, namespace `sbx-missions`
 
 ## The situation
 
@@ -9,7 +9,7 @@ It's 22:15. An application team needs a fix in production tonight. Their deploym
 The deployment tool runs Terraform to create the app's supporting resources, then a Helm release that waits for the rollout to become healthy before reporting success. Right now it is sitting there, not finishing.
 
 ```bash
-kubectl -n missions get pods
+kubectl -n sbx-missions get pods
 ```
 
 ## What we'd like from you

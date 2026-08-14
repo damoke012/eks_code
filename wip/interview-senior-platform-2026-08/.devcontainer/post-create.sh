@@ -25,48 +25,61 @@ log "Waiting for nodes"
 kubectl wait --for=condition=Ready nodes --all --timeout=180s || warn "nodes not ready yet"
 
 # ---------------------------------------------------------------- exercise 03
-log "Deploying Exercise 03 scenario"
+# SAFETY GATE. Everything below creates and mutates Kubernetes objects. It must
+# only ever run against the local k3d sandbox. If a real kubeconfig is active —
+# which happens the moment someone runs this outside a codespace — stop.
+ctx=$(kubectl config current-context 2>/dev/null || echo none)
+case "$ctx" in
+  k3d-sandbox) ;;
+  *)
+    printf '\n\033[1;31mREFUSING TO RUN.\033[0m current kube context is %q, expected "k3d-sandbox".\n' "$ctx" >&2
+    printf 'This script creates and patches objects. It is for the interview sandbox only.\n\n' >&2
+    exit 1
+    ;;
+esac
+
+log "Deploying Exercise 03 scenario (context: $ctx)"
 
 kubectl apply -f - >/dev/null <<'EOF'
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: missions
+  name: sbx-missions
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: missions-api-chart
-  namespace: missions
+  name: sbx-missions-api-chart
+  namespace: sbx-missions
 data:
   APPLICATION__ENVIRONMENT: production
-  APPLICATION__PROJECT: missions-api
+  APPLICATION__PROJECT: sbx-missions-api
   SERILOG__MINIMUMLEVEL__DEFAULT: Information
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: missions-api
-  namespace: missions
+  name: sbx-missions-api
+  namespace: sbx-missions
   labels:
-    app.kubernetes.io/name: missions-api
+    app.kubernetes.io/name: sbx-missions-api
 spec:
   replicas: 2
   revisionHistoryLimit: 5
   selector:
     matchLabels:
-      app.kubernetes.io/name: missions-api
+      app.kubernetes.io/name: sbx-missions-api
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: missions-api
+        app.kubernetes.io/name: sbx-missions-api
     spec:
       containers:
-        - name: missions-api
+        - name: sbx-missions-api
           image: nginx:1.27-alpine
           envFrom:
             - configMapRef:
-                name: missions-api-chart
+                name: sbx-missions-api-chart
           ports:
             - containerPort: 80
           readinessProbe:
@@ -76,14 +89,14 @@ spec:
 EOF
 
 log "Waiting for the healthy rollout to settle"
-kubectl -n missions rollout status deploy/missions-api --timeout=180s || warn "initial rollout slow"
+kubectl -n sbx-missions rollout status deploy/sbx-missions-api --timeout=180s || warn "initial rollout slow"
 
 # Now introduce the fault: a second envFrom pointing at a ConfigMap that does
 # not exist. Running pods are unaffected; the new ReplicaSet cannot start.
 log "Introducing the Exercise 03 fault"
-kubectl -n missions patch deploy missions-api --type=json -p='[
+kubectl -n sbx-missions patch deploy sbx-missions-api --type=json -p='[
   {"op":"add","path":"/spec/template/spec/containers/0/envFrom/-",
-   "value":{"configMapRef":{"name":"missions-api-m-u"}}}
+   "value":{"configMapRef":{"name":"sbx-missions-api-m-u"}}}
 ]' >/dev/null
 
 sleep 20
@@ -100,10 +113,10 @@ log "Environment summary"
 echo
 kubectl get nodes 2>/dev/null
 echo
-kubectl -n missions get pods 2>/dev/null
+kubectl -n sbx-missions get pods 2>/dev/null
 echo
 printf '\033[1;32mReady.\033[0m Open README.md to begin.\n\n'
 printf 'Expected state:\n'
 printf '  - 2 nodes Ready\n'
-printf '  - namespace "missions": 2 pods Running, 1 pod NOT starting\n'
+printf '  - namespace "sbx-missions": 2 pods Running, 1 pod NOT starting\n'
 printf '  - exercises/01-go-spec-guard builds and its tests pass\n\n'

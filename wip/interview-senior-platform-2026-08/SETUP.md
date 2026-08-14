@@ -41,7 +41,7 @@ is a broken build five minutes before a candidate joins.
 
 ```bash
 kubectl get nodes                                  # 2 Ready
-kubectl -n missions get pods                       # 2 Running, 1 CreateContainerConfigError
+kubectl -n sbx-missions get pods                       # 2 Running, 1 CreateContainerConfigError
 cd exercises/01-go-spec-guard && go test ./...     # ok
 go run . hack/ui-spec.yaml                         # must exit 0 BEFORE the candidate fixes it
 ```

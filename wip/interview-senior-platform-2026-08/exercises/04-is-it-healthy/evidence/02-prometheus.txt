@@ -1,5 +1,5 @@
-# Response codes served by missions-api, from the service mesh.
-#   sum by (response_code) (increase(http_requests_total{workload="missions-api"}[15m]))
+# Response codes served by sbx-missions-api, from the service mesh.
+#   sum by (response_code) (increase(http_requests_total{workload="sbx-missions-api"}[15m]))
 
 response_code   count
 200             1174

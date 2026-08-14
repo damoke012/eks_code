@@ -73,11 +73,11 @@ changing your mind halfway through is not.
 ```bash
 which go kubectl helm terraform jq
 kubectl get nodes
-kubectl -n missions get pods
+kubectl -n sbx-missions get pods
 cd exercises/01-go-spec-guard && go test ./...
 ```
 
-Expected: five tools found, 2 nodes Ready, three pods in `missions` (two `Running`, one
+Expected: five tools found, 2 nodes Ready, three pods in `sbx-missions` (two `Running`, one
 `CreateContainerConfigError`), and the Go tests passing.
 
 Then follow `.interviewer/INTERVIEWER_GUIDE.md`. Timings, model answers and the rubric are all
@@ -117,7 +117,7 @@ demonstrating something real.
 Have them open `/workspaces/.codespaces/.persistedshare/creation.log` and read the actual error.
 If it's mid-interview, hand over yours rather than rebuilding.
 
-**`kubectl -n missions get pods` shows nothing.**
+**`kubectl -n sbx-missions get pods` shows nothing.**
 `post-create.sh` didn't finish. Re-run it: `bash .devcontainer/post-create.sh`. It's idempotent and
 takes about ninety seconds on a warm container.
 
@@ -125,22 +125,30 @@ takes about ninety seconds on a warm container.
 The patch step ran before the first rollout settled. Apply it by hand:
 
 ```bash
-kubectl -n missions patch deploy missions-api --type=json -p='[
+kubectl -n sbx-missions patch deploy sbx-missions-api --type=json -p='[
   {"op":"add","path":"/spec/template/spec/containers/0/envFrom/-",
-   "value":{"configMapRef":{"name":"missions-api-m-u"}}}
+   "value":{"configMapRef":{"name":"sbx-missions-api-m-u"}}}
 ]'
 ```
 
 **They already solved Exercise 03 and you want it back.**
 ```bash
-kubectl -n missions delete cm missions-api-m-u --ignore-not-found
-kubectl -n missions rollout restart deploy/missions-api
+kubectl -n sbx-missions delete cm sbx-missions-api-m-u --ignore-not-found
+kubectl -n sbx-missions rollout restart deploy/sbx-missions-api
 ```
 
 **`kubectl get nodes` shows a real cluster.**
-You're in your own WSL terminal, not the codespace. Check `kubectl config current-context` before
-running anything. **Never run these manifests against a real cluster** — they're written for k3d
-and the namespace names deliberately echo production ones.
+You're in your own terminal, not the codespace. **Always check the context first:**
+
+```bash
+kubectl config current-context     # must read k3d-sandbox
+```
+
+Every object here is namespaced `sbx-missions` precisely so it cannot collide with a real
+namespace, and `post-create.sh` refuses to run unless the context is `k3d-sandbox`. Neither
+protects you from running a *solve* command by hand in the wrong terminal, so check first —
+Exercise 03's answer involves deleting a ConfigMap, and that is not a command you want to get
+wrong twice.
 
 **Go tests fail with a module error.**
 `cd exercises/01-go-spec-guard && go mod tidy`. The codespace has network; this only happens if the

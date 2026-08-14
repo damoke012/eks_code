@@ -9,7 +9,7 @@ Open a terminal (**View → Terminal**) and run:
 ```bash
 go version                    # go1.24 or later
 kubectl get nodes             # 2 nodes Ready
-kubectl -n missions get pods  # 2 pods, one of them unhappy
+kubectl -n sbx-missions get pods  # 2 pods, one of them unhappy
 terraform version             # v1.10.x
 jq --version                  # jq-1.7 or later
 ```

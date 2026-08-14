@@ -25,7 +25,7 @@ which is most of this job.
 2. Verify:
    ```bash
    kubectl get nodes                              # 2 Ready
-   kubectl -n missions get pods                   # 2 Running, 1 CreateContainerConfigError
+   kubectl -n sbx-missions get pods                   # 2 Running, 1 CreateContainerConfigError
    cd exercises/01-go-spec-guard && go test ./... # ok
    go run . hack/ui-spec.yaml                     # exits 0 — this is the bug they must catch
    ```
@@ -202,17 +202,17 @@ someone reaching for a familiar action rather than reading.
 ## Exercise 03 — the stuck rollout (what actually happened)
 
 **Ground truth:** the deploy tool's Terraform step and its Helm step disagreed about a ConfigMap.
-The new pod template consumes `missions-api-m-u` via `envFrom`; that ConfigMap did not exist; the
+The new pod template consumes `sbx-missions-api-m-u` via `envFrom`; that ConfigMap did not exist; the
 new pod could not start; Helm waited for a rollout that could never complete and eventually timed
 out.
 
 **The diagnosis path we want:**
 
 ```bash
-kubectl -n missions get pods                       # 2 Running (old RS), 1 not starting (new RS)
-kubectl -n missions describe pod <the stuck one>   # Error: configmap "missions-api-m-u" not found
-kubectl -n missions get rs                         # two ReplicaSets, one scaled up and stuck
-kubectl -n missions get cm                         # missions-api-chart exists, missions-api-m-u doesn't
+kubectl -n sbx-missions get pods                       # 2 Running (old RS), 1 not starting (new RS)
+kubectl -n sbx-missions describe pod <the stuck one>   # Error: configmap "sbx-missions-api-m-u" not found
+kubectl -n sbx-missions get rs                         # two ReplicaSets, one scaled up and stuck
+kubectl -n sbx-missions get cm                         # sbx-missions-api-chart exists, sbx-missions-api-m-u doesn't
 ```
 
 **The question that separates candidates** is the second one in the exercise: *is the service up?*
@@ -234,7 +234,7 @@ jq -r '.resources[] | select(.type=="kubernetes_config_map_v1") | .instances[].a
 then `kubectl apply` a ConfigMap with that data and those labels. The stuck pod starts within
 about thirty seconds, the rollout completes.
 
-**Recovery — the other defensible answer:** `kubectl -n missions rollout undo deploy/missions-api`.
+**Recovery — the other defensible answer:** `kubectl -n sbx-missions rollout undo deploy/sbx-missions-api`.
 That reverts to the pod template without the missing reference. It works, and it is a legitimate
 mitigation. Push on it: the intended configuration is now missing, the platform will reapply the
 same broken state on the next deploy, and you've bought time rather than fixed anything. A

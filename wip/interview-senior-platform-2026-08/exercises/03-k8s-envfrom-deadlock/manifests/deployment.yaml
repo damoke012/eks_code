@@ -3,25 +3,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: missions-api
-  namespace: missions
+  name: sbx-missions-api
+  namespace: sbx-missions
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: missions-api
+      app.kubernetes.io/name: sbx-missions-api
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: missions-api
+        app.kubernetes.io/name: sbx-missions-api
     spec:
       containers:
-        - name: missions-api
+        - name: sbx-missions-api
           image: nginx:1.27-alpine
           envFrom:
             - configMapRef:
-                name: missions-api-chart
+                name: sbx-missions-api-chart
             - configMapRef:
-                name: missions-api-m-u
+                name: sbx-missions-api-m-u
           ports:
             - containerPort: 80
