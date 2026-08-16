@@ -33,10 +33,7 @@
             "settings": {
                 "go.toolsManagement.autoUpdate": false,
                 "go.useLanguageServer": true,
-                "terminal.integrated.defaultProfile.linux": "bash",
-                "files.exclude": {
-                    "**/.interviewer": true
-                }
+                "terminal.integrated.defaultProfile.linux": "bash"
             }
         }
     },

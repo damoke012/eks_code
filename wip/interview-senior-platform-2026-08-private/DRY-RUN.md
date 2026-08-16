@@ -158,7 +158,7 @@ A senior candidate raises this unprompted.
 
 ### Step 18. Read the real content out of Terraform state
 ```bash
-cd ~/interview-senior-platform/exercises/03-k8s-envfrom-deadlock   # or wherever the repo is
+cd /workspaces/interview-senior-platform/exercises/03-k8s-envfrom-deadlock   # or wherever the repo is
 jq -r '.resources[] | select(.type=="kubernetes_config_map_v1")
        | .instances[].attributes.data' state/common-datastore.tfstate.json
 ```
@@ -231,7 +231,7 @@ that have found the real design space.
 
 ### Step 26. Leave it clean
 ```bash
-cd ~/interview-senior-platform
+cd /workspaces/interview-senior-platform
 git checkout .
 git status --short          # should be empty
 kubectl -n sbx-missions get pods   # 2 Running, 1 CreateContainerConfigError

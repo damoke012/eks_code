@@ -1,8 +1,19 @@
 # Publishing and maintaining this repo
 
-This template lives in `wip/` in the platform repo (corporate) and is **published to personal
-GitHub** so external candidates can use it. The two copies are kept in sync by hand — deliberately,
-so that nothing corporate can be pushed by accident.
+There are **two** repos and they must not be merged:
+
+| | Contents | Who sees it |
+|---|---|---|
+| `interview-senior-platform` (candidate) | `README.md`, `exercises/`, `.devcontainer/`, `.gitignore` | the candidate, as a read-only collaborator |
+| `interview-senior-platform-private` | this file, `INTERVIEWER_GUIDE.md`, `CANDIDATE-WORKFLOW.md`, `recreate.sh`, `ex01-solved/` | you |
+
+Both live on **personal** GitHub and are kept in sync from `wip/` by hand — deliberately, so that
+nothing corporate can be pushed by accident.
+
+⚠️ The interviewer guide was previously shipped inside the candidate repo under `.interviewer/`,
+hidden by a `files.exclude` setting in `devcontainer.json`. That is not a control: `cat
+.interviewer/INTERVIEWER_GUIDE.md` defeats it, and the candidate can read the repo on github.com
+anyway. Model answers and the rubric live in the private repo now. Keep it that way.
 
 ## First publish
 
@@ -31,7 +42,14 @@ cd /path/to/interview-senior-platform
 rsync -a --delete \
   --exclude='.git' \
   /path/to/platform-repo/wip/interview-senior-platform-2026-08/ .
-# re-run the sanitisation check, then commit and push
+
+# leak check — BOTH must print "clean"
+grep -rIniE 'usxpress|usx-|octopus\.usx|smfd|risingwave|variant-inc|\.usxpress\.|vibin' . \
+  --exclude-dir=.git || echo "clean"
+ls -a | grep -E 'INTERVIEWER_GUIDE|CANDIDATE-WORKFLOW|SETUP\.md|recreate\.sh|ex01-solved|\.interviewer' \
+  || echo "clean"
+
+# then commit and push
 ```
 
 ## Verifying a change before an interview
@@ -56,5 +74,5 @@ Keep the pattern:
 - Built from a **real incident**, with every identifier replaced
 - `EXERCISE.md` states the time, the task, and *what we're watching for* — candidates deserve to
   know the criteria
-- Model answers and grading go in `.interviewer/`, never in the exercise
+- Model answers and grading go in **this private repo**, never in the candidate repo
 - Re-run the sanitisation grep before pushing

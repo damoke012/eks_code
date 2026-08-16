@@ -1,8 +1,8 @@
 # Interviewer Guide — Senior Platform Engineer (2026-08)
 
-**Interviewer-only.** `.interviewer/` is hidden from the candidate's file explorer via
-`files.exclude` in `devcontainer.json`, but it is not secret — they could open it. Brief them not
-to, or keep this directory in a private companion repo if you want hard separation.
+**Interviewer-only. Never publish this file to the candidate repo.** It lives in the private
+companion repo for exactly that reason: it was previously shipped inside the candidate repo, hidden
+only by a `files.exclude` setting, which any candidate defeats with a single `cat`.
 
 Built for the backfill round. It deliberately closes the three gaps identified in
 `wip/hiring/vibin-backfill-screen-review.md`:
@@ -85,6 +85,25 @@ they can carry.
 ---
 
 ## Exercise 01 — Go (model answer and signals)
+
+### Opening it — run `recreate.sh` on your screen first
+
+There is no failed deploy for the candidate to look at, because in the real incident there wasn't
+one: every deploy was green. Rather than let them read that in prose, show it. **In your own
+codespace, on the shared screen, ~30 seconds:**
+
+```bash
+cd /workspaces/interview-senior-platform/exercises/01-go-spec-guard
+/workspaces/interview-senior-platform-private/recreate.sh "$PWD/hack/ui-spec.yaml"
+```
+
+Beats to narrate: step 3 (the ConfigMap is a verbatim copy, so the hand-typed value beats the
+generated one), step 4 (`exit=0` — the cheapest moment to catch it, and nothing looked), step 5
+(nothing in the platform compares those two values), step 7 (two green redeploys, value unchanged).
+Then hand over: *"make the platform refuse this manifest."*
+
+**Never run it in the candidate's codespace and never copy it into the candidate repo** — steps 5
+to 7 are Exercise 02's answer.
 
 ### What the rule should look like
 

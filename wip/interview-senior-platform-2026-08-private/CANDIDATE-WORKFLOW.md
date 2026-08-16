@@ -80,7 +80,7 @@ cd exercises/01-go-spec-guard && go test ./...
 Expected: five tools found, 2 nodes Ready, three pods in `sbx-missions` (two `Running`, one
 `CreateContainerConfigError`), and the Go tests passing.
 
-Then follow `.interviewer/INTERVIEWER_GUIDE.md`. Timings, model answers and the rubric are all
+Then follow `INTERVIEWER_GUIDE.md` (this repo, alongside this file). Timings, model answers and the rubric are all
 there.
 
 | Min | Section |
@@ -158,6 +158,7 @@ post-create step was interrupted.
 
 ## Related
 
-- [`.interviewer/INTERVIEWER_GUIDE.md`](.interviewer/INTERVIEWER_GUIDE.md) — probes, model answers, rubric
-- [`SETUP.md`](SETUP.md) — publishing this repo and keeping it updated
-- [`README.md`](README.md) — what the candidate sees
+- [`INTERVIEWER_GUIDE.md`](INTERVIEWER_GUIDE.md) — probes, model answers, rubric
+- [`SETUP.md`](SETUP.md) — publishing the candidate repo and keeping it updated
+- [`recreate.sh`](recreate.sh) — run on your screen to open Exercise 01
+- `README.md` in the **candidate** repo — what the candidate sees
