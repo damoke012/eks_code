@@ -18,8 +18,26 @@ log "Creating cluster 'sandbox' (2 nodes)"
 if ! k3d cluster list 2>/dev/null | grep -q '^sandbox'; then
   k3d cluster create sandbox --agents 1 --wait --timeout 180s
 else
+  log "Cluster 'sandbox' already exists - starting it"
   k3d cluster start sandbox >/dev/null 2>&1 || true
 fi
+
+# Always write the kubeconfig, on BOTH paths.
+#
+# `k3d cluster create` writes one and switches context. `k3d cluster start` does
+# not. A rebuilt container gets a fresh empty ~/.kube/config, so on any rebuild
+# the cluster comes back running with nothing pointing at it - kubectl then
+# falls back to localhost:8080 and the safety gate below refuses to run.
+log "Writing kubeconfig and switching context"
+k3d kubeconfig merge sandbox --kubeconfig-merge-default --kubeconfig-switch-context >/dev/null \
+  || warn "could not merge kubeconfig"
+
+log "Waiting for the API server to answer"
+for _ in $(seq 1 60); do
+  kubectl get --raw /healthz >/dev/null 2>&1 && break
+  sleep 2
+done
+kubectl get --raw /healthz >/dev/null 2>&1 || warn "API server still not answering"
 
 log "Waiting for nodes"
 kubectl wait --for=condition=Ready nodes --all --timeout=180s || warn "nodes not ready yet"

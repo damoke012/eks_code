@@ -117,6 +117,20 @@ demonstrating something real.
 Have them open `/workspaces/.codespaces/.persistedshare/creation.log` and read the actual error.
 If it's mid-interview, hand over yours rather than rebuilding.
 
+**`kubectl config current-context` says "not set" after a container rebuild.**
+The cluster is running, but nothing points at it — `k3d cluster start` doesn't write a kubeconfig
+and a rebuilt container starts with an empty one. `post-create.sh` handles this now; if you're on
+an older copy:
+
+```bash
+k3d kubeconfig merge sandbox --kubeconfig-merge-default --kubeconfig-switch-context
+bash .devcontainer/post-create.sh
+```
+
+**A `devcontainer.json` edit triggers a rebuild, and a rebuild destroys the cluster.**
+Budget three minutes and re-verify afterwards. Never edit that file inside the last ten minutes
+before an interview.
+
 **`kubectl -n sbx-missions get pods` shows nothing.**
 `post-create.sh` didn't finish. Re-run it: `bash .devcontainer/post-create.sh`. It's idempotent and
 takes about ninety seconds on a warm container.
