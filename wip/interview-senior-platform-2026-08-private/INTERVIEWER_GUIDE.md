@@ -242,7 +242,64 @@ drain, an eviction, an autoscaler consolidation, and they cannot restart.
 A senior candidate says this unprompted and treats it as the reason to hurry. A mid candidate
 diagnoses correctly and misses that the healthy pods are load-bearing and fragile.
 
-**Recovery — the intended answer:** read the ConfigMap's real content from
+### Where the values live, and what counts as reading them
+
+The three `DATASTORE__CLUSTER__*` values exist in **exactly one place**: `state/common-datastore.tfstate.json`.
+`manifests/deployment.yaml` names the missing ConfigMap in its `envFrom` block but does not contain
+its contents. Confirm with:
+
+```bash
+grep -rln 'datastore-pl-0\|DATASTORE__CLUSTER' .    # -> state/ only
+```
+
+That is the point of the exercise: a candidate who never opens `state/` has nowhere to get the
+values but their imagination.
+
+**`jq` is not the test.** Any of these are equally good — grade the *reading*, not the tool:
+
+```bash
+jq -r '.resources[] | select(.type=="kubernetes_config_map_v1") | .instances[].attributes.data' state/common-datastore.tfstate.json
+grep -oE '"DATASTORE__[A-Z_]+": "[^"]*"' state/common-datastore.tfstate.json
+```
+
+...or simply opening the file in the editor. Only be concerned if the values appear without the
+candidate having looked anywhere.
+
+### The values, for your reference
+
+| Key | Value |
+|---|---|
+| `DATASTORE__CLUSTER__SERVER` | `datastore-pl-0.internal.example.net` |
+| `DATASTORE__CLUSTER__TLS_CRT_KEY_FILE` | `/etc/certs/tls-combined.pem` |
+| `DATASTORE__CLUSTER__CONNECTION_STRING` | `mongodb+srv://datastore-pl-0.internal.example.net/?authSource=%24external&authMechanism=MONGODB-X509&retryWrites=true&w=majority&readPreference=secondaryPreferred&appName=sbx-missions-api` |
+
+Labels on the ConfigMap: `app=sbx-missions-api`,
+`platform.example.io/environment=production`, `platform.example.io/project=sbx-missions-api`,
+`platform.example.io/revision=0.4.12`.
+
+Two details candidates get wrong from memory: the connection string ends `appName=sbx-missions-api`
+(not `missions-api`), and `kubectl create configmap` has no flag for labels, so a kubectl-only
+recovery needs a second `kubectl label` command. Dropping the labels is a partial answer - the
+platform's record and the cluster still disagree.
+
+**Recovery - the kubectl route**, if the candidate prefers it (equally valid):
+
+```bash
+kubectl -n sbx-missions create configmap sbx-missions-api-m-u \
+  --from-literal=DATASTORE__CLUSTER__SERVER='datastore-pl-0.internal.example.net' \
+  --from-literal=DATASTORE__CLUSTER__TLS_CRT_KEY_FILE='/etc/certs/tls-combined.pem' \
+  --from-literal=DATASTORE__CLUSTER__CONNECTION_STRING='mongodb+srv://datastore-pl-0.internal.example.net/?authSource=%24external&authMechanism=MONGODB-X509&retryWrites=true&w=majority&readPreference=secondaryPreferred&appName=sbx-missions-api'
+
+kubectl -n sbx-missions label configmap sbx-missions-api-m-u \
+  app=sbx-missions-api \
+  platform.example.io/environment=production \
+  platform.example.io/project=sbx-missions-api \
+  platform.example.io/revision=0.4.12
+```
+
+Order matters: `label` before `create` fails with `NotFound`.
+
+**Recovery - the manifest route:** read the ConfigMap's real content from
 `state/common-datastore.tfstate.json` and recreate it exactly.
 
 ```bash
