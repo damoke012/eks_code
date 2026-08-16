@@ -50,7 +50,7 @@ They get an email and a GitHub notification within about thirty seconds.
 >    `<your-gh-user>/interview-senior-platform` → **Accept**
 > 2. Go to https://github.com/<your-gh-user>/interview-senior-platform
 > 3. **Code → Codespaces → Create codespace on main**
-> 4. It takes about three minutes to build. Do this **before** we start if you can
+> 4. It takes about five minutes to build. Do this **before** we start if you can
 > 5. When VS Code loads, open `README.md`
 >
 > You'll share your screen over Teams. Use Chrome, Edge or Firefox. There's nothing to prepare and
@@ -58,7 +58,16 @@ They get an email and a GitHub notification within about thirty seconds.
 > google anything you'd google at work.
 
 **4. Spin up your own codespace and leave it running.** If theirs fails to build you can hand over
-yours and lose two minutes instead of the round.
+yours and lose two minutes instead of the round. Clone the interviewer material into it — this is
+what makes yours the interviewer copy:
+
+```bash
+git clone https://github.com/<your-gh-user>/interview-senior-platform-private.git \
+  /workspaces/interview-private
+```
+
+Clone it to `/workspaces/interview-private`, **outside** the candidate repo. Nested inside, one
+`git add .` puts the answer key into the repo you hand to candidates.
 
 **5. Decide your Copilot policy and tell them at the start.** Allowing it is realistic and shows
 whether they can supervise a suggestion. Disallowing it tests raw ability. Either is defensible;
