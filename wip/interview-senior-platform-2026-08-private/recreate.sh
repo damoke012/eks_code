@@ -29,20 +29,14 @@ hdr "2. What the manifest pins, by hand"
 grep -nE 'CLIENT_ID|TENANT_ID|SCOPES' "$SPEC"
 
 hdr "3. The ConfigMap the platform renders — a verbatim copy, nothing inspects it"
-python3 - "$SPEC" <<'PY'
-import sys, re
-inblk = False
-print("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-admin-ui-chart\ndata:")
-for l in open(sys.argv[1]).read().splitlines():
-    if re.match(r'^\s*configVars:', l):
-        inblk = True
-        continue
-    if inblk:
-        m = re.match(r'^\s{4}(\S+):\s*(.+)$', l)
-        if not m:
-            break
-        print(f"  {m.group(1)}: {m.group(2)}")
-PY
+awk '
+  /^[[:space:]]*configVars:/ { inblk = 1
+    print "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: orders-admin-ui-chart\ndata:"
+    next }
+  inblk {
+    if ($0 ~ /^    [^ ].*:/) { sub(/^    /, "  "); print } else { exit }
+  }
+' "$SPEC"
 echo "   -> served to the browser as runtime configuration"
 
 hdr "4. What the guard says about that manifest"
