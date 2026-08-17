@@ -1,0 +1,55 @@
+// PARTIAL TRANSCRIPTION from screen share, 2026-08-17. Not a git diff.
+// Reproduced verbatim, including errors. Do not tidy.
+
+func validateUI(ui *UI) []error {
+    var problems []error
+
+    if ui.Type != "spa" {
+        problems = append(problems,
+            fmt.Errorf("ui.type: %q is not a supported ui type", ui.Type))
+    }
+
+    // TODO(exercise): see EXERCISE.md.
+    var uuidpattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12$}`  ,
+)
+    func looksLikeManagedIdentity(value string) bool {
+         if uuidpattern.MatchString(value){
+            return true
+         }
+         if strings.HasSuffix(value,"/default"){
+
+             clientID := strings.TrimSuffix(value,"/default")
+
+             if uuidpattern.MatchString(clientID){
+                return true
+             }
+
+
+         }
+         return false
+
+    }
+
+    func validateUIConfigVars(configVars map[string]string, errors *[]error){
+
+    for key, value := range configVars{
+
+        if looksLikeManagedIdentity(value){
+
+            *errors = append(
+                *errors,
+                fmt.Errorf("ui.configVars". %s containsa hardcode identity value '%s'. "+"Client ID and OAuth identities are managed by the platform "+"
+            "and should not be mannually configured", key, value,
+            )
+        }
+    }
+   }
+   func(s*Spec) Validate () []error {
+
+    var errors []errors
+
+    if s.UI! =nil {
+        validateUIConfigVars(s.UI.ConfigVars, &errors,)
+    }
+    return errors
+   }
