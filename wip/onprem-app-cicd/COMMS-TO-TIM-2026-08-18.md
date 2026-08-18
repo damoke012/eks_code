@@ -1,5 +1,11 @@
 # Message to Tim — RisingWave pipeline promotion (draft for Idris)
 
+> ⚠️ **REVISED 2026-08-18 (second pass).** The first draft of this document was itself
+> wrong: it claimed the ETL "exists only as DDL applied by hand" and that we "couldn't
+> find it in a repository". `variant-inc/risingwave-pipeline` has held the SQL since May
+> 2026, with a working three-stage pipeline. See `EXISTING-CICD-DELTA-2026-08-18.md`.
+> The suggested message below has been rewritten accordingly.
+
 Idris drafted a message to Tim on 2026-08-18 asking what pipelines exist on op-dev and
 what the promotion process is. Held before sending. This document says why, and gives
 him a version that reflects what we already know and what now exists.
@@ -55,44 +61,40 @@ are this sprint's work.
 
 > Hi Tim,
 >
-> As we bring the RisingWave QA environment up (INFRA-1624), we've built the delivery path
-> that will carry your pipeline from dev into QA and then prod. Before we wire your ETL
-> into it, I want to check our understanding with you rather than guess.
+> As we bring RisingWave up on the QA cluster (INFRA-1624), I want to check a couple of
+> things with you before we wire the pipeline promotion, because I think our picture of
+> what runs where may be out of date.
 >
-> **What we see on op-dev today.** In the `risingwave` namespace: a Kafka source reading
-> from Confluent Cloud (Avro via schema registry), feeding `brand_mv_raw`, then
-> `brand_mv_state` (dedupe on MAX offset), then `brand_mv_flat`. No sinks defined. The DDL
-> appears to have been applied interactively — we couldn't find it in a repository.
+> **What we can see.** `variant-inc/risingwave-pipeline` carries the brand pipeline under
+> `pipelines/Brand/` — sources, ingest, transform and sink — and the platform team's
+> workflow applies files from that repo to the `risingwave-2` namespace on op-dev.
 >
-> Is that the whole picture, and is `brand_mv_flat` the intended endpoint, or are sinks
-> coming?
+> **What doesn't line up.** `400-sink.rw` defines sinks, but the `risingwave` namespace on
+> op-dev currently has none — the pipeline there runs Kafka source → `brand_mv_raw` →
+> `brand_mv_state` → `brand_mv_flat` and stops. So the repo and the running cluster have
+> drifted apart, and I'd rather not promote a shape that was never actually run.
 >
-> **Three things only you can answer:**
-> 1. Where is the canonical copy of that SQL today — a repo, a file, or the cluster itself?
-> 2. Are there objects on dev that should *not* be promoted (experiments, scratch views)?
-> 3. Who owns the Confluent Cloud credentials, and who can rotate them?
+> 1. Is `pipelines/Brand/` the intended definition, with the sinks yet to be applied? Or
+>    has the live pipeline moved on and the repo is behind?
+> 2. Is `brand_mv_flat` the endpoint today, or are the sinks the direction of travel?
+> 3. Are there objects on dev that should *not* be promoted — experiments, scratch views?
 >
-> **One item that needs attention independently of any of this.** The Confluent SASL
-> username and password are stored in the source definition in plaintext — they're
-> readable from `rw_catalog.rw_sources` by anyone with a SQL session on the cluster. We'd
-> like to move them into AWS Secrets Manager, delivered to the cluster by External Secrets
-> and referenced from the DDL via `SECRET` rather than inlined. That means rotating them,
-> so we'll need to coordinate with whoever owns them.
+> **One item that needs attention regardless.** The Confluent SASL username and password
+> are stored in the source definition in plaintext — readable from `rw_catalog.rw_sources`
+> by anyone with a SQL session on the cluster. We'd like to move them into Secrets Manager,
+> deliver them with External Secrets, and reference them from the DDL via `SECRET` instead
+> of inlining. That means rotating them, so we need to know who owns them.
 >
-> **What we're building, so you know what to expect.** Your pipeline becomes an artefact:
-> the SQL is versioned in a repository, built into an image by GitHub Actions, and pushed
-> to our shared registry. Argo CD deploys it to QA, and promoting to prod is a pull
-> request that moves the *same* image — nothing is rebuilt between environments, so what
-> passes QA is bit-for-bit what runs in prod. You'll get a view in Argo CD showing your
-> deployment's status, separate from the RisingWave platform itself.
+> **What we're adding.** The existing pipeline applies SQL from an in-cluster runner on
+> op-dev, which is the right design there but can't reach the QA or prod clusters — they
+> have no runner. So for QA and prod we're packaging the same SQL into an image that Argo
+> CD applies in-cluster, and promoting the identical image forward by digest. Nothing about
+> your dev workflow changes; you'd get a view in Argo CD showing the QA and prod deploys.
 >
 > We own the credentials, the namespace and the guardrails. You own the SQL and what the
 > pipeline does.
 >
-> Happy to walk through it whenever suits — I think 20 minutes on a call would beat a
-> thread.
-
----
+> Worth 20 minutes on a call rather than a thread, if you have it.
 
 ## Note on the Entra secret
 
