@@ -79,6 +79,26 @@ ECR repository policy (`lazy/api`, representative):
 
 Any principal in org `o-yza5l1xhrc` may pull. Nothing to add.
 
+## Status
+
+**QA COMPLETE 2026-08-18.** iaac-talos-flux-platform#94 (rbac ARN) and
+iaac-talos-flux-cluster#34 (Kustomization) merged. `ecr-credentials` Ready,
+`ecr-pull-secret` distributed to 20 namespaces, `app-namespaces` Ready,
+`app-risingwave` created with ambient/PSA-restricted/quota, `argocd-apps` Ready,
+ApplicationSet `onprem-apps` generating `risingwave-etl`.
+
+One wrinkle worth knowing on any rebuild: the standalone `ecr-credentials-sync-init`
+Job races the ServiceAccount annotation. It failed with `InvalidIdentityToken`
+(QA-issued token presented against dev's role ARN, whose account has no matching OIDC
+provider), exhausted `backoffLimit: 3`, and — because Jobs are immutable — pinned the
+Kustomization at Failed permanently. The scheduled 5-minute runs succeeded throughout.
+Fix is to delete the Job and reconcile; Flux recreates it against the settled
+annotation. Worth adding an init-container wait or dropping the init Job entirely.
+
+**PROD STILL UNWIRED.** Same two changes needed, with
+`937464026810:role/op-usxpress-prod-ecr-credentials-sync` (verified to exist, trusting
+d3rxit8f4yvshu.cloudfront.net, AmazonEC2ContainerRegistryReadOnly attached).
+
 ## The fix
 
 **1. Platform repo — per branch, NOT a merge.** `iaac-talos-flux-platform`,
