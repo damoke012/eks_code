@@ -1,0 +1,7 @@
+-- Smoke test payload. Proves the whole delivery chain without touching any real pipeline:
+-- build -> ECR by digest -> cross-account pull -> Argo CD sync -> Job runs in-cluster ->
+-- reaches risingwave-frontend over cluster DNS and authenticates.
+--
+-- Creates nothing and changes nothing.
+SELECT version();
+SELECT 1 AS smoke_ok;

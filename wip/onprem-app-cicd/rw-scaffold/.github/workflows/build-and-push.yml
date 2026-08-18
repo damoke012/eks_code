@@ -1,0 +1,97 @@
+# Build the pipeline image and push it to the shared ECR BY DIGEST, then open the QA
+# promotion PR.
+#
+# Runs on GitHub-hosted runners: building needs no cluster access. This is separate from
+# pipeline.yaml, which applies SQL directly to risingwave-2 on op-usxpress-dev via the
+# in-cluster ARC runner. That path is unchanged and still the way dev iterates. This one
+# produces an artefact that QA and prod can run, because neither has an ARC runner.
+name: build-and-push
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'pipelines/**'
+      - 'smoke/**'
+      - 'build/**'
+      - '.github/workflows/build-and-push.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write        # for the OIDC token
+  contents: write        # to open the promotion PR
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 064859874041.dkr.ecr.us-east-2.amazonaws.com
+  ECR_REPOSITORY: risingwave/etl-pipeline
+  PUSH_ROLE: arn:aws:iam::064859874041:role/gha-risingwave-etl-ecr-push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The role's trust is pinned to refs/heads/master. A run from any other branch gets
+      # an OIDC token whose sub claim does not match and STS denies it — which surfaces as
+      # a permissions error, not a branch error. Deliberate: see ONPREM_CICD.md §5.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PUSH_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          provenance: false
+
+      - name: Report
+        run: |
+          echo "### Image pushed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${ECR_REGISTRY}/${ECR_REPOSITORY}@${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "This digest is what QA and then prod will run. Nothing is rebuilt between them." >> $GITHUB_STEP_SUMMARY
+
+  promote-to-qa:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump the QA overlay digest
+        run: |
+          set -euo pipefail
+          f=deploy/overlays/qa/kustomization.yaml
+          sed -i "s|digest: sha256:.*|digest: ${{ needs.build.outputs.digest }}|" "$f"
+          if git diff --quiet "$f"; then
+            echo "digest unchanged — nothing to promote"; exit 0
+          fi
+          git diff "$f"
+
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: promote/qa-${{ github.sha }}
+          title: "promote: QA -> ${{ github.sha }}"
+          commit-message: "promote: QA to ${{ needs.build.outputs.digest }}"
+          body: |
+            Built from `${{ github.sha }}`.
+
+            Digest `${{ needs.build.outputs.digest }}`.
+
+            Merging this makes Argo CD apply that digest on **op-usxpress-qa**, in namespace
+            `app-risingwave`. The Job runs as a sync hook, so its logs appear in the Argo UI.
+
+            Prod is a separate PR against `deploy/overlays/prod/` using the **same** digest.
+            Nothing is rebuilt between environments.

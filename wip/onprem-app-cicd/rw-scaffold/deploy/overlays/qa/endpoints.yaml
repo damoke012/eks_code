@@ -1,0 +1,17 @@
+# Per-cluster coordinates. The Job runs in app-risingwave and reaches ACROSS to the
+# RisingWave instance the platform runs in the `risingwave` namespace on op-usxpress-qa.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: etl-pipeline-endpoints
+data:
+  PIPELINE_DIR: /pipeline/smoke        # switch to /pipeline/pipelines/Brand for the real run
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"
+  RW_DB:   dev
+  RW_USER: root
+  PG_HOST: postgres-postgresql.risingwave.svc.cluster.local
+  PG_PORT: "5432"
+  PG_DB:   postgres
+  PG_USER: postgres
+  APPLIED_BY: argocd-qa
