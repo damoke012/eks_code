@@ -2,7 +2,7 @@
 
 **Created in Jira 2026-08-18.** Epic **INFRA-1632**, sprint **6155 "On-Prem App Delivery"**
 on board 322, **2026-08-17 → 2026-08-28** (state: future — start it when ready).
-The preceding sprint 6088 "UI Sprint 2" had its end date moved to 2026-08-15. Stories INFRA-1633 … INFRA-1643, all
+The preceding sprint 6088 "UI Sprint 2" had its end date moved to 2026-08-14 (Friday). Stories INFRA-1633 … INFRA-1643, all
 parented to the epic and in the sprint.
 
 | # | Key | Ticket |
