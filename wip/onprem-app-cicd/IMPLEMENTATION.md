@@ -122,13 +122,25 @@ Istio enrolment. An app team cannot conjure a namespace by editing an Applicatio
 
 ## Unknowns — verify before committing to dates
 
-1. **Does `ecr-credentials-sync` cover a brand-new namespace?** It populates `ecr-pull-secret` into
-   29 namespaces on dev, but we haven't read how it selects them. If it's a static list, PR 2 must
-   add `app-risingwave` to it — otherwise the Job cannot pull and the failure looks like a broken
-   image reference.
-   ```bash
-   kubectl -n ecr-credentials get cronjob ecr-credentials-sync -o yaml | grep -A20 'args\|command'
-   ```
+1. ~~Does `ecr-credentials-sync` cover a brand-new namespace?~~ **RESOLVED 2026-08-18 — yes.**
+   It enumerates namespaces dynamically from the API, excluding only `kube-system`, `kube-public`,
+   `kube-node-lease` and `flux-system`, then creates/updates `ecr-pull-secret` in each. It also
+   patches every ServiceAccount in every namespace with `imagePullSecrets`. So `app-risingwave` is
+   covered within 5 minutes of creation, with no list to maintain. PR 2 is unblocked.
+
+   Three observations on that CronJob, none blocking, all worth a ticket:
+   - It runs `image: public.ecr.aws/aws-cli/aws-cli:latest` — a **mutable tag on a job that holds
+     cluster-wide secret-write permissions**. That is the exact thing PR 6's digest policy exists to
+     prevent, in the platform's own code. It also explains the three Failed jobs from ~60 days ago:
+     a `:latest` roll is the obvious candidate.
+   - It depends on `python3` being present inside the aws-cli image. Nothing guarantees that across
+     a `:latest` change.
+   - Patching **every** ServiceAccount in **every** namespace fights GitOps: any SA whose definition
+     is managed by Flux or Helm will drift, get reverted, and be re-patched on the next 5-minute
+     run. Worth checking for churn:
+     ```bash
+     kubectl get events -A --field-selector reason=ServiceAccountUpdated 2>/dev/null | head
+     ```
 2. **QA and prod have not been through the dev discovery.** Unknown whether `ecr-credentials` is
    wired, whether Argo CD has the same `apps` project, whether ARC exists.
    ```bash

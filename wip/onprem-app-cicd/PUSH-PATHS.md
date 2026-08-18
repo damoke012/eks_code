@@ -123,19 +123,18 @@ plus a `kustomization.yaml` on that branch listing `application-prod.yaml` only.
 
 ---
 
-## Before PR 2 — one thing to check
+## Before PR 2 — checked, nothing to do
 
-Does `ecr-credentials-sync` populate a namespace it has never seen? If it works from a static list,
-`app-risingwave` must be added to it or the Job cannot pull, and the failure looks like a bad image
-reference rather than a missing credential.
+`ecr-credentials-sync` enumerates namespaces dynamically (excluding `kube-system`, `kube-public`,
+`kube-node-lease`, `flux-system`) and also patches every ServiceAccount with `imagePullSecrets`.
+`app-risingwave` is covered within 5 minutes of creation. Verified on op-dev 2026-08-18.
+
+After PR 2 lands, confirm it actually happened before wondering why a pull fails:
 
 ```bash
-export KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml
-kubectl -n ecr-credentials get cronjob ecr-credentials-sync -o yaml \
-  | sed -n '/containers:/,/volumeMounts\|restartPolicy/p'
+kubectl -n app-risingwave get secret ecr-pull-secret
+kubectl -n app-risingwave get sa default -o jsonpath='{.imagePullSecrets}' ; echo
 ```
-
-If it enumerates all namespaces, nothing to do. If it reads a list, that list is another line in PR 2.
 
 ## Order summary
 
