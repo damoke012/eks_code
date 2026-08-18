@@ -1,0 +1,50 @@
+---
+# ==============================================================================
+# App delivery — namespaces and Argo CD Applications.
+#
+# `app-namespaces` creates the app-* namespaces the platform owns: quota, PSA
+# labels, Istio enrolment. Argo CD does NOT create them (CreateNamespace=false on
+# every Application) so an app team cannot conjure a namespace by editing a
+# manifest.
+#
+# `argocd-apps` is kept separate from `argocd-config` deliberately: config is
+# platform policy (AppProjects, admin secret) and rarely changes; apps churn as
+# teams onboard. Separate Kustomizations mean an app mistake cannot roll back the
+# guardrails.
+# ==============================================================================
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: app-namespaces
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/app-namespaces
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+    - name: ecr-credentials        # so the pull secret lands in the new namespace
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd-apps
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  path: ./infrastructure/argocd-apps
+  prune: true
+  wait: true
+  timeout: 5m
+  dependsOn:
+    - name: argocd-config          # AppProjects must exist before an Application references one
+    - name: app-namespaces         # destination namespace must exist first

@@ -1,0 +1,27 @@
+# The RisingWave ETL pipeline on op-usxpress-qa.
+#
+# Lives in the `apps` AppProject, whose destinations are restricted to `app-*`.
+# It therefore cannot target `risingwave` or `risingwave-2` — the RisingWave
+# *platform* namespaces, which Flux owns. That separation is structural.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: risingwave-etl-qa
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/variant-inc/risingwave-pipeline.git
+    targetRevision: main
+    path: deploy/overlays/qa
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-risingwave
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false      # the platform creates app-* namespaces, not Argo

@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Argo CD Applications for this cluster.
+#
+# This directory is PER-BRANCH: the platform repo carries one branch per cluster
+# (op-dev / op-qa / op-prod), so op-qa lists application-qa.yaml and op-prod lists
+# application-prod.yaml. Do not list both on one branch.
+resources:
+  - application-qa.yaml
