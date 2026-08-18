@@ -95,9 +95,21 @@ Kustomization at Failed permanently. The scheduled 5-minute runs succeeded throu
 Fix is to delete the Job and reconcile; Flux recreates it against the settled
 annotation. Worth adding an init-container wait or dropping the init Job entirely.
 
-**PROD STILL UNWIRED.** Same two changes needed, with
-`937464026810:role/op-usxpress-prod-ecr-credentials-sync` (verified to exist, trusting
-d3rxit8f4yvshu.cloudfront.net, AmazonEC2ContainerRegistryReadOnly attached).
+**PROD COMPLETE 2026-08-18.** iaac-talos-flux-platform#95 and
+iaac-talos-flux-cluster#35 merged. `ecr-credentials` Ready, init Job and scheduled Job
+both Complete, pull secret distributed to 18 namespaces, `app-namespaces` Ready,
+`app-risingwave` created. `argocd-apps` is deliberately absent on prod — only QA has an
+ApplicationSet; prod app delivery needs its own when the app side is ready.
+
+Verified via break-glass: prod has NO SSO path (`aws-iam-authenticator` is wired only on
+op-usxpress-qa), so access was `op-usxpress-prod/talosconfig` from Secrets Manager
+937464026810 → `talosctl -n 10.10.82.52 kubeconfig`. Prod's Flux Git token was healthy,
+unlike QA's. Getting dev and prod onto the SSO path is separate outstanding work.
+
+⚠️ A trailing-newline trap: `clusters/op-usxpress-prod/flux-system/infra.yaml` had no
+final newline, so an appended `---` landed inside the preceding comment and silently
+merged two documents. Caught pre-merge by `awk '/^---$/{c++}'` vs `grep -c '^kind:'`
+vs `kubectl apply --dry-run=client -o name | wc -l` — all three must agree.
 
 ## The fix
 
