@@ -178,3 +178,21 @@ created), no new Flux wiring, no new Argo CD Application file.
   self-hosted registry is a stateful component to run HA, back up and upgrade for no stated benefit.
 - **The existing ARC runner stays** for what it was built for — ad-hoc SQL and anything needing
   in-cluster network — but nothing in the promotion path depends on it.
+
+## ECR side created 2026-08-18 (by CLI, not Terraform)
+
+```
+repository  064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/etl-pipeline
+            IMMUTABLE tags, scan-on-push, lifecycle: untagged>7d, keep 50
+push role   arn:aws:iam::064859874041:role/gha-risingwave-etl-ecr-push
+            trust: repo:variant-inc/risingwave-pipeline:ref:refs/heads/main
+            perms: GetAuthorizationToken (*), push actions on that one repository ARN
+```
+
+⚠️ **These are unmanaged resources.** `terraform/ecr-app-repos.tf` describes exactly this
+shape and should be `terraform import`ed once the IaC repo owning account 064859874041 is
+identified (INFRA-1633). Until then the state of these two objects lives only here.
+
+⚠️ The role's trust is pinned to `variant-inc/risingwave-pipeline` on `refs/heads/main`.
+If the app repository is named differently, update the trust policy or the push will fail
+with a confusing `Not authorized to perform sts:AssumeRoleWithWebIdentity`.
