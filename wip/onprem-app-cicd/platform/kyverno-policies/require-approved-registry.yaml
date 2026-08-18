@@ -1,0 +1,42 @@
+# Images in app-* namespaces must come from the shared ECR registry.
+#
+# Start in Audit. Flip to Enforce once the first app is deployed and the policy
+# report is clean — there are zero app-* workloads today, so the window for
+# adopting this cheaply is now.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-approved-registry
+  annotations:
+    policies.kyverno.io/title: Approved registry only
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/description: >-
+      Workloads in app-* namespaces may only run images from the shared ECR
+      registry (064859874041.dkr.ecr.us-east-2.amazonaws.com). Platform
+      namespaces are unaffected — they run upstream charts by design.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: ecr-only
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaceSelector:
+                matchExpressions:
+                  - key: kubernetes.io/metadata.name
+                    operator: In
+                    values: ["app-risingwave"]
+      validate:
+        message: >-
+          Images must come from 064859874041.dkr.ecr.us-east-2.amazonaws.com.
+          Build in CI and push to ECR; do not reference upstream registries directly.
+        pattern:
+          spec:
+            =(ephemeralContainers):
+              - image: "064859874041.dkr.ecr.us-east-2.amazonaws.com/*"
+            =(initContainers):
+              - image: "064859874041.dkr.ecr.us-east-2.amazonaws.com/*"
+            containers:
+              - image: "064859874041.dkr.ecr.us-east-2.amazonaws.com/*"

@@ -1,0 +1,85 @@
+# Build the pipeline artefact and push it to the shared ECR by digest.
+#
+# Runs on a GitHub-hosted runner. Building needs no cluster access — only the
+# *apply* needs to reach RisingWave, and that happens later, in-cluster, as a Job
+# that Argo CD deploys. Nothing here touches on-prem.
+name: build-and-push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pipelines/**'
+      - 'build/**'
+      - '.github/workflows/build-and-push.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # for OIDC to AWS
+  contents: write      # to open the promotion PR
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 064859874041.dkr.ecr.us-east-2.amazonaws.com
+  ECR_REPOSITORY: risingwave/etl-pipeline
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the ECR push role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::064859874041:role/gha-risingwave-etl-pipeline-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          provenance: false
+
+      - name: Record the digest
+        run: |
+          echo "Pushed ${ECR_REGISTRY}/${ECR_REPOSITORY}@${{ steps.push.outputs.digest }}"
+          echo "This exact digest is what QA and then prod will run. Nothing is rebuilt."
+
+  promote-to-qa:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump the QA overlay to the new digest
+        run: |
+          set -euo pipefail
+          f=deploy/overlays/qa/kustomization.yaml
+          sed -i "s|digest: sha256:.*|digest: ${{ needs.build.outputs.digest }}|" "$f"
+          git diff --stat
+
+      - name: Open the promotion PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: promote/qa-${{ github.sha }}
+          title: "promote: QA -> ${{ github.sha }}"
+          commit-message: "promote: QA to ${{ needs.build.outputs.digest }}"
+          body: |
+            Built from `${{ github.sha }}`.
+
+            Digest `${{ needs.build.outputs.digest }}`.
+
+            Merging this makes Argo CD apply that digest to `app-risingwave` on
+            **op-usxpress-qa**. Prod is a separate PR against the prod overlay,
+            using the same digest — nothing is rebuilt between environments.

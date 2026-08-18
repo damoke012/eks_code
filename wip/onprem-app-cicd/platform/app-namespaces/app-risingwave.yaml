@@ -1,0 +1,51 @@
+# app-risingwave — the ETL application's namespace.
+#
+# Deliberately NOT `risingwave` or `risingwave-2`: those are the RisingWave
+# *platform* namespaces, reconciled by Flux. The `apps` AppProject only permits
+# Argo CD destinations matching `app-*`, so this separation is enforced by the
+# guardrail rather than by convention.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-risingwave
+  labels:
+    # Istio ambient — no sidecar, ztunnel handles mTLS
+    istio.io/dataplane-mode: ambient
+    # PodSecurity. `restricted` unless a workload proves it needs more.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    # Ownership, for cost and for knowing who to call
+    app.kubernetes.io/managed-by: flux
+    platform.usxpress.io/owner: risingwave
+    platform.usxpress.io/delivery: argocd
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: app-risingwave-quota
+  namespace: app-risingwave
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+    persistentvolumeclaims: "4"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: app-risingwave-limits
+  namespace: app-risingwave
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi

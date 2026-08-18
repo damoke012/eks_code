@@ -1,0 +1,47 @@
+# Applies the pipeline SQL, in-cluster, reaching RisingWave over ClusterIP.
+#
+# Runs as an Argo CD Sync hook so it re-runs on every sync and its logs appear in
+# the Argo UI — which is where the RisingWave team watch their deploys. The apply
+# script is idempotent, so a re-sync with no SQL change is a no-op.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-pipeline-apply
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: etl-pipeline-apply
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ecr-pull-secret          # distributed by ecr-credentials-sync
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: apply
+          image: etl-pipeline            # overlays pin the digest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          envFrom:
+            - configMapRef:
+                name: etl-pipeline-endpoints   # per-cluster coordinates
+          env:
+            - name: RW_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: etl-pipeline-credentials, key: RW_PASSWORD }
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: etl-pipeline-credentials, key: PG_PASSWORD }
