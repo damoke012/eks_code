@@ -1,13 +1,16 @@
 # Wiring `ecr-credentials` onto op-usxpress-qa and op-usxpress-prod
 
-Discovered 2026-08-18 while landing PR D. `app-namespaces` failed with:
+Discovered 2026-08-18 while landing PR D. `app-namespaces` failed on QA with:
 
 ```
-dependency 'flux-system/ecr-credentials' not found:
-kustomizations.kustomize.toolkit.fluxcd.io "ecr-credentials" not found
+dependency 'flux-system/ecr-credentials' not found
 ```
 
-## What is actually missing
+**Net result: no AWS change is required.** The IAM roles already exist in every
+account and the ECR registry is already open to the whole org. The entire fix is
+two manifest edits and one Kustomization — no Terraform, no Octopus deploy.
+
+## What is missing
 
 `ecr-credentials` is wired on `bm-dev` and `dpl2` only. QA's `infra.yaml` excludes it
 in a **stale** comment dated 2026-07-08:
@@ -17,11 +20,11 @@ Excludes ... Tier 3 components (rook, velero, etcd-backup, octopus-worker, ecr-c
 ```
 
 Every other item on that list — `rook-ceph-operator`, `rook-ceph-cluster`, `velero`,
-`etcd-backup` — is live on QA today. `ecr-credentials` is the one that was left
-behind. This is an oversight in the Tier 3 catch-up, not a standing decision.
+`etcd-backup` — is live on QA today. `ecr-credentials` is the one left behind: an
+oversight in the Tier 3 catch-up, not a standing decision.
 
-Prod is worse: its header **documents ECR as central** and cites
-`ecr-credentials/cronjob.yaml`, under a banner reading "NOT PHASED — every
+Prod is worse. Its header **documents ECR as central** and cites
+`ecr-credentials/cronjob.yaml` under a banner reading "NOT PHASED — every
 Kustomization is active". The Kustomization is absent. No app image can be pulled on
 prod today; it is masked only because no app runs there yet.
 
@@ -29,68 +32,71 @@ prod today; it is masked only because no app runs there yet.
 
 `infrastructure/ecr-credentials/` is byte-identical across the op-dev, op-qa and
 op-prod branches — same blob hashes on `cronjob.yaml`, `namespace.yaml`, `rbac.yaml`.
-All three annotate the ServiceAccount with the **dev** role:
+All three annotate the **dev** role:
 
 ```yaml
 eks.amazonaws.com/role-arn: arn:aws:iam::700736442855:role/op-usxpress-dev-ecr-credentials-sync
 ```
 
-Adding the Kustomization without fixing this gives a green Flux Kustomization, a
-running CronJob, and no pull secret — because AssumeRoleWithWebIdentity fails
-against an issuer the dev role does not trust. Ready=True proves the CronJob was
-applied, not that it succeeded. Same class of false green as ESO SecretSynced.
+It was authored for dev and copied. Only op-dev consumed the directory, so nothing
+surfaced. Adding the Kustomization without fixing this yields a green Flux
+Kustomization, a running CronJob and no pull secret: AssumeRoleWithWebIdentity fails
+against an issuer dev's role does not trust. `Ready=True` proves the CronJob was
+applied, not that it succeeded — the same false green as ESO `SecretSynced`.
 
-## Order of work
+## Ground truth — verified 2026-08-18
 
-**1. Answer this first — it may delete step 3 entirely.**
+Account map:
 
-```bash
-aws ecr get-repository-policy --region us-east-2 \
-  --registry-id 064859874041 --repository-name <any-existing-repo>
+| Profile | Account | Role present |
+|---|---|---|
+| `infra-common` | 064859874041 | ECR registry |
+| `usx-dev` | 700736442855 | `op-usxpress-dev-ecr-credentials-sync` |
+| `usx-qa` / `op-qa` | 527101283767 | `op-usxpress-qa-ecr-credentials-sync` |
+| `usx-prod` / `ops-controller` | 937464026810 | `op-usxpress-prod-ecr-credentials-sync` |
+
+Each cluster's roles live in **its own account**, matching prod's stated design
+("SELF-CONTAINED BY DESIGN ... own OIDC provider ... no dependency on dev/QA
+accounts"). The per-cluster roles were created with the clusters; only the manifest
+was never differentiated.
+
+Talos OIDC issuers (the `oidc.eks.us-east-2.*` providers are the EKS clusters, not
+these):
+
+```
+dev   d3a7wcnazdrd6p.cloudfront.net
+qa    d2t7d36wmf0hbm.cloudfront.net
+prod  d3rxit8f4yvshu.cloudfront.net
 ```
 
-If the policy grants `arn:aws:iam::700736442855:root`, then *any* role in that
-account can pull, the new QA/prod roles work with no ECR-side change, and the
-"who owns 064859874041" question stops blocking QA delivery. If it names the dev
-role explicitly, that account's IaC must add the new roles.
+ECR repository policy (`lazy/api`, representative):
 
-**2. IAM — `terraform/ecr-puller-roles.tf`.** Creates
-`op-usxpress-qa-ecr-credentials-sync` and `op-usxpress-prod-ecr-credentials-sync`
-in 700736442855, each trusting its own cluster's OIDC issuer, pull-only, pinned to
-`system:serviceaccount:ecr-credentials:ecr-credentials-sync`.
-
-Before raising: confirm the OIDC issuer URLs and how iaac-talos registers them.
-
-```bash
-aws iam list-open-id-connect-providers
-aws iam get-role --role-name op-usxpress-dev-ecr-credentials-sync \
-  --query 'Role.AssumeRolePolicyDocument'
+```json
+"Principal": { "AWS": "*" },
+"Action": [ "...GetDownloadUrlForLayer", "BatchGetImage", "PutImage", ... ],
+"Condition": { "StringEquals": { "aws:PrincipalOrgID": "o-yza5l1xhrc" } }
 ```
 
-The dev trust policy is the template — match its condition keys exactly.
+Any principal in org `o-yza5l1xhrc` may pull. Nothing to add.
 
-⚠️ Octopus deploy only. Watch that TfApply is true, or the run prints a plan,
-skips the apply, and reports Success.
+## The fix
 
-**3. ECR-side grant** in 064859874041, only if step 1 says it is needed.
+**1. Platform repo — per branch, NOT a merge.** `iaac-talos-flux-platform`,
+`infrastructure/ecr-credentials/rbac.yaml`:
 
-**4. Platform repo — per branch, NOT a merge.**
-
-`iaac-talos-flux-platform`, branch `op-qa`, `infrastructure/ecr-credentials/rbac.yaml`:
-
+branch `op-qa`:
 ```yaml
-    eks.amazonaws.com/role-arn: arn:aws:iam::700736442855:role/op-usxpress-qa-ecr-credentials-sync
+    eks.amazonaws.com/role-arn: arn:aws:iam::527101283767:role/op-usxpress-qa-ecr-credentials-sync
 ```
 
-Branch `op-prod`, same file:
-
+branch `op-prod`:
 ```yaml
-    eks.amazonaws.com/role-arn: arn:aws:iam::700736442855:role/op-usxpress-prod-ecr-credentials-sync
+    eks.amazonaws.com/role-arn: arn:aws:iam::937464026810:role/op-usxpress-prod-ecr-credentials-sync
 ```
 
-**5. Cluster repo — `iaac-talos-flux-cluster`, branch `master`.** Add to
-`clusters/op-usxpress-qa/flux-system/infra.yaml` (and prod's, once prod's role
-exists). Copied from `clusters/bm-dev/flux-system/infra.yaml`:
+**2. Cluster repo — `iaac-talos-flux-cluster`, branch `master`.** Add to
+`clusters/op-usxpress-qa/flux-system/infra.yaml`, copied verbatim from
+`clusters/bm-dev/flux-system/infra.yaml`:
 
 ```yaml
 ---
@@ -110,7 +116,11 @@ spec:
   timeout: 5m
 ```
 
-While editing QA's file, correct the stale Tier 3 comment at line ~162.
+Correct the stale Tier 3 comment (~line 162) in the same edit.
+
+Prod gets the same block, but only once prod's `app-namespaces` is being wired —
+prod's Flux Git token should be checked first (it is the same vintage as the QA
+token that expired silently on 2026-08-16).
 
 ## Acceptance — do not stop at Ready=True
 
@@ -124,11 +134,17 @@ kubectl -n app-risingwave get secret ecr-pull-secret
 kubectl -n app-risingwave get sa default -o jsonpath='{.imagePullSecrets}{"\n"}'
 ```
 
-A failed AssumeRoleWithWebIdentity shows in the job log, nowhere else.
+A failed AssumeRoleWithWebIdentity appears in the job log and nowhere else.
 
-## Known concerns carried forward
+## Findings to carry forward
 
-* The CronJob runs `public.ecr.aws/aws-cli/aws-cli:latest` — unpinned, and it holds
-  cluster-wide secret-write. Worth pinning by digest before prod.
+* **The ECR repository policy grants `PutImage` to the entire org**, not just pull.
+  Any principal in `o-yza5l1xhrc` can push to any repository. That materially weakens
+  the one-app-one-repo-one-branch push roles in `ecr-app-repos.tf`: those roles
+  constrain what the *pipeline* may do, but nothing constrains anyone else. Worth
+  raising before prod app delivery — with IMMUTABLE tags an existing tag cannot be
+  overwritten, but a new tag can be introduced by anyone in the org.
+* The CronJob runs `public.ecr.aws/aws-cli/aws-cli:latest` — unpinned, holding
+  cluster-wide secret-write. Pin by digest before prod.
 * It patches **every** ServiceAccount in **every** namespace. Broad, but it is the
-  mechanism that made `app-risingwave` work on dev without bespoke config.
+  mechanism that made `app-risingwave` work on dev with no bespoke config.
