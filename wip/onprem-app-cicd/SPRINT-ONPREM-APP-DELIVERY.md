@@ -1,5 +1,24 @@
 # Sprint — On-prem application delivery
 
+**Created in Jira 2026-08-18.** Epic **INFRA-1632**, sprint **6155 "On-Prem App Delivery"**
+on board 322 (state: future — start it when ready). Stories INFRA-1633 … INFRA-1643, all
+parented to the epic and in the sprint.
+
+| # | Key | Ticket |
+|---|---|---|
+| 1 | INFRA-1633 | ECR repository + GitHub OIDC push role — **BLOCKED** |
+| 2 | INFRA-1634 | RisingWave ETL application repository |
+| 3 | INFRA-1635 | Deploy overlays for QA and prod, pinned by digest |
+| 4 | INFRA-1636 | ApplicationSet for op-usxpress-prod |
+| 5 | INFRA-1637 | **SECURITY** — rotate the Confluent Cloud credentials |
+| 6 | INFRA-1638 | Extend AWS SSO to op-usxpress-dev and op-usxpress-prod |
+| 7 | INFRA-1639 | Argo CD SSO for application teams — **BLOCKED** |
+| 8 | INFRA-1640 | Kyverno policies Audit → Enforce |
+| 9 | INFRA-1641 | Harden ecr-credentials-sync |
+| 10 | INFRA-1642 | Flux Git token at source + alert on stale sources |
+| 11 | INFRA-1643 | Review the shared ECR registry policy |
+
+
 **Goal.** An app team can build an image and have it deployed to QA and prod through a
 path they can see and troubleshoot themselves, with the platform owning namespaces,
 credentials and guardrails — and no manual steps in between.
