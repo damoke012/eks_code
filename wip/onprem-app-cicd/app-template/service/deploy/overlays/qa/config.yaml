@@ -1,0 +1,9 @@
+# Per-cluster coordinates. Nothing secret — secrets come from AWS Secrets Manager
+# via an ExternalSecret (see the job/ template for the pattern).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  ENVIRONMENT: qa
+  LOG_LEVEL: Information

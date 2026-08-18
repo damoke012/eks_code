@@ -1,4 +1,4 @@
-# Images in app-* namespaces must come from the shared ECR registry.
+# Images in namespaces delivered by Argo CD must come from the shared ECR registry.
 #
 # Start in Audit. Flip to Enforce once the first app is deployed and the policy
 # report is clean — there are zero app-* workloads today, so the window for
@@ -11,7 +11,7 @@ metadata:
     policies.kyverno.io/title: Approved registry only
     policies.kyverno.io/category: Supply Chain
     policies.kyverno.io/description: >-
-      Workloads in app-* namespaces may only run images from the shared ECR
+      Workloads in namespaces delivered by Argo CD may only run images from the shared ECR
       registry (064859874041.dkr.ecr.us-east-2.amazonaws.com). Platform
       namespaces are unaffected — they run upstream charts by design.
 spec:
@@ -24,10 +24,10 @@ spec:
           - resources:
               kinds: [Pod]
               namespaceSelector:
-                matchExpressions:
-                  - key: kubernetes.io/metadata.name
-                    operator: In
-                    values: ["app-risingwave"]
+                matchLabels:
+                  # every app-* namespace the platform creates carries this label,
+                  # so a new app is covered on the day it onboards - no policy edit
+                  platform.usxpress.io/delivery: argocd
       validate:
         message: >-
           Images must come from 064859874041.dkr.ecr.us-east-2.amazonaws.com.

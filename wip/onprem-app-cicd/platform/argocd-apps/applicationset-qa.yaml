@@ -1,0 +1,45 @@
+# Every on-prem application delivered by Argo CD on this cluster.
+#
+# Onboarding an app is four lines in `elements` below — not a new file, not a new
+# Kustomization. The ApplicationSet controller (already part of the Argo CD stack)
+# generates one Application per entry.
+#
+# The `apps` AppProject restricts destinations to `app-*`, so nothing added here
+# can target a platform namespace even by mistake.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: onprem-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          # ---- onboard here -------------------------------------------------
+          - name: risingwave-etl
+            namespace: app-risingwave
+            repoURL: https://github.com/variant-inc/risingwave-pipeline.git
+            path: deploy/overlays/qa
+          # -------------------------------------------------------------------
+  template:
+    metadata:
+      name: '{{.name}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: apps
+      source:
+        repoURL: '{{.repoURL}}'
+        targetRevision: main
+        path: '{{.path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false     # the platform owns app-* namespaces

@@ -1,4 +1,4 @@
-# Images in app-* namespaces must be referenced by digest, not tag.
+# Images in namespaces delivered by Argo CD must be referenced by digest, not tag.
 #
 # This is what makes "build once, promote the same artefact" real. A tag can be
 # moved; a digest cannot. Without this, promotion is a convention that holds
@@ -11,7 +11,7 @@ metadata:
     policies.kyverno.io/title: Digest, not tag
     policies.kyverno.io/category: Supply Chain
     policies.kyverno.io/description: >-
-      Workloads in app-* namespaces must pin images by sha256 digest so that what
+      Workloads in namespaces delivered by Argo CD must pin images by sha256 digest so that what
       runs in prod is provably the artefact that passed in QA.
 spec:
   validationFailureAction: Audit
@@ -23,10 +23,10 @@ spec:
           - resources:
               kinds: [Pod]
               namespaceSelector:
-                matchExpressions:
-                  - key: kubernetes.io/metadata.name
-                    operator: In
-                    values: ["app-risingwave"]
+                matchLabels:
+                  # every app-* namespace the platform creates carries this label,
+                  # so a new app is covered on the day it onboards - no policy edit
+                  platform.usxpress.io/delivery: argocd
       validate:
         message: >-
           Images must be pinned by digest, e.g. repo@sha256:… — a tag can be moved,

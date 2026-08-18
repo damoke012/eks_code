@@ -4,18 +4,20 @@
 analysis). This is the how: staged files, target paths, PR order, and what "done" looks like at each
 step.
 
-First customer: the RisingWave ETL pipeline. Everything here generalises — `app-risingwave` becomes
-`app-<name>` for the second team.
+**This is the platform capability for every on-prem application, not a RisingWave project.**
+RisingWave's ETL is the first consumer and the pilot; nothing here is specific to it. Onboarding the
+second app is: one namespace file, one entry in a Terraform map, four lines in an ApplicationSet, and
+a copy of the app template.
 
 ## What's in this directory
 
 ```
-platform/app-namespaces/       → iaac-talos-flux-platform  (namespace, quota, limits)
-platform/kyverno-policies/     → iaac-talos-flux-platform  (registry + digest policies)
-argocd/                        → the two Argo CD Applications
-terraform/                     → ECR repository + GitHub OIDC push role
-app-template/                  → the reference app repo: Dockerfile, apply script,
-                                 workflow, kustomize base + overlays
+platform/app-namespaces/       → iaac-talos-flux-platform   _template.yaml + one file per app
+platform/kyverno-policies/     → iaac-talos-flux-platform   registry + digest, selected by LABEL
+platform/argocd-apps/          → iaac-talos-flux-platform   one ApplicationSet per cluster
+platform/cluster-wiring-block  → iaac-talos-flux-cluster    the two Flux Kustomizations
+terraform/ecr-app-repos.tf     → (repo TBC)                 for_each over an app map
+app-template/                  → the app team copies this   job/ or service/ flavour + workflow
 ```
 
 Everything has been syntax-checked. Both overlays build under `kubectl kustomize`, all manifests
@@ -52,13 +54,13 @@ Each PR is independently revertible and ordered so nothing references something 
 
 | # | Repo | Path | Contents | Blocks |
 |---|---|---|---|---|
-| 1 | **TBC — see §Decisions** | — | `terraform/ecr-and-push-role.tf` | 3 |
+| 1 | **TBC — see §Decisions** | — | `terraform/ecr-app-repos.tf` | 3 |
 | 2 | `iaac-talos-flux-platform` (`op-dev`, then `op-qa`, `op-prod`) | `infrastructure/app-namespaces/` | `platform/app-namespaces/` | 4, 5 |
 | 3 | `variant-inc/risingwave-pipeline` | repo root | `app-template/` (Dockerfile, apply.sh, workflow, deploy/) | 5 |
 | 4 | `iaac-talos-flux-cluster` (`master`) | `clusters/bm-dev/flux-system/infra.yaml` + QA + prod | Kustomization entry for `app-namespaces` | — |
-| 5 | `iaac-talos-flux-platform` | `infrastructure/argocd-config/` | `argocd/application-qa.yaml` (QA cluster only) | — |
+| 5 | `iaac-talos-flux-platform` (`op-qa`) | `infrastructure/argocd-apps/` | `applicationset-qa.yaml` | — |
 | 6 | `iaac-talos-flux-platform` | `infrastructure/kyverno-policies/` | `platform/kyverno-policies/` | — |
-| 7 | `iaac-talos-flux-platform` | `infrastructure/argocd-config/` | `argocd/application-prod.yaml` | after QA is proven |
+| 7 | `iaac-talos-flux-platform` (`op-prod`) | `infrastructure/argocd-apps/` | `applicationset-prod.yaml` | after QA is proven |
 
 PR 6 can go any time — the policies ship in `Audit`, so they report without blocking. Flip to
 `Enforce` once the first app is deployed and the policy report is clean.
@@ -107,9 +109,24 @@ and its logs land in the Argo UI, which is where the RisingWave team will watch 
 **`CreateNamespace=false`.** The platform creates `app-*` namespaces with quotas, PSA labels and
 Istio enrolment. An app team cannot conjure a namespace by editing an Application.
 
+## Onboarding the *next* app — the whole cost
+
+This is the test of whether this is a platform capability or a one-off:
+
+| Step | Where | Size |
+|---|---|---|
+| namespace | `app-namespaces/`: copy `_template.yaml`, replace `APPNAME` | 1 file |
+| ECR repo + push role | `terraform/ecr-app-repos.tf`: one entry in `locals.onprem_apps` | 4 lines |
+| Argo CD | `applicationset-qa.yaml`: one entry in `elements` | 4 lines |
+| the app's own repo | copy `app-template/job/` or `app-template/service/` | copy + 2 edits |
+
+**Nothing else.** No new Kustomization, no new Kyverno rule (they select on the
+`platform.usxpress.io/delivery: argocd` label, so a new namespace is covered on the day it's
+created), no new Flux wiring, no new Argo CD Application file.
+
 ## Decisions needed
 
-1. **Which repo manages ECR?** `terraform/ecr-and-push-role.tf` targets account **064859874041**
+1. **Which repo manages ECR?** `terraform/ecr-app-repos.tf` targets account **064859874041**
    (infra-common / devops). `iaac-talos` manages 700736442855, so it does not belong there. This is
    the one thing blocking PR 1.
 2. **Repo layout** — the app-template assumes manifests live in `variant-inc/risingwave-pipeline`

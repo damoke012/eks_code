@@ -1,9 +1,8 @@
-# The RisingWave ETL application. NOT the risingwave / risingwave-2 platform
-# namespaces, which Flux owns — the `apps` AppProject cannot target those.
+# Template — copy to app-<name>.yaml and replace APPNAME.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: app-risingwave
+  name: app-APPNAME
   labels:
     istio.io/dataplane-mode: ambient
     pod-security.kubernetes.io/enforce: restricted
@@ -11,14 +10,14 @@ metadata:
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
     app.kubernetes.io/managed-by: flux
-    platform.usxpress.io/owner: risingwave
+    platform.usxpress.io/owner: APPNAME
     platform.usxpress.io/delivery: argocd     # selected by the Kyverno policies
 ---
 apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: app-risingwave-quota
-  namespace: app-risingwave
+  name: app-APPNAME-quota
+  namespace: app-APPNAME
 spec:
   hard:
     requests.cpu: "4"
@@ -31,8 +30,8 @@ spec:
 apiVersion: v1
 kind: LimitRange
 metadata:
-  name: app-risingwave-limits
-  namespace: app-risingwave
+  name: app-APPNAME-limits
+  namespace: app-APPNAME
 spec:
   limits:
     - type: Container

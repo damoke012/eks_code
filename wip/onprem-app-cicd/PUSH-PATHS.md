@@ -7,7 +7,7 @@ Set the source once:
 
 ```bash
 SRC=/home/doke/work/eks_code/wip/onprem-app-cicd
-ls "$SRC"          # sanity: IMPLEMENTATION.md, platform/, app-template/, terraform/, argocd/
+ls "$SRC"          # sanity: IMPLEMENTATION.md, ONBOARDING.md, platform/, app-template/, terraform/
 ```
 
 ⚠️ **Your WSL `eks_code` is ~20 commits behind and its pull is blocked** by uncommitted changes in
@@ -33,7 +33,7 @@ the branch for the cluster they're for. That's why the same directory is pushed 
 **⚠️ Not `iaac-talos`** — that manages `700736442855`. Confirm the repo before raising this.
 
 ```
-terraform/ecr-and-push-role.tf   →   <that repo>/<module path>/ecr-risingwave-etl.tf
+terraform/ecr-app-repos.tf   →   <that repo>/<module path>/ecr-app-repos.tf
 ```
 
 Verify after apply:
@@ -89,14 +89,15 @@ kubectl get kustomization -n flux-system app-namespaces argocd-apps
 kubectl get ns app-risingwave -o jsonpath='{.metadata.labels}' ; echo
 ```
 
-## PR 5 — the QA Application
+## PR 5 — the QA ApplicationSet
 
 ```
-platform/argocd-apps/   →   iaac-talos-flux-platform:op-qa/infrastructure/argocd-apps/
+platform/argocd-apps/applicationset-qa.yaml  →  iaac-talos-flux-platform:op-qa/infrastructure/argocd-apps/
+platform/argocd-apps/kustomization.yaml      →  same directory
 ```
 
-The directory already contains `application-qa.yaml` and a `kustomization.yaml` listing only it.
-**Do not add the prod Application on this branch.**
+One ApplicationSet per cluster generates an Application per app. Onboarding an app later is four
+lines in `elements` — no new file. **Do not put the prod ApplicationSet on this branch.**
 
 ## PR 6 — Kyverno policies (any time)
 
@@ -116,10 +117,11 @@ Clean report → flip `validationFailureAction: Audit` to `Enforce` in a follow-
 ## PR 7 — the prod Application (after QA is proven)
 
 ```
-argocd/application-prod.yaml  →  iaac-talos-flux-platform:op-prod/infrastructure/argocd-apps/
+platform/argocd-apps/applicationset-prod.yaml  →  iaac-talos-flux-platform:op-prod/infrastructure/argocd-apps/
 ```
 
-plus a `kustomization.yaml` on that branch listing `application-prod.yaml` only.
+plus a `kustomization.yaml` on that branch listing `applicationset-prod.yaml` only. It has no
+`automated:` block — prod syncs when a human presses Sync.
 
 ---
 
