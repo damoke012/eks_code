@@ -1,9 +1,13 @@
 # Sprint — On-prem application delivery
 
-**Created in Jira 2026-08-18.** Epic **INFRA-1632**, sprint **6155 "On-Prem App Delivery"**
-on board 322, **2026-08-17 → 2026-08-28** (state: future — start it when ready).
-The preceding sprint 6088 "UI Sprint 2" had its end date moved to 2026-08-14 (Friday). Stories INFRA-1633 … INFRA-1643, all
-parented to the epic and in the sprint.
+**Created in Jira 2026-08-18.** Epic **INFRA-1632**. Stories INFRA-1633 … INFRA-1643, all
+parented to the epic and in sprint **959 "UI Sprint 3"** (board 322), dated
+**2026-08-17 → 2026-08-28**.
+
+Sprint 6088 "UI Sprint 2" was closed on 2026-08-18 with its end date set to 2026-08-14;
+its unfinished work moved into UI Sprint 3. A separate sprint 6155 "On-Prem App Delivery"
+was created first and then emptied — the work was consolidated into UI Sprint 3 so the
+team runs one sprint, with the epic doing the grouping.
 
 | # | Key | Ticket |
 |---|---|---|
