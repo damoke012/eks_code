@@ -24,6 +24,54 @@ The design is sound and the reasoning behind it is right: RisingWave's SQL front
 `ClusterIP` with no external route, so a GitHub-hosted runner cannot reach it, and an
 in-cluster ARC runner can.
 
+---
+
+## 1a. Progress — 2026-08-18/19
+
+**The build and push half is proven end to end.** This had never been done before.
+
+| Step | Status |
+|---|---|
+| GitHub Actions assumes the ECR push role via OIDC | ✅ |
+| Image built and pushed to ECR **by digest** | ✅ `sha256:d6162426…` from commit `987ea1ca` |
+| Immutable tags refuse an overwrite | ✅ confirmed on a re-dispatch |
+| QA overlay bumped to that digest on `master` | ✅ |
+| ApplicationSet targets `master` | ✅ |
+| **Argo CD reads the repository** | ❌ **no Git credential exists** (INFRA-1647) |
+| Job runs in-cluster | blocked behind the above |
+
+Merged: `iaac-talos-flux-platform#96` (ApplicationSet → `master`),
+`risingwave-pipeline#9` (the scaffold), `#10` (disable the inherited Octopus push),
+`#11` (digest promotion).
+
+### Three defects found by doing it, rather than by design
+
+1. **The ECR push role needed read on its own repository.** `buildx` reads the manifest
+   back after pushing, so the build failed *after* every layer had uploaded, with a message
+   that reads like a push permission problem. Corrected — `ecr:BatchGetImage`,
+   `GetDownloadUrlForLayer`, `DescribeImages`, still scoped to the one repository.
+2. **`build.yaml` had been failing on every push in `risingwave-pipeline`** — the inherited
+   cloud Octopus workflow, triggering on `"**"`. It red-flagged every pull request in that
+   repository since the fork. Trigger disabled (kept, not deleted). This unblocks everyone's
+   PRs there, not just this work.
+3. **Argo CD holds no Git credential at all** on op-usxpress-qa — no secret carries the
+   `argocd.argoproj.io/secret-type` label. `risingwave-pipeline` is INTERNAL, so Argo cannot
+   read it. **This blocks every private application repository**, and it was invisible until
+   the first real deploy because the Application pointed at a path that did not exist and
+   never got as far as authenticating.
+
+### What is in the repository now
+
+`build/Dockerfile`, `build/apply.sh`, `smoke/001-connectivity.rw`,
+`.github/workflows/build-and-push.yml`, and `deploy/base` plus
+`deploy/overlays/{qa,prod}`.
+
+`pipeline.yaml` and the ARC runner are untouched. Dev is unchanged.
+
+The first deploy will run `smoke/` only — `SELECT version(); SELECT 1` — proving the chain
+without touching any real pipeline. `PIPELINE_DIR` switches to `/pipeline/pipelines/Brand`
+once §5 is settled.
+
 ## 2. What is actually missing
 
 That pipeline reaches **`risingwave-2` on `op-usxpress-dev`, and nothing else**:
@@ -119,9 +167,12 @@ it does not depend on any of the CI/CD work.
 * The QA ApplicationSet, generating the `risingwave-etl` Application.
 
 ### Platform — outstanding
-* The build workflow and `deploy/overlays/qa` scaffold (INFRA-1634).
-* ApplicationSet `targetRevision` is `main`; the repo's default branch is `master`. One
-  line, but nothing resolves until it is fixed.
+* **Argo CD Git credential (INFRA-1647) — the current blocker.** A `repo-creds` secret
+  scoped to `https://github.com/variant-inc`, delivered by External Secrets and applied by
+  Flux. Org-scoped rather than per-repo, so onboarding the next app needs no new credential.
+  It needs a token minted for Argo CD and stored in Secrets Manager — not the classic PAT
+  hand-patched into `flux-system` on 2026-08-18, which is itself unresolved (INFRA-1642).
+* **Finish the smoke test (INFRA-1648)** once the credential exists.
 * QA's RisingWave L4 routes carry dev hostnames and bind to a Gateway that does not exist,
   so QA has no SQL access over a URL (INFRA-1645).
 
@@ -131,9 +182,10 @@ it does not depend on any of the CI/CD work.
 |---|---|---|---|
 | 1 | Rotate the Confluent credentials | INFRA-1637 | who owns them |
 | 2 | Settle the repo/cluster drift | INFRA-1644 | Tim |
-| 3 | Fix `targetRevision` main → master | INFRA-1634 | — |
-| 4 | Build workflow + QA overlay | INFRA-1634 | 3 |
-| 5 | Smoke test with a trivial payload | INFRA-1634 | 4 |
+| 3 | ~~Fix `targetRevision` main → master~~ | done | — |
+| 4 | ~~Build workflow + QA overlay~~ | done | — |
+| 5 | Argo CD Git credential | INFRA-1647 | — |
+| 5b | Finish the smoke test | INFRA-1648 | 5 |
 | 6 | Swap in the real `pipelines/` tree | INFRA-1635 | 2, 5 |
 | 7 | Prod ApplicationSet + prod overlay | INFRA-1636 | 6 |
 
