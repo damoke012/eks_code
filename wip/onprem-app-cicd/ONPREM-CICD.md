@@ -115,7 +115,14 @@ Equally, the platform does not review application code or decide when a release 
 | 2 | `iaac-talos-flux-platform` (per env branch) | `infrastructure/app-namespaces/app-<name>.yaml` |
 | 3 | `iaac-talos-flux-platform` (per env branch) | ApplicationSet entry — four lines |
 | 4 | AWS Secrets Manager | per-environment secret paths |
-| 5 | — | hand back the ECR URI and the push role ARN |
+| 5 | `iaac-talos-flux-platform` (per env branch) | **Argo CD repo credential** — a `repo-creds` secret scoped to `https://github.com/variant-inc`, from Secrets Manager via ExternalSecret. One-time per cluster, not per app |
+| 6 | — | hand back the ECR URI and the push role ARN |
+
+⚠️ Step 5 is **not yet done on any cluster** (INFRA-1647). Argo CD currently holds no Git
+credential at all, so it cannot read a private application repository. An app team can do
+everything correctly and still see `ComparisonError: authentication required`. This was
+invisible until the first real deploy, because the Application pointed at a path that did
+not exist and never got as far as authenticating.
 
 ⚠️ **Per-environment branches are copies of one another.** Every cluster-specific value —
 account ID, role ARN, OIDC issuer, hostname, node address — must be changed on each branch.
