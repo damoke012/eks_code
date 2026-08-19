@@ -102,12 +102,19 @@ resource "aws_iam_role_policy" "gha_ecr_push" {
       },
       {
         Effect = "Allow"
+        # buildx reads the manifest back after pushing to confirm what it wrote,
+        # so a pusher needs read on the same repository. Omitting these fails the
+        # build AFTER every layer has uploaded, with a message that reads like a
+        # push permission problem. Still scoped to the one repository.
         Action = [
           "ecr:BatchCheckLayerAvailability",
           "ecr:CompleteLayerUpload",
           "ecr:InitiateLayerUpload",
           "ecr:PutImage",
           "ecr:UploadLayerPart",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:DescribeImages",
         ]
         Resource = aws_ecr_repository.onprem_app[each.key].arn
       },
