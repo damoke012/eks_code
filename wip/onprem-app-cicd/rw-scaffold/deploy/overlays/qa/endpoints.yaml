@@ -12,6 +12,6 @@ data:
   RW_USER: root
   PG_HOST: pg-postgresql.risingwave.svc.cluster.local   # QA's actual service; dev's is named differently
   PG_PORT: "5432"
-  PG_DB:   postgres
+  PG_DB:   risingwave      # POSTGRES_DB on the pg-postgresql StatefulSet; NOT 'postgres'
   # PG_USER now comes from the credentials secret, beside its password.
   APPLIED_BY: argocd-qa
