@@ -76,13 +76,24 @@ and `scripts/check-postgres-secret-usable.sh` says so directly.
 
 ```bash
 # dev · op-usxpress-dev — cert-based kubeconfig, needs corp VPN
-KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml \
-  bash scripts/check-postgres-secret-usable.sh <dev-context> risingwave \
-    op-usxpress-dev/risingwave/postgres usx-dev
-```
+# The context name is RESOLVED from the API endpoint, never typed: kubeconfig
+# filenames and context names drift independently on WSL, and a command that
+# silently targets the wrong cluster is worse than one that fails.
+export KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml
+DEV_CTX=$(kubectl config view -o json | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+clusters = {c['name'] for c in d['clusters']
+            if c['cluster'].get('server') == 'https://10.10.82.50:6443'}
+names = [c['name'] for c in d['contexts'] if c['context']['cluster'] in clusters]
+print(names[0] if names else '')
+")
+[ -n "$DEV_CTX" ] || { echo 'no context in this kubeconfig points at 10.10.82.50:6443'; }
+echo "resolved dev context: $DEV_CTX"
 
-⚠️ The dev context name is not assumed here — resolve it by endpoint first
-(`https://10.10.82.50:6443`), the same way the wizard does, rather than trusting a filename.
+bash scripts/check-postgres-secret-usable.sh "$DEV_CTX" risingwave \
+  op-usxpress-dev/risingwave/postgres usx-dev
+```
 
 **Prod has no routine access path** (INFRA-1638): checking it needs break-glass
 `op-usxpress-prod/talosconfig` from Secrets Manager in 937464026810. Worth doing once the dev
