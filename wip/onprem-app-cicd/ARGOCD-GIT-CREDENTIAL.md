@@ -1,10 +1,25 @@
 # INFRA-1647 — the Argo CD Git credential
 
-**Decided 2026-08-20:** GitHub App, not a PAT. QA first, prod after `risingwave-etl` is
-green. `…-pat.yaml` stays in the pack as a documented fallback and is not kept in sync.
+**Decided 2026-08-20, then revised the same day.** GitHub App remains the target. But
+`dare-x` is a **member** of `variant-inc`, not an owner (`gh api orgs/variant-inc/memberships`),
+and creating an org App needs owner rights — GitHub returns 404 rather than 403 for that
+settings page, so the block presents as a broken link.
+
+So: **ship the PAT to prove the path, request the App in parallel, swap when it lands.**
+The swap is three keys inside the same ExternalSecret with the same Secret name — Argo CD
+sees a credential change, not a replacement, and nothing is reconfigured. The ask is drafted
+in [`REQUEST-GITHUB-APP-OWNER.md`](REQUEST-GITHUB-APP-OWNER.md); owners are `usx-devops`,
+`buddy-james`, `higdonmatthew`, `stevebduckjr`, `svivesusx`.
+
+Mint the PAT on **`usx-devops`** if it can be reached — it is an org owner and a shared
+automation identity, so it survives offboarding. A `dare-x` PAT is a bridge, not an answer.
+
+**The PAT's expiry date goes on INFRA-1647 the day it ships**, and INFRA-1642's stale-source
+alert stops being parallel hygiene: with a PAT in place, nothing on either cluster reports
+the day it dies. That is not hypothetical here — it is what happened on 2026-08-16.
 
 **Run it with the wizard:** [`wizard-argocd-git-credential-qa.sh`](wizard-argocd-git-credential-qa.sh)
-walks all nine steps — it re-checks that the defect is still real before asking for
+walks all nine steps for **either** credential type — it re-checks that the defect is still real before asking for
 anything, validates the PEM with `openssl` before it can reach Secrets Manager, prints the
 key list before and after the merge, runs the three document-count checks and the
 foreign-identifier grep before the PR, and ends on `risingwave-etl`'s sync status rather

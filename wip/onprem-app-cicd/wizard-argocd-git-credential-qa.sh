@@ -259,7 +259,7 @@ banner "INFRA-1647 · Argo CD Git credential · op-usxpress-qa"
 stage "Preflight — tools, access, and is the defect still there"
 say "Checking what this wizard needs before it asks you to do anything."
 MISSING=0
-for t in aws kubectl git python3 openssl; do
+for t in aws kubectl git python3 openssl curl; do
   if command -v "$t" >/dev/null 2>&1; then step "$t ✓"; else warn "$t is missing"; MISSING=1; fi
 done
 [[ $MISSING -eq 1 ]] && { warn "install the missing tools and re-run"; exit 1; }
@@ -353,76 +353,95 @@ fi
 pause "Press Enter to start."
 
 # ──────────────────────────────────────────────────────────────────────────
-stage "GitHub — create the App on variant-inc"
-say "Argo CD will authenticate as a GitHub App rather than a token, so there is"
-say "no expiry date to forget. This is the failure that took the QA Flux source"
-say "down silently for two days on 2026-08-16."
+stage "GitHub — which credential, and mint it"
+say "Argo CD needs to authenticate to variant-inc. Two ways, and which one you"
+say "can use is not a preference — it depends on rights you either have or don't."
 say ""
 
-# Creating an org App needs OWNER. GitHub answers a settings page you cannot
-# reach with 404, not 403, so without this check the wizard sends you to a page
-# that looks broken rather than forbidden. Verified 2026-08-20: dare-x is a
-# member, and the App route needs someone else.
+CRED_MODE="${CRED_MODE:-}"
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   GH_ME=$(gh api user -q .login 2>/dev/null || echo "")
   GH_ROLE=$(gh api "orgs/variant-inc/memberships/$GH_ME" -q .role 2>/dev/null || echo "unknown")
-  if [[ "$GH_ROLE" == "admin" ]]; then
-    step "$GH_ME is an owner of variant-inc ✓"
-  else
-    warn "$GH_ME is '$GH_ROLE' on variant-inc, not 'admin'."
-    warn "Creating the App needs an owner. The New GitHub App page will 404."
-    note ""
-    note "Owners who can create it:"
-    gh api 'orgs/variant-inc/members?role=admin&per_page=100' -q '.[].login' 2>/dev/null \
-      | while read -r o; do note "  $o"; done
-    note ""
-    note "Stages 2 and 3 below are exactly what an owner needs to do — send them."
-    note "To ship without waiting, use the PAT variant instead:"
-    note "  platform/argocd-config/op-qa/repo-creds-externalsecret-pat.yaml"
-    note "  and put repo.username / repo.password in $SM_SECRET."
-    note "Swapping App for PAT later is a three-key change inside the same"
-    note "ExternalSecret, with the same Secret name — Argo CD never notices."
-    confirm "Continue anyway (an owner is doing this part)?" || exit 0
-  fi
+  step "$GH_ME is '$GH_ROLE' on variant-inc"
 else
-  note "gh not authenticated — cannot check whether you own variant-inc."
-  note "If the page 404s, you are a member and creating the App needs an owner."
+  GH_ME=""; GH_ROLE="unknown"
+  note "gh not authenticated — cannot check your role on variant-inc"
 fi
-open_url "https://github.com/organizations/variant-inc/settings/apps/new"
-step "GitHub App name:  argocd-onprem"
-step "Homepage URL: any valid URL — https://github.com/variant-inc is fine"
-step "Webhook: UNTICK 'Active'. Argo CD polls; it needs no webhook."
-step "Permissions → Repository permissions → Contents: Read-only. Nothing else."
-step "Where can this GitHub App be installed: 'Only on this account'"
-step "Click 'Create GitHub App'."
-say ""
-note "The App ID is on the App's settings page, under 'App ID'."
-ask APP_ID "Paste the App ID (digits only):"
-if [[ ! "$APP_ID" =~ ^[0-9]+$ ]]; then
-  warn "that is not a plain number — the App ID is digits only, e.g. 1234567"
-  ask APP_ID "Paste the App ID again:"
+
+if [[ -z "$CRED_MODE" ]]; then
+  if [[ "$GH_ROLE" == "admin" ]]; then
+    if confirm "Create an org-owned GitHub App (no expiry to forget)?"; then
+      CRED_MODE=app
+    else
+      CRED_MODE=pat
+    fi
+  else
+    warn "creating an org App needs owner rights, which you do not have."
+    note "GitHub answers that settings page with 404, not 403, so it reads as a"
+    note "broken link rather than a permission you're missing."
+    note ""
+    note "Send REQUEST-GITHUB-APP-OWNER.md to an owner — that is the durable fix."
+    note "Meanwhile a PAT proves the whole delivery path today, and swapping to"
+    note "the App later is three keys in the same ExternalSecret, same Secret"
+    note "name: Argo CD sees a credential change, not a replacement."
+    confirm "Continue with a PAT?" || exit 0
+    CRED_MODE=pat
+  fi
 fi
-write_env APP_ID "$APP_ID"
+write_env CRED_MODE "$CRED_MODE"
+
+if [[ "$CRED_MODE" == "app" ]]; then
+  MANIFEST="repo-creds-externalsecret.yaml"
+  open_url "https://github.com/organizations/variant-inc/settings/apps/new"
+  step "GitHub App name:  argocd-onprem"
+  step "Homepage URL: https://github.com/variant-inc"
+  step "Webhook: UNTICK 'Active'. Argo CD polls; it needs no webhook."
+  step "Permissions → Repository permissions → Contents: Read-only. Nothing else."
+  step "Where can this GitHub App be installed: 'Only on this account'"
+  step "Click 'Create GitHub App'."
+  say ""
+  note "The App ID is on the App's settings page, under 'App ID'."
+  ask APP_ID "Paste the App ID (digits only):"
+  [[ "$APP_ID" =~ ^[0-9]+$ ]] || { warn "digits only, e.g. 1234567"; ask APP_ID "App ID:"; }
+  write_env APP_ID "$APP_ID"
+else
+  MANIFEST="repo-creds-externalsecret-pat.yaml"
+  warn "A PAT expires, and nothing on either cluster alerts when it does."
+  warn "That is exactly how the QA Flux source ran two days on dead config."
+  say ""
+  say "Mint it on the SHARED automation account if you can reach it — usx-devops"
+  say "is an org owner and already trusted here. A PAT on your own account works"
+  say "today but dies with your offboarding."
+  say ""
+  open_url "https://github.com/settings/personal-access-tokens/new"
+  step "Token name:  argocd-onprem-qa"
+  step "Resource owner: variant-inc   ← NOT your personal account"
+  step "Expiration: the shortest that is workable — you will be swapping it out"
+  step "Repository access: 'Only select repositories' → risingwave-pipeline"
+  step "  (or 'All repositories' so the next app needs no new token)"
+  step "Permissions → Repository → Contents: Read-only. Nothing else."
+  step "Generate. If it says the org must approve, that approval is the same ask"
+  step "  as the App — send REQUEST-GITHUB-APP-OWNER.md instead."
+  say ""
+  ask_secret PAT_TOKEN "Paste the token (hidden):"
+  [[ -n "$PAT_TOKEN" ]] || { warn "nothing pasted"; exit 1; }
+fi
 
 # ──────────────────────────────────────────────────────────────────────────
+if [[ "$CRED_MODE" == "app" ]]; then
 stage "GitHub — private key and installation"
 say "Two things from the App page: a private key, and the installation."
-step "On the App settings page, scroll to 'Private keys' → 'Generate a private key'."
+step "App settings page → 'Private keys' → 'Generate a private key'."
 step "Your browser downloads a .pem file. Note where it landed."
 say ""
 step "Then: left menu → 'Install App' → Install on variant-inc."
-step "Choose 'All repositories', or 'Only select repositories' with"
-step "  risingwave-pipeline selected. Either works; all-repos means the next app"
-step "  onboards with no credential work at all."
+step "'All repositories', or 'Only select repositories' with risingwave-pipeline."
 say ""
 note "After installing you land on a URL ending /settings/installations/<number>."
 note "That trailing number is the Installation ID — it is NOT the App ID."
 ask INSTALL_ID "Paste the Installation ID (digits only):"
-if [[ ! "$INSTALL_ID" =~ ^[0-9]+$ ]]; then
-  warn "digits only, e.g. 87654321"
-  ask INSTALL_ID "Paste the Installation ID again:"
-fi
-[[ "$INSTALL_ID" == "$APP_ID" ]] && warn "that is the same number as the App ID — they are different values; check the URL"
+[[ "$INSTALL_ID" =~ ^[0-9]+$ ]] || { warn "digits only"; ask INSTALL_ID "Installation ID:"; }
+[[ "$INSTALL_ID" == "$APP_ID" ]] && warn "same number as the App ID — they differ; check the URL"
 write_env INSTALL_ID "$INSTALL_ID"
 
 say ""
@@ -430,39 +449,87 @@ ask PEM_PATH "Full path to the downloaded .pem:"
 PEM_PATH="${PEM_PATH/#\~/$HOME}"
 if [[ ! -f "$PEM_PATH" ]]; then
   warn "no file at $PEM_PATH"
-  ask PEM_PATH "Path to the .pem:"
-  PEM_PATH="${PEM_PATH/#\~/$HOME}"
-  [[ -f "$PEM_PATH" ]] || { warn "still not found — re-run when you have it"; exit 1; }
+  ask PEM_PATH "Path to the .pem:"; PEM_PATH="${PEM_PATH/#\~/$HOME}"
+  [[ -f "$PEM_PATH" ]] || { warn "still not found"; exit 1; }
 fi
 if openssl rsa -in "$PEM_PATH" -check -noout >/dev/null 2>&1 \
    || openssl pkey -in "$PEM_PATH" -noout >/dev/null 2>&1; then
   step "private key parses ✓  ($(wc -l < "$PEM_PATH") lines)"
 else
-  warn "openssl cannot parse $PEM_PATH — that is the file Argo CD would reject with"
-  warn "'could not parse private key'. Re-download it and re-run."
+  warn "openssl cannot parse $PEM_PATH — Argo CD would reject it with"
+  warn "'could not parse private key'. Re-download and re-run."
   exit 1
 fi
 write_env PEM_PATH "$PEM_PATH"
+
+else
+stage "GitHub — prove the token can actually read the repo"
+say "Not 'is it a plausible string' — can it read the thing Argo CD will read."
+say "The token is never echoed and never written to disk."
+say ""
+HDRS=$(curl -sI -H "Authorization: Bearer $PAT_TOKEN" \
+         -H "Accept: application/vnd.github+json" \
+         https://api.github.com/repos/variant-inc/risingwave-pipeline/contents/deploy 2>/dev/null || true)
+CODE=$(printf '%s' "$HDRS" | head -1 | awk '{print $2}')
+case "$CODE" in
+  200) step "reads variant-inc/risingwave-pipeline deploy/ ✓  (HTTP 200)" ;;
+  404) warn "HTTP 404 — the token cannot see that repository."
+       warn "Either it was scoped to other repos, or the org has not approved it."
+       exit 1 ;;
+  401) warn "HTTP 401 — the token is invalid or was pasted incompletely."; exit 1 ;;
+  403) warn "HTTP 403 — the org blocked it, or SSO authorisation is pending."
+       note "Fine-grained tokens on an enterprise org often need approval."
+       exit 1 ;;
+  *)   warn "unexpected response: ${CODE:-none}"; exit 1 ;;
+esac
+
+PAT_OWNER=$(curl -s -H "Authorization: Bearer $PAT_TOKEN" https://api.github.com/user \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("login","?"))' 2>/dev/null || echo "?")
+PAT_EXPIRY=$(printf '%s' "$HDRS" | grep -i 'github-authentication-token-expiration' \
+              | cut -d' ' -f2- | tr -d '\r' || true)
+step "owned by: $PAT_OWNER"
+if [[ -n "$PAT_EXPIRY" ]]; then
+  step "expires:  $PAT_EXPIRY"
+  warn "Put that date on INFRA-1647 now. Nothing on this cluster will remind you."
+  write_env PAT_EXPIRY "$PAT_EXPIRY"
+else
+  warn "no expiry reported — a token that never expires is worse, not better"
+fi
+[[ "$PAT_OWNER" == "$GH_ME" ]] && \
+  warn "this is your personal account — a bridge, not the standing answer"
+write_env PAT_OWNER "$PAT_OWNER"
+fi
 
 # ──────────────────────────────────────────────────────────────────────────
 stage "Secrets Manager — merge into $SM_SECRET (QA · 527101283767)"
 warn "This secret already holds the Argo CD admin password."
 say "put-secret-value replaces the WHOLE document, so this reads the current"
-say "value, adds three keys, and shows you the key list before writing anything."
+say "value, adds keys, and shows you the key list before writing anything."
 say ""
 CUR=$(aws --profile usx-qa secretsmanager get-secret-value \
         --secret-id "$SM_SECRET" --query SecretString --output text)
 step "current keys: $(python3 -c 'import json,sys; print(", ".join(sorted(json.load(sys.stdin))))' <<<"$CUR")"
 
-NEW=$(APP_ID="$APP_ID" INSTALL_ID="$INSTALL_ID" PEM_PATH="$PEM_PATH" CUR="$CUR" python3 - <<'PY'
+if [[ "$CRED_MODE" == "app" ]]; then
+  NEW=$(APP_ID="$APP_ID" INSTALL_ID="$INSTALL_ID" PEM_PATH="$PEM_PATH" CUR="$CUR" python3 -c '
 import json, os
 d = json.loads(os.environ["CUR"])
 d["repo.githubAppID"] = os.environ["APP_ID"]
 d["repo.githubAppInstallationID"] = os.environ["INSTALL_ID"]
 d["repo.githubAppPrivateKey"] = open(os.environ["PEM_PATH"]).read()
 print(json.dumps(d))
-PY
-)
+')
+else
+  NEW=$(PAT_OWNER="$PAT_OWNER" PAT_TOKEN="$PAT_TOKEN" CUR="$CUR" python3 -c '
+import json, os
+d = json.loads(os.environ["CUR"])
+# Any non-empty username works when the password is a PAT; the real account is
+# recorded so the next person knows whose credential this is.
+d["repo.username"] = os.environ["PAT_OWNER"]
+d["repo.password"] = os.environ["PAT_TOKEN"]
+print(json.dumps(d))
+')
+fi
 step "keys after merge: $(python3 -c 'import json,sys; print(", ".join(sorted(json.load(sys.stdin))))' <<<"$NEW")"
 say ""
 note "admin.password and admin.passwordMtime must both still be in that list."
@@ -478,10 +545,9 @@ else
   SKIPPED+=("Secrets Manager merge into $SM_SECRET")
   warn "skipped — the manifest will sync to nothing until this is done"
 fi
-unset CUR NEW
+unset CUR NEW PAT_TOKEN
 pause
 
-# ──────────────────────────────────────────────────────────────────────────
 stage "Platform repo — the manifest, on branch op-qa"
 say "One new file, plus one line in the kustomization that is already there."
 cd "$PLATFORM_REPO"
@@ -494,16 +560,16 @@ git checkout -b infra-1647-argocd-git-credential >/dev/null 2>&1 \
 step "working branch: infra-1647-argocd-git-credential"
 
 DEST="$PLATFORM_REPO/infrastructure/argocd-config"
-cp "$PACK/platform/argocd-config/op-qa/repo-creds-externalsecret.yaml" "$DEST/"
-step "copied repo-creds-externalsecret.yaml"
+cp "$PACK/platform/argocd-config/op-qa/$MANIFEST" "$DEST/"
+step "copied $MANIFEST   (credential mode: $CRED_MODE)"
 
-if grep -q 'repo-creds-externalsecret.yaml' "$DEST/kustomization.yaml"; then
+if grep -q "$MANIFEST" "$DEST/kustomization.yaml"; then
   step "kustomization already lists it"
 else
   # a file with no trailing newline swallows an appended line into the last one:
   # exactly the trap that silently merged two documents in prod's infra.yaml.
   [[ -n "$(tail -c1 "$DEST/kustomization.yaml")" ]] && printf '\n' >> "$DEST/kustomization.yaml"
-  printf '  - repo-creds-externalsecret.yaml\n' >> "$DEST/kustomization.yaml"
+  printf '  - %s\n' "$MANIFEST" >> "$DEST/kustomization.yaml"
   step "appended it to kustomization.yaml"
 fi
 pause
@@ -511,7 +577,7 @@ pause
 # ──────────────────────────────────────────────────────────────────────────
 stage "Checks — before the PR, not after the merge"
 cd "$DEST"
-K1=$(grep -c '^kind:' repo-creds-externalsecret.yaml || true)
+K1=$(grep -c '^kind:' "$MANIFEST" || true)
 K2=$(kubectl kustomize . | grep -c '^kind:' || true)
 K3=$(kubectl kustomize . | kq apply --dry-run=client -f - -o name 2>/dev/null | wc -l || true)
 say "documents in the new file : $K1   (want 1)"
@@ -528,7 +594,7 @@ fi
 say ""
 say "Foreign cluster identifiers — this directory family has produced four copy"
 say "defects already (INFRA-1646):"
-if grep -n 'op-usxpress-dev\|op-usxpress-prod\|700736442855\|937464026810' repo-creds-externalsecret.yaml; then
+if grep -n 'op-usxpress-dev\|op-usxpress-prod\|700736442855\|937464026810' "$MANIFEST"; then
   warn "the file names another cluster. Fix before pushing."
   exit 1
 else
