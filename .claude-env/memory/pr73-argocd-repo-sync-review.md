@@ -129,3 +129,15 @@ registers the CRDs. Fix = port QA's split (`argocd` + `argocd-config` with
 `dependsOn` + `wait: true`, from `wip/argocd-qa-rollout/`) back to op-dev. Dev keeps flat
 workers, so do **NOT** carry QA's `global.nodeSelector: {pool: platform}` across — every pod
 would go Pending.
+
+**Verified 2026-08-20:** the Istio VirtualService is still missing — on op-usxpress-qa there
+is no VirtualService and no Gateway in the `argocd` namespace, and `argocd-server` has been
+ClusterIP-only for 27 days. The Argo CD UI has never been reachable from outside the cluster.
+INFRA-1622 stays open on exactly that.
+
+`server.insecure: true` in the HelmRelease means TLS terminates at the gateway, so the route
+has to carry it.
+
+⚠️ **INFRA-1639 (Argo CD SSO for app teams) is blocked behind this, not beside it.** SSO is
+moot while there is no route: app teams cannot reach the UI to log in either way. Order is
+route first, then the Entra app registration.
