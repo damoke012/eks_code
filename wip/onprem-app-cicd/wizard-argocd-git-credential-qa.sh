@@ -357,6 +357,37 @@ stage "GitHub — create the App on variant-inc"
 say "Argo CD will authenticate as a GitHub App rather than a token, so there is"
 say "no expiry date to forget. This is the failure that took the QA Flux source"
 say "down silently for two days on 2026-08-16."
+say ""
+
+# Creating an org App needs OWNER. GitHub answers a settings page you cannot
+# reach with 404, not 403, so without this check the wizard sends you to a page
+# that looks broken rather than forbidden. Verified 2026-08-20: dare-x is a
+# member, and the App route needs someone else.
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  GH_ME=$(gh api user -q .login 2>/dev/null || echo "")
+  GH_ROLE=$(gh api "orgs/variant-inc/memberships/$GH_ME" -q .role 2>/dev/null || echo "unknown")
+  if [[ "$GH_ROLE" == "admin" ]]; then
+    step "$GH_ME is an owner of variant-inc ✓"
+  else
+    warn "$GH_ME is '$GH_ROLE' on variant-inc, not 'admin'."
+    warn "Creating the App needs an owner. The New GitHub App page will 404."
+    note ""
+    note "Owners who can create it:"
+    gh api 'orgs/variant-inc/members?role=admin&per_page=100' -q '.[].login' 2>/dev/null \
+      | while read -r o; do note "  $o"; done
+    note ""
+    note "Stages 2 and 3 below are exactly what an owner needs to do — send them."
+    note "To ship without waiting, use the PAT variant instead:"
+    note "  platform/argocd-config/op-qa/repo-creds-externalsecret-pat.yaml"
+    note "  and put repo.username / repo.password in $SM_SECRET."
+    note "Swapping App for PAT later is a three-key change inside the same"
+    note "ExternalSecret, with the same Secret name — Argo CD never notices."
+    confirm "Continue anyway (an owner is doing this part)?" || exit 0
+  fi
+else
+  note "gh not authenticated — cannot check whether you own variant-inc."
+  note "If the page 404s, you are a member and creating the App needs an owner."
+fi
 open_url "https://github.com/organizations/variant-inc/settings/apps/new"
 step "GitHub App name:  argocd-onprem"
 step "Homepage URL: any valid URL — https://github.com/variant-inc is fine"
