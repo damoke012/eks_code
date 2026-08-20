@@ -379,18 +379,80 @@ if [[ -z "$CRED_MODE" ]]; then
     warn "creating an org App needs owner rights, which you do not have."
     note "GitHub answers that settings page with 404, not 403, so it reads as a"
     note "broken link rather than a permission you're missing."
-    note ""
     note "Send REQUEST-GITHUB-APP-OWNER.md to an owner — that is the durable fix."
-    note "Meanwhile a PAT proves the whole delivery path today, and swapping to"
-    note "the App later is three keys in the same ExternalSecret, same Secret"
-    note "name: Argo CD sees a credential change, not a replacement."
-    confirm "Continue with a PAT?" || exit 0
-    CRED_MODE=pat
+    note ""
+    REPO_ADMIN=$(gh api repos/variant-inc/risingwave-pipeline -q .permissions.admin 2>/dev/null || echo false)
+    if [[ "$REPO_ADMIN" == "true" ]]; then
+      step "you DO have admin on risingwave-pipeline"
+      note "So a repository deploy key is available today: owned by the repo, no"
+      note "expiry, not tied to any person. Per-repo rather than org-wide, which"
+      note "is the only thing the App buys over it."
+      note ""
+      note "A fine-grained PAT is owned by a USER account even when the resource"
+      note "owner is the org — there is no PAT that is not tied to a person,"
+      note "except one minted on a shared account like usx-devops."
+      if confirm "Use a repository deploy key?"; then
+        CRED_MODE=ssh
+      else
+        confirm "Fall back to a PAT (tied to a person, expires)?" || exit 0
+        CRED_MODE=pat
+      fi
+    else
+      note "No admin on risingwave-pipeline either, so a deploy key is out."
+      confirm "Continue with a PAT?" || exit 0
+      CRED_MODE=pat
+    fi
   fi
 fi
 write_env CRED_MODE "$CRED_MODE"
 
-if [[ "$CRED_MODE" == "app" ]]; then
+# The Secret Argo CD ends up reading. app/pat share one org-wide repo-creds
+# object; ssh is a per-repository `repository` object with an exact URL.
+case "$CRED_MODE" in
+  ssh) SECRET_NAME="argocd-repo-risingwave-pipeline" ;;
+  *)   SECRET_NAME="argocd-repo-creds-variant-inc" ;;
+esac
+write_env SECRET_NAME "$SECRET_NAME"
+
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  MANIFEST="repo-ssh-externalsecret.yaml"
+  SSH_KEY="$HOME/.ssh/argocd-rw-pipeline"
+  REPO_SSH_URL="ssh://git@github.com/variant-inc/risingwave-pipeline.git"
+  say "A deploy key belongs to the REPOSITORY. It survives offboarding, it does"
+  say "not expire, and it needs admin on one repo rather than ownership of the"
+  say "org — which is why it is available to you today and the App is not."
+  say ""
+  warn "The trade is scope: per-repository, so app number two needs its own key."
+  warn "The org App stays the target because it collapses that back to one object."
+  say ""
+  if [[ -f "$SSH_KEY" ]]; then
+    step "key already present: $SSH_KEY"
+    step "fingerprint: $(ssh-keygen -lf "$SSH_KEY.pub" | awk '{print $2}')"
+  else
+    say "No key yet. This creates one and registers it read-only on the repo."
+    if confirm "Generate and register a read-only deploy key?"; then
+      ssh-keygen -t ed25519 -C "argocd-onprem-qa read-only deploy key" \
+        -f "$SSH_KEY" -N "" >/dev/null
+      gh api -X POST repos/variant-inc/risingwave-pipeline/keys \
+        -f title='argocd-onprem-qa (read-only)' \
+        -f key="$(cat "$SSH_KEY.pub")" -F read_only=true >/dev/null
+      step "registered ✓"
+    else
+      warn "nothing to store without a key"; exit 1
+    fi
+  fi
+  # Prove it is READ-ONLY on GitHub's side rather than trusting the request we
+  # sent. A writable deploy key would hand Argo CD push rights it must not have.
+  RO=$(gh api repos/variant-inc/risingwave-pipeline/keys \
+        -q ".[] | select(.title==\"argocd-onprem-qa (read-only)\") | .read_only" 2>/dev/null | head -1)
+  if [[ "$RO" == "true" ]]; then
+    step "GitHub reports the key read_only=true ✓"
+  else
+    warn "GitHub reports read_only='$RO' — a writable key gives Argo CD push rights."
+    confirm "Continue anyway?" || exit 1
+  fi
+  write_env SSH_KEY "$SSH_KEY"
+elif [[ "$CRED_MODE" == "app" ]]; then
   MANIFEST="repo-creds-externalsecret.yaml"
   open_url "https://github.com/organizations/variant-inc/settings/apps/new"
   step "GitHub App name:  argocd-onprem"
@@ -428,7 +490,25 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────
-if [[ "$CRED_MODE" == "app" ]]; then
+if [[ "$CRED_MODE" == "ssh" ]]; then
+stage "GitHub — prove the deploy key can read the repo"
+say "Not 'does the file look like a key' — can it fetch the ref Argo CD reads."
+say ""
+if GIT_SSH_COMMAND="ssh -i $SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+     git ls-remote "$REPO_SSH_URL" master >/dev/null 2>&1; then
+  SHA=$(GIT_SSH_COMMAND="ssh -i $SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+          git ls-remote "$REPO_SSH_URL" master | awk '{print substr($1,1,8)}')
+  step "reads $REPO_SSH_URL ✓"
+  step "master is at $SHA — the commit Argo CD will compare against"
+else
+  warn "cannot read the repository with that key."
+  note "  key:  $SSH_KEY"
+  note "  repo: $REPO_SSH_URL"
+  note "Registered on the right repo?  gh api repos/variant-inc/risingwave-pipeline/keys"
+  exit 1
+fi
+
+elif [[ "$CRED_MODE" == "app" ]]; then
 stage "GitHub — private key and installation"
 say "Two things from the App page: a private key, and the installation."
 step "App settings page → 'Private keys' → 'Generate a private key'."
@@ -510,7 +590,17 @@ CUR=$(aws --profile usx-qa secretsmanager get-secret-value \
         --secret-id "$SM_SECRET" --query SecretString --output text)
 step "current keys: $(python3 -c 'import json,sys; print(", ".join(sorted(json.load(sys.stdin))))' <<<"$CUR")"
 
-if [[ "$CRED_MODE" == "app" ]]; then
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  NEW=$(SSH_KEY="$SSH_KEY" CUR="$CUR" python3 -c '
+import json, os
+d = json.loads(os.environ["CUR"])
+# The PEM keeps its real newlines through json.dumps as \n, and ESO writes them
+# back out as newlines. A key pasted as one line fails inside the repo-server,
+# while the ExternalSecret keeps reporting SecretSynced.
+d["repo.risingwave-pipeline.sshPrivateKey"] = open(os.environ["SSH_KEY"]).read()
+print(json.dumps(d))
+')
+elif [[ "$CRED_MODE" == "app" ]]; then
   NEW=$(APP_ID="$APP_ID" INSTALL_ID="$INSTALL_ID" PEM_PATH="$PEM_PATH" CUR="$CUR" python3 -c '
 import json, os
 d = json.loads(os.environ["CUR"])
@@ -572,6 +662,26 @@ else
   printf '  - %s\n' "$MANIFEST" >> "$DEST/kustomization.yaml"
   step "appended it to kustomization.yaml"
 fi
+
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  # A `repository` secret matches ONE exact URL. An https:// Application will
+  # not match it and fails with `authentication required` — indistinguishable
+  # from having no credential at all. So this moves in the same PR, never after.
+  AS="$PLATFORM_REPO/infrastructure/argocd-apps/applicationset-qa.yaml"
+  if [[ -f "$AS" ]]; then
+    if grep -q "$REPO_SSH_URL" "$AS"; then
+      step "ApplicationSet already on the ssh URL"
+    else
+      sed -i "s|https://github.com/variant-inc/risingwave-pipeline.git|$REPO_SSH_URL|" "$AS"
+      step "ApplicationSet repoURL → $REPO_SSH_URL"
+    fi
+    grep -n 'repoURL' "$AS" | while read -r l; do note "  $l"; done
+  else
+    warn "no applicationset-qa.yaml at $AS — the Application will not match the"
+    warn "credential until its repoURL is the ssh one."
+    SKIPPED+=("ApplicationSet repoURL → ssh")
+  fi
+fi
 pause
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -591,6 +701,23 @@ else
   step "all three agree ✓"
 fi
 
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  say ""
+  say "Credential URL vs Application URL — these must be identical, not merely"
+  say "similar. This is the whole failure mode of a `repository` secret:"
+  U_SEC=$(grep -oE 'ssh://[^"]+' "$MANIFEST" | head -1)
+  U_APP=$(grep -oE 'ssh://[^ ]+' "$PLATFORM_REPO/infrastructure/argocd-apps/applicationset-qa.yaml" 2>/dev/null | head -1)
+  say "  secret:      ${U_SEC:-<none>}"
+  say "  application: ${U_APP:-<none>}"
+  if [[ -n "$U_SEC" && "$U_SEC" == "$U_APP" ]]; then
+    step "identical ✓"
+  else
+    warn "they differ — Argo CD will report 'authentication required', which"
+    warn "looks exactly like no credential at all."
+    confirm "Continue anyway?" || exit 1
+  fi
+fi
+
 say ""
 say "Foreign cluster identifiers — this directory family has produced four copy"
 say "defects already (INFRA-1646):"
@@ -606,6 +733,7 @@ pause
 stage "Raise the PR"
 cd "$PLATFORM_REPO"
 git add infrastructure/argocd-config/
+[[ "$CRED_MODE" == "ssh" ]] && git add infrastructure/argocd-apps/ || true
 git commit -q -m "argocd: org-scoped Git credential for variant-inc (INFRA-1647)
 
 Argo CD on op-usxpress-qa holds no Git credential at all -- no secret carries
@@ -649,20 +777,32 @@ command -v flux >/dev/null 2>&1 \
 
 say ""
 say "1. ESO synced the secret:"
-kq -n argocd get externalsecret argocd-repo-creds-variant-inc || true
+kq -n argocd get externalsecret "$SECRET_NAME" || true
 
 say ""
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  note "expecting label argocd.argoproj.io/secret-type: repository"
+else
+  note "expecting label argocd.argoproj.io/secret-type: repo-creds"
+fi
 say "2. The LABEL is on the Secret. ESO does not copy labels from the"
 say "   ExternalSecret, so without this Argo CD ignores a perfectly good"
 say "   credential and says nothing:"
-kq -n argocd get secret argocd-repo-creds-variant-inc \
+kq -n argocd get secret "$SECRET_NAME" \
   -o jsonpath='{.metadata.labels}{"\n"}' || true
 
 say ""
-say "3. The url is a PREFIX of the Application's repoURL, character for character:"
-kq -n argocd get secret argocd-repo-creds-variant-inc \
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  say "3. The url matches the Application's repoURL EXACTLY — a repository"
+  say "   credential is not a prefix, it is one URL:"
+else
+  say "3. The url is a PREFIX of the Application's repoURL, character for character:"
+fi
+kq -n argocd get secret "$SECRET_NAME" \
   -o jsonpath='{.data.url}' 2>/dev/null | base64 -d; echo
-note "want https://github.com/variant-inc — no trailing slash, no .git"
+kq -n argocd get application risingwave-etl \
+  -o jsonpath='{.spec.source.repoURL}{"\n"}' 2>/dev/null || true
+note "those two lines must agree"
 
 say ""
 say "4. THE check — Argo CD actually reads the repository:"
@@ -672,9 +812,10 @@ note "want: Synced Healthy"
 
 say ""
 say "Still failing? The symptom names the cause:"
-note "  authentication required     → the url prefix does not match (check 3)"
-note "  could not parse private key → the PEM lost its newlines"
+note "  authentication required     → the urls in check 3 do not match"
+note "  could not parse private key → the key lost its newlines in transit"
 note "  404 on the installation     → the App was created but never installed"
+note "  Permission denied (publickey) → the deploy key is on a different repo"
 note "  repo-server logs:  kubectl --kubeconfig=$QA_KUBECONFIG --context $QA_CTX \\"
 note "                       -n argocd logs deploy/argocd-repo-server --tail=50"
 pause
@@ -688,12 +829,18 @@ say ""
 say "Prod is the identical change with op-usxpress-prod/platform/argocd in"
 say "account 937464026810, and it lands with INFRA-1636, not before."
 say ""
-if [[ -f "$PEM_PATH" ]] && confirm "Delete the downloaded private key at $PEM_PATH?"; then
+if [[ "$CRED_MODE" == "ssh" ]]; then
+  note "the deploy key stays at $SSH_KEY — Secrets Manager holds the copy the"
+  note "cluster uses, and you may want the local one to rotate it later."
+  note "It is not tied to your GitHub account: the repo owns it, so offboarding"
+  note "does not revoke it. Revoke by deleting the key on the repo."
+fi
+if [[ "${PEM_PATH:-}" && -f "${PEM_PATH:-}" ]] && confirm "Delete the downloaded private key at $PEM_PATH?"; then
   rm -f "$PEM_PATH"
   step "deleted — Secrets Manager now holds the only copy"
 else
-  warn "the private key is still on disk at $PEM_PATH"
-  SKIPPED+=("delete the local .pem at $PEM_PATH")
+  [[ "${PEM_PATH:-}" ]] && { warn "the private key is still on disk at $PEM_PATH"
+    SKIPPED+=("delete the local .pem at $PEM_PATH"); }
 fi
 note "captured values (not the key): $ENV_FILE"
 
