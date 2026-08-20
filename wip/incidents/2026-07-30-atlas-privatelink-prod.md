@@ -1,143 +1,98 @@
-# PROD — Orders ↔ MongoDB Atlas PrivateLink blackhole (2026-07-30)
+# PROD — Orders ↔ MongoDB Atlas: pool paused (2026-07-30)
 
 **Cluster:** `usxpress-prod` (EKS, acct 937464026810, us-east-2)
-**Symptom:** `orders` API — `MongoDB.Driver` throws
+**Symptom:** `orders/order-api` — `MongoDB.Driver`:
 `The connection pool is in paused state for server pl-0-us-east-2.1cr18.mongodb.net:1025`
 from `OrdersRepository.FindManyByOrderIdsAsync`.
 
-**Conclusion: the Atlas PrivateLink path is dead. Every AWS-side component is healthy.**
-Escalate to MongoDB Atlas — there is no cluster-side fix.
+> ## ⚠️ RETRACTION — the network diagnosis in the first version of this note was WRONG
+>
+> An earlier revision concluded the Atlas PrivateLink endpoint was blackholing and told the reader to
+> escalate to MongoDB. **That was a measurement error, not a finding.** The probe used was
+> `cat < /dev/tcp/HOST/PORT`, which opens the socket and then *blocks reading*. TLS/443 and MongoDB both wait
+> for the client to speak first, so `cat` hangs on a perfectly healthy connection and `timeout` reports exit
+> 124. Every "blackhole" reading came from that.
+>
+> The tell was ignored for too long: `connect-connect-0` "failed" to reach `1.1.1.1:443` while that same pod
+> was demonstrably connected to Confluent Cloud over the internet. Two things that cannot both be true.
+>
+> Re-tested with `exec 3<>/dev/tcp/HOST/PORT`, which returns on TCP handshake and reads nothing:
+>
+> | from | `1.1.1.1:443` | `89.194.134.107:27017` (Atlas public) | `10.16.6.113:1025` (PrivateLink) |
+> |---|---|---|---|
+> | `kafka/connect-connect-0` | OPEN | OPEN | **OPEN** |
+> | `orders/order-api` | OPEN | OPEN | **OPEN** |
+>
+> **The network is healthy end to end. Do not raise a MongoDB case on this basis.**
 
 ---
 
-## Evidence chain (all verified, not inferred)
+## Where the problem actually is
 
-| Layer | Result |
-|---|---|
-| DNS | ✅ `pl-0-us-east-2.1cr18.mongodb.net` → `10.16.6.113`, `10.16.8.87`, `10.16.11.221` |
-| VPC endpoint `vpce-06e6cad5b697c515a` | ✅ `State: available`, created 2024-07-16 (worked for a year) |
-| Endpoint ENIs | ✅ all three `in-use`, one per subnet |
-| Endpoint SG `sg-0c8f8db29b16a1477` | ✅ all TCP from `10.16.0.0/20` — covers every node |
-| Subnet NACLs | ✅ allow all, both directions |
-| Cilium network policy | ✅ none exist in the cluster |
-| Istio | ✅ test ran as UID 1337 (excluded from redirection) — still fails |
-| Node SG `eks-cluster-sg-usxpress-prod-…` | ✅ egress `0.0.0.0/0` all traffic |
-| Node subnet | ⚠️ `subnet-0f854a974f2658c9d` — **the same subnet as one endpoint ENI**, so this is local traffic: no routing, NAT or gateway involved |
-| **TCP from pod netns** | ❌ timeout on all 3 ENIs, port 1025 |
-| **TCP from node/host netns** | ❌ timeout — so not pod networking, policy, or masquerade |
-| **TCP ports 1024 / 1025 / 1026 / 27017** | ❌ all timeout — endpoint blackholes entirely |
-| **9 distinct nodes + a Connect pod + both Orders replicas** | ❌ all timeout — not node-specific |
-| Method control: same test → `172.20.0.10:53` | ✅ `OPEN` — the `/dev/tcp` probe is sound |
+Network, DNS and AWS config are all verified good, so a paused pool must originate at the driver/server
+layer. In the .NET driver a pool is *paused* when SDAM marks that server Unknown after a failure during
+connection establishment or heartbeat — so the useful question is **what the original failure was**, which
+appears in the logs *before* the "paused state" messages start repeating.
 
-**Atlas itself is UP.** All 27 Kafka Connect Mongo connectors report `READY=True`, and there is only one
-Atlas VPC endpoint in the account — so Connect reaches Atlas over the public path via NAT. Mongo is serving;
-only the private path is broken.
+Candidates, in the order I would check them:
 
-`10.16.6.113` is in the same `/20` as the node that tested it (`10.16.6.218`), so this isn't even a routing
-question — SG open, ENI present, nothing answering.
+1. **Auth failure** on connection creation — pauses the pool exactly like a network fault. Would follow a
+   credential rotation on the Atlas user.
+2. **TLS handshake failure** — Atlas CA rotation, or the app's trust store.
+3. **A genuinely unhealthy replica-set member.** The connection string sets `readPreference=secondary`, so
+   reads only ever target secondaries. One sick secondary breaks reads while the cluster looks healthy.
+4. **Pool saturation** — `maxPoolSize=300` per pod; under load, waits queue and time out.
+5. Atlas-side cluster event (election, maintenance, resync).
 
-## The mechanism (why there is no client-side workaround)
+## Verified facts (these stand)
 
-Orders' connection string is the **standard SRV**, not a private-endpoint one:
+- DNS: `_mongodb._tcp.mongodb.1cr18.mongodb.net` → `mongodb-shard-00-0{0,1,2}:27017`;
+  TXT `authSource=admin&replicaSet=atlas-qy8w3t-shard-0`. Shard hosts resolve public
+  (`89.194.134.107`); `pl-0-us-east-2` → the VPC endpoint. Same answers inside and outside the cluster.
+- VPC endpoint `vpce-06e6cad5b697c515a` available, 3 ENIs in-use, SG allows all TCP from `10.16.0.0/20`,
+  node SG egress `0.0.0.0/0`, no NACL denies. No Cilium network policies exist.
+- **Members advertise `pl-0-…:1024/1025/1026`** — the driver connects to a public seed, runs `hello`, and is
+  handed private-endpoint hostnames. That part is by design and works, since the endpoint is reachable.
+- Connection strings live in **Helm chart secrets**, not ExternalSecrets → not an ESO sync problem.
+- Atlas status page: no incidents affecting us-east-2, PrivateLink, or private endpoints.
 
-```
-mongodb+srv://***@mongodb.1cr18.mongodb.net/enterprise?maxPoolSize=300&readPreference=secondary&appName=orders-api-poc
-```
+## Estates
 
-DNS resolves correctly and publicly:
+- **Atlas `mongodb.1cr18.mongodb.net`** — `orders/order-api` *and* the 27 `kafka` Mongo connectors
+  (`connect-secrets:Mongo_Enterprise_Connection_Uri`). Note "Enterprise" in that key name refers to the
+  database, not the self-hosted estate.
+- **Self-hosted on-prem** `USXMONGODB1/2/3.usxpress.com:27000` (`replicaSet=prod1`) —
+  `enterprise/ingestor-chart` only.
 
-```
-_mongodb._tcp.mongodb.1cr18.mongodb.net → mongodb-shard-00-0{0,1,2}.1cr18.mongodb.net:27017
-TXT                                     → authSource=admin&replicaSet=atlas-qy8w3t-shard-0
-mongodb-shard-00-00.1cr18.mongodb.net   → 89.194.134.107  (PUBLIC — same answer from inside the cluster)
-pl-0-us-east-2.1cr18.mongodb.net        → 10.16.6.113 / 10.16.8.87 / 10.16.11.221  (the VPC endpoint)
-```
+## Next steps
 
-So the driver reaches a **public** seed, runs `hello`, and the replica-set members **advertise themselves as
-`pl-0-us-east-2.1cr18.mongodb.net:1024/1025/1026`**. The driver then abandons the public names for the
-advertised private ones — which blackhole. The pool for `:1025` pauses, and no client configuration can
-route around it, because the member list comes from Atlas, not from us.
+1. Find the **original** exception in the Orders app log, before the repeating "paused state" lines — it
+   names the real cause (auth / TLS / timeout).
+2. Establish whether it is constant or intermittent, and when it started.
+3. Only then decide whether this is an app-side fix (pool sizing, read preference, retry policy) or an Atlas
+   cluster-health question.
 
-`readPreference=secondary` makes it worse: reads only ever target secondaries, so losing those members
-breaks reads outright.
+## Unrelated issues found while triaging
 
-Note `PrivateDnsEnabled: false` on the VPC endpoint — Atlas is advertising the private hostnames from the
-replica-set config, not via a DNS override on our side.
+- `kafka/connect-connect-1` — CrashLoop, 109 restarts / 10h on `ip-10-16-10-66`; exits code 2 after ~87s with
+  `UnknownHostException` on Confluent brokers. Workers 0 and 2 healthy. Its node also timed out serving
+  kubelet logs.
+- `geoservices/data-address-api` — 70 restarts, and `mcleod-data-sync/mosh` 1–13, all on that same node,
+  which reports `Ready` with clean conditions.
+- `rabbitmq-system` — 4 pods `ImagePullBackOff`. `wiz/wiz-sensor` — stuck `Terminating` 11h.
+- **No VPC flow logs on `vpc-089f99053feed0cad`** — packet-level evidence was unavailable. Worth enabling.
 
-## Blast radius — WIDER than first assessed
+## Method notes — five wrong turns, and the fix for each
 
-Two Mongo estates, and **Kafka Connect is on the Atlas one**:
+1. **CoreDNS `i/o timeout` to corp forwarders** — historical lines surfaced by `--tail`, read as current.
+   Zero in the last 30 min. *Check timestamps before treating a log line as live.*
+2. **Connect rebalance churn** — disproved; `connect-connect-0` logged zero rebalances.
+3. **Pod CIDR vs endpoint SG** — wrong; `172.24.0.0/16` is a Cilium overlay, not a VPC CIDR.
+4. **"Connect proves Atlas is up"** — wrong; Connect uses the same cluster, and `RUNNING` connectors prove
+   nothing about live connectivity.
+5. **The `cat < /dev/tcp` probe** — the big one. *Validate an instrument against a known-good AND a
+   known-bad target before trusting it. A result that contradicts a known fact means the instrument is
+   wrong, not the fact.*
 
-- **Atlas** (`mongodb.1cr18.mongodb.net`) — `orders/order-api` **and** all 27 `kafka` Mongo
-  source/sink connectors (`connect-secrets:Mongo_Enterprise_Connection_Uri` →
-  `mongodb+srv://…@mongodb.1cr18.mongodb.net/`). **All affected.**
-- **Self-hosted on-prem** (`USXMONGODB1/2/3.usxpress.com:27000`, `replicaSet=prod1`) —
-  `enterprise/ingestor-chart` only. **Not affected.**
-
-⚠️ **`KafkaConnector READY=True` / task `RUNNING` is NOT proof of connectivity.** A Connect task stays
-RUNNING on an idle or stale connection and only fails once it tries and exhausts retries. `connect-connect-0`
-itself cannot open TCP to the endpoint — so the Mongo CDC pipeline is very likely stalled even though every
-connector reports healthy. **Check topic lag / last committed offsets before telling anyone data is flowing.**
-
-The Mongo connection strings come from the Helm chart secrets, **not** from ExternalSecrets (the only ESO
-objects in `orders` are Kafka and Azure AD, all `SecretSynced`). So credential rotation is ruled out as a
-cause.
-
-## What to give MongoDB support
-
-- VPC endpoint: `vpce-06e6cad5b697c515a`
-- Endpoint service: `com.amazonaws.vpce.us-east-2.vpce-svc-07a355fc8047ca10d`
-- Atlas project/cluster hash from the hostname: `1cr18`, region `us-east-2`
-- AWS shows the endpoint `available`; AWS only reports its own half of the connection, so an endpoint dead on
-  the provider side still shows healthy here.
-
-Check first in the Atlas UI: **Network Access → Private Endpoint** status for that project, and the cluster's
-own state (paused / resized / maintenance all produce this).
-
-## Blast radius — confirm before declaring
-
-Orders is confirmed affected. **Anything else connecting via a `pl-0-*` host is equally affected** and should
-be enumerated rather than assumed. Apps reaching Atlas by the standard SRV hostname are unaffected.
-
-## Workaround — do NOT apply unilaterally
-
-Orders could be pointed at the standard Atlas SRV endpoint, which we know works (Kafka Connect uses it). That
-moves the traffic out of the VPC and over NAT — a security-posture change that needs the owner of the Atlas
-/ network design to agree. Raise as an option; don't ship it during triage.
-
-## Separate issues found while triaging (not this incident)
-
-- **`kafka/connect-connect-1`** — CrashLoop, 109 restarts / 10h, on `ip-10-16-10-66`. Exits code 2 after ~87s
-  with `UnknownHostException` on Confluent brokers → `Failed to connect to and describe Kafka cluster`. Not
-  OOM (limit 4Gi, `Reason: Error`). Workers 0 and 2 are healthy and the connectors are unaffected, so it is
-  contained — but that node's kubelet also timed out serving logs (`10.16.10.66:10250`).
-- **`geoservices/data-address-api`** — 70 restarts, and `mcleod-data-sync/mosh` 1–13 restarts, all on that
-  same node. The node reports `Ready` with clean conditions, so this needs looking at on its own.
-- **`rabbitmq-system`** — 4 pods in `ImagePullBackOff`.
-- **`wiz/wiz-sensor`** — stuck `Terminating` 11h.
-
-## Method note — wrong turns, and what corrected them
-
-1. **CoreDNS `i/o timeout` to the corp forwarders** — read as current, were **historical** (`--tail` surfaces
-   old lines). Zero in the last 30 min; the forwarders answer fine when queried directly. Nearly escalated a
-   corp-DNS outage that did not exist.
-2. **Connect rebalance churn** — disproved: `connect-connect-0` logged zero rebalances.
-3. **"Pods are on a VPC secondary CIDR so the endpoint SG blocks them"** — wrong: `172.24.0.0/16` is a Cilium
-   overlay, the VPC is only `10.16.0.0/20`, and traffic is masqueraded to the node IP.
-4. **"Kafka Connect proves Atlas is up"** — wrong twice. Connect uses the **same** Atlas cluster, and
-   `RUNNING` connectors prove nothing; `connect-connect-0` cannot reach the endpoint either.
-5. **"Node-specific egress fault"** — wrong: nine nodes fail identically and node SG egress is wide open.
-6. **Ad-hoc `kubectl run` probe pods in prod** — called out and stopped. Everything after that used existing
-   containers (`istio-proxy`, `cilium`) or the AWS API. See memory `no-test-pods-in-prod`.
-
-**What actually cut through:** the app's own stack trace (`connection pool is in paused state for
-pl-0-…:1025`), and validating the probe against a known-good target before trusting its failures. Triage
-started from cluster symptoms instead of the reported error, and that cost most of the session.
-
-
-
-Two dead ends were chased before the real error text arrived: CoreDNS `i/o timeout` lines to the corp
-resolvers (**historical** — `--tail` surfaced old entries; zero in the last 30 min, and the forwarders answer
-fine), and a Connect rebalance theory (**disproved** — worker-0 logged zero rebalances). Both cost time
-because triage started from cluster symptoms rather than the reported error. **Get the exact error text
-first.**
+Triage started from cluster symptoms rather than the reported error. The app stack trace, once supplied, was
+worth more than everything before it.
