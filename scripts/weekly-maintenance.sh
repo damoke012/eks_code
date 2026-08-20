@@ -65,5 +65,20 @@ else
   fence "no .claude-env — a rebuild would destroy skills, router and memory"; findings=$((findings+1))
 fi
 
+section "6. Cluster checks worth running by hand"
+# Not run here: they need a live cluster and a pinned --context, and this script
+# is deliberately runnable anywhere. Listed so they are not forgotten -- every
+# one of these caught a real defect that reported success at every other layer.
+fence "scripts/check-service-ports-listening.sh <ns> --context <ctx>"
+fence "   does anything listen where each Service routes? (INFRA-1654: eleven weeks)"
+fence "scripts/check-onprem-route.sh <host> --context <ctx> [--tls-port N]"
+fence "   route -> backend -> authoritative DNS vs local resolver -> HTTP/SNI (INFRA-1622)"
+fence "scripts/check-postgres-secret-usable.sh"
+fence "   authenticates, rather than comparing hashes (INFRA-1652: eight days)"
+fence "scripts/check-foreign-cluster-ids.sh <checkout> <branch> --diff <base>"
+fence "   another cluster's account/DNS/IPs in a branch (nine instances by 2026-08-20)"
+fence "scripts/audit-ecr-policies.sh --profile infra-common --region us-east-2 --summary"
+fence "   who can push to the shared registry (INFRA-1655: 515 of 517)"
+
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
 exit 0
