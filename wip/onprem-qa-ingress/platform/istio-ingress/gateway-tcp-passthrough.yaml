@@ -1,0 +1,48 @@
+# TLS-PASSTHROUGH Gateway for the on-prem TCP plane — op-usxpress-qa.
+#
+# INFRA-1645. Ported from `origin/op-dev` 2026-08-20, where it was persisted at
+# Phase 1 (INFRA-1494) closure on 2026-06-01. QA's two L4 VirtualServices
+# (risingwave-routes/virtualservice-sql.yaml, virtualservice-postgres.yaml) have
+# been selecting this Gateway by name since the branch was created and it was
+# never defined here — so they bind to nothing, silently. A VirtualService whose
+# Gateway does not exist reports no error, no status condition and no event.
+#
+# The host suffix is the ONLY intended difference from op-dev. QA's ingress
+# DaemonSet already binds hostPort 4567 and 5432 (identical postRenderer in
+# infrastructure/istio-ingress/release.yaml), so no other change is required.
+#
+# Adding a new TCP service:
+#   1. Add a `servers:` entry for a new port (or reuse an existing protocol slot).
+#   2. Add a VirtualService selecting this gateway with a `tls.match.sniHosts`
+#      and `route.destination` to the backend Service.
+#
+# Backends must terminate TLS themselves (PASSTHROUGH = the gateway does not).
+
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: tcp-passthrough
+  namespace: istio-ingress
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  # PostgreSQL wire / RisingWave SQL on 4567
+  - port:
+      number: 4567
+      name: rwsql-passthrough
+      protocol: TLS
+    tls:
+      mode: PASSTHROUGH
+    hosts:
+    - "*.op-qa.usxpress.io"
+
+  # PostgreSQL wire on 5432
+  - port:
+      number: 5432
+      name: postgres-passthrough
+      protocol: TLS
+    tls:
+      mode: PASSTHROUGH
+    hosts:
+    - "*.op-qa.usxpress.io"

@@ -1,0 +1,40 @@
+# INFRA-1645. Corrected for op-usxpress-qa 2026-08-20.
+#
+# This file arrived on the op-qa branch as a verbatim copy of the dev branch's:
+# it advertised the DEV hostname for this service and targeted dev's seven
+# worker addresses. The destination was always QA-correct, so nothing looked wrong in
+# the cluster — the route simply published a hostname belonging to another
+# environment. Ninth instance of the copied-identifier class.
+#
+# It also selected Gateway "tcp-passthrough", which did not exist on this branch
+# until the same PR added infrastructure/istio-ingress/gateway-tcp-passthrough.yaml.
+# A VirtualService bound to a missing Gateway reports no error and never serves.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: rw-sql-passthrough
+  namespace: istio-ingress
+  labels:
+    app.kubernetes.io/managed-by: flux
+    team: risingwave
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: rw-sql.op-qa.usxpress.io
+    # QA's ingress Service is ClusterIP with hostNetwork, so external-dns has no
+    # address to derive a target from. Same three addresses the working QA routes
+    # use (risingwave-dashboard).
+    external-dns.alpha.kubernetes.io/target: "10.10.82.23,10.10.82.106,10.10.82.139"
+spec:
+  hosts:
+    - rw-sql.op-qa.usxpress.io
+  gateways:
+    - tcp-passthrough
+  tls:
+    - match:
+        - port: 4567
+          sniHosts:
+            - rw-sql.op-qa.usxpress.io
+      route:
+        - destination:
+            host: ghostunnel-rw-sql.risingwave.svc.cluster.local
+            port:
+              number: 4567
