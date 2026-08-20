@@ -90,14 +90,15 @@ else
   ok "authoritative NS: $NS"
   AUTH=$(dig +short @"$NS" "$HOST" A 2>/dev/null | tr '\n' ' ')
   LOCAL=$(dig +short "$HOST" A 2>/dev/null | tr '\n' ' ')
-  NEGTTL=$(dig +noall +authority "$HOST" 2>/dev/null | awk 'NR==1{print $2}')
+  # negative-cache TTL is the LAST field of the zone SOA, not the record TTL
+  NEGTTL=$(dig +short @"$NS" SOA "$ZONE" 2>/dev/null | awk '{print $NF}')
 
   if [ -n "$AUTH" ]; then ok "authoritative answer: $AUTH"; else bad "authoritative answer: NONE -- the record is not in $ZONE"; fi
   if [ -n "$LOCAL" ]; then ok "this machine resolves: $LOCAL"; else bad "this machine resolves: NOTHING"; fi
 
   if [ -n "$AUTH" ] && [ -z "$LOCAL" ]; then
     echo "         >> The record EXISTS. Your resolver is serving a cached negative answer."
-    echo "         >> Negative TTL on the SOA: ${NEGTTL:-unknown}s. Wait it out, or use"
+    echo "         >> Negative TTL on the SOA: ${NEGTTL:-unknown} seconds. Wait it out, or use"
     echo "         >>   curl --resolve $HOST:443:${AUTH%% *} https://$HOST/"
     echo "         >> WSL forwards to the Windows host resolver, which caches separately:"
     echo "         >>   ipconfig /flushdns   (from Windows)"

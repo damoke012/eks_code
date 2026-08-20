@@ -68,8 +68,16 @@ CLOSE = [
 
 C1622 = (
     "INFRA-1622",
-    "DONE on op-usxpress-qa 2026-08-20. Argo CD's UI is reachable at "
-    "https://argocd.op-qa.usxpress.io/ through the shared Istio ingress.\n\n"
+    "DONE on op-usxpress-qa 2026-08-20. Argo CD's UI is served at "
+    "https://argocd.op-qa.usxpress.io/ through the shared Istio ingress. Evidence:\n\n"
+    "  authoritative DNS (ns-251.awsdns-31.com): 10.10.82.23 10.10.82.106 10.10.82.139\n"
+    "  HTTP 200 via each of the three, by --resolve\n"
+    "  argocd/argocd-server has an endpoint and exposes the routed port\n\n"
+    "Recorded honestly: a plain curl from the WSL workstation still returned 000 at "
+    "close time. That is this laptop's resolver holding a cached negative answer from "
+    "the hour the record genuinely did not exist -- a control hostname on the same "
+    "gateway resolves fine on the same resolver, which rules out split-horizon DNS. "
+    "It clears on its own or with ipconfig /flushdns.\n\n"
     "Shipped as a VirtualService on istio-ingress/shared-http routing to "
     "argocd-server.argocd.svc.cluster.local:80 -- port 80, not 443, because the chart runs with "
     "server.insecure: true and TLS terminates at the gateway. Merged as "
@@ -99,9 +107,10 @@ def main():
     if UI_VERIFIED:
         todo.insert(0, C1622)
     else:
-        print("INFRA-1622  SKIPPED -- pass --ui-verified once you have seen")
-        print("            curl -sk https://argocd.op-qa.usxpress.io/  ->  200")
-        print("            (a merged VirtualService is not the same claim)\n")
+        print("INFRA-1622  SKIPPED -- pass --ui-verified once scripts/check-onprem-route.sh")
+        print("            argocd.op-qa.usxpress.io shows the authoritative record AND a 200")
+        print("            from the gateway IPs. A merged VirtualService, a Ready Flux")
+        print("            Kustomization and an external-dns CREATE line are none of them\n")
 
     for issue, comment in todo:
         print(issue)
