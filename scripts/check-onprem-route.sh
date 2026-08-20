@@ -15,19 +15,27 @@
 #
 # Optional: --control <hostname>   a route known to work, for the differential.
 #                                  Auto-picked from the same gateway if omitted.
+#           --tls-port <n>         L4 mode, for a TLS-PASSTHROUGH route. Reads the
+#                                  destination from spec.tls instead of spec.http,
+#                                  checks sniHosts matches, checks the Gateway
+#                                  EXISTS (a missing one makes the route bind to
+#                                  nothing AND makes external-dns skip the object,
+#                                  so the name never gets a record -- INFRA-1645),
+#                                  and probes with an SNI handshake rather than HTTP.
 set -uo pipefail
 
-HOST=""; CONTROL=""; KUBECONFIG_ARG=""; CONTEXT_ARG=""
+HOST=""; CONTROL=""; KUBECONFIG_ARG=""; CONTEXT_ARG=""; TLS_PORT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --kubeconfig) KUBECONFIG_ARG="$2"; shift 2 ;;
     --context)    CONTEXT_ARG="$2";    shift 2 ;;
     --control)    CONTROL="$2";        shift 2 ;;
+    --tls-port)   TLS_PORT="$2";       shift 2 ;;
     -h|--help)    sed -n '2,18p' "$0"; exit 0 ;;
     *)            HOST="$1";           shift   ;;
   esac
 done
-[ -n "$HOST" ] || { echo "usage: $0 <hostname> [--kubeconfig P] [--context C] [--control H]" >&2; exit 2; }
+[ -n "$HOST" ] || { echo "usage: $0 <hostname> [--kubeconfig P] [--context C] [--control H] [--tls-port N]" >&2; exit 2; }
 [ -n "$CONTEXT_ARG" ] || { echo "!! refusing to run without --context: this must be pinned to one cluster" >&2; exit 2; }
 
 k() { kubectl ${KUBECONFIG_ARG:+--kubeconfig="$KUBECONFIG_ARG"} --context "$CONTEXT_ARG" "$@"; }
@@ -61,8 +69,26 @@ else
   echo "         on this cluster that works supplies the target by hand."
 fi
 
-DEST=$(jq -r '.spec.http[0].route[0].destination.host // ""' <<<"$VS_JSON")
-DPORT=$(jq -r '.spec.http[0].route[0].destination.port.number // ""' <<<"$VS_JSON")
+if [ -n "$TLS_PORT" ]; then
+  DEST=$(jq -r '.spec.tls[0].route[0].destination.host // ""' <<<"$VS_JSON")
+  DPORT=$(jq -r '.spec.tls[0].route[0].destination.port.number // ""' <<<"$VS_JSON")
+  SNI=$(jq -r '(.spec.tls[0].match[0].sniHosts // []) | join(",")' <<<"$VS_JSON")
+  [ "$SNI" = "$HOST" ] && ok "sniHosts matches the host" \
+                       || bad "sniHosts is [$SNI] but the route is for $HOST -- SNI must match exactly"
+  GWREF=$(jq -r '(.spec.gateways // [])[0]' <<<"$VS_JSON")
+  GWNS=$VS_NS; GWNAME=$GWREF
+  case "$GWREF" in */*) GWNS=${GWREF%%/*}; GWNAME=${GWREF##*/} ;; esac
+  if k -n "$GWNS" get gateways.networking.istio.io "$GWNAME" >/dev/null 2>&1; then
+    ok "Gateway $GWNS/$GWNAME exists"
+  else
+    bad "Gateway $GWNS/$GWNAME DOES NOT EXIST -- the route binds to nothing, silently,"
+    echo "         and external-dns skips the VirtualService entirely, so the name never"
+    echo "         gets a record either."
+  fi
+else
+  DEST=$(jq -r '.spec.http[0].route[0].destination.host // ""' <<<"$VS_JSON")
+  DPORT=$(jq -r '.spec.http[0].route[0].destination.port.number // ""' <<<"$VS_JSON")
+fi
 ok "routes to $DEST:$DPORT"
 
 # ---- 2. does the backend Service actually expose that port? ------------------
@@ -106,6 +132,23 @@ else
 fi
 
 # ---- 4. HTTP, separating "did not resolve" from "did not connect" ------------
+if [ -n "$TLS_PORT" ]; then
+  say "4. TLS passthrough on port $TLS_PORT"
+  command -v openssl >/dev/null || { bad "openssl not installed"; exit "$FAIL"; }
+  for ip in ${AUTH:-}; do
+    SUBJ=$(echo | timeout 8 openssl s_client -connect "$ip:$TLS_PORT" -servername "$HOST" 2>/dev/null \
+           | openssl x509 -noout -subject 2>/dev/null)
+    if [ -n "$SUBJ" ]; then
+      ok "$ip:$TLS_PORT presented a certificate -- $SUBJ"
+    else
+      bad "$ip:$TLS_PORT completed no TLS handshake for SNI $HOST"
+    fi
+  done
+  say "verdict"
+  [ "$FAIL" = 0 ] && echo "   every checked link holds." || echo "   at least one link is broken -- see FAIL lines above."
+  exit "$FAIL"
+fi
+
 say "4. HTTP"
 CODE=$(curl -sk -m 8 -o /dev/null -w '%{http_code}' "https://$HOST/" 2>/dev/null)
 printf '   plain          : %s\n' "$CODE"
