@@ -11,8 +11,10 @@
 # objects. Endpoints existing proves a pod passed *its own* probe, not that the
 # routed port answers.
 #
-# This connects. For every Service port it opens a port-forward and attempts a
-# TCP connection, which is the only evidence that settles it.
+# This connects. For every Service port it opens a port-forward, forces the
+# forward by connecting, and then reads kubectl's own report of whether the POD
+# side succeeded -- because connecting to the local forwarder proves only that
+# kubectl bound a port.
 #
 # READ ONLY — port-forward creates no workload and changes no object.
 #
@@ -62,14 +64,37 @@ while IFS=$'\t' read -r SVC PORT TARGET PNAME; do
   fi
 
   LOCAL=$((LOCAL + 1))
-  k -n "$NS" port-forward "svc/$SVC" "$LOCAL:$PORT" >/dev/null 2>&1 &
+  PFLOG=$(mktemp)
+  k -n "$NS" port-forward "svc/$SVC" "$LOCAL:$PORT" >"$PFLOG" 2>&1 &
   PF=$!
+
+  # kubectl binds the LOCAL socket before it ever contacts the pod, so a
+  # successful connect to 127.0.0.1 proves only that kubectl started. The first
+  # version of this script recorded exactly that as "listening" and reported
+  # ghostunnel-rw-postgres:5432 healthy while INFRA-1654 was still open --
+  # the same adjacent-step green signal this check exists to find.
+  #
+  # kubectl reports the real outcome on its own stderr when the forwarded
+  # connection is attempted:
+  #   "an error occurred forwarding 45001 -> 5432: ... connect: connection refused"
+  # So: wait for the local listener, open a connection to force the forward, then
+  # read what kubectl says about it.
   RESULT="no"
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if (exec 3<>/dev/tcp/127.0.0.1/$LOCAL) 2>/dev/null; then RESULT="yes"; exec 3<&- 3>&-; break; fi
-    sleep 0.4
+  for _ in $(seq 1 15); do
+    if (exec 3<>/dev/tcp/127.0.0.1/$LOCAL) 2>/dev/null; then exec 3<&- 3>&-; break; fi
+    sleep 0.3
   done
+  if (exec 3<>/dev/tcp/127.0.0.1/$LOCAL) 2>/dev/null; then
+    sleep 0.8                       # let kubectl attempt the pod side and log it
+    exec 3<&- 3>&- 2>/dev/null
+    if grep -qiE 'error occurred forwarding|connection refused|lost connection|error forwarding port' "$PFLOG"; then
+      RESULT="no"
+    else
+      RESULT="yes"
+    fi
+  fi
   kill "$PF" 2>/dev/null; wait "$PF" 2>/dev/null
+  rm -f "$PFLOG"
 
   if [ "$RESULT" = yes ]; then
     printf '%-34s %-7s %-9s %-9s %s\n' "$SVC" "$PORT" "$TARGET" "$EPS" "yes"
