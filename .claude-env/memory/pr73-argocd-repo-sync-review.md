@@ -1,11 +1,11 @@
 ---
 name: pr73-argocd-repo-sync-review
-description: "ArgoCD on-prem (INFRA-1622) — PR #73 rejected, then adopted as a Flux-installed platform stack; COMPLETE on dev + QA with app-* guardrail proven"
+description: "ArgoCD on-prem (INFRA-1622) — PR #73 rejected, then adopted as a Flux-installed platform stack; COMPLETE on dev + QA; INFRA-1622 CLOSED 2026-08-20, UI route serving on QA"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 161fed6b-7af8-49e8-9abf-c06ed6494c28
-  modified: 2026-07-24T00:17:12.477Z
+  modified: 2026-08-20T19:45:00.000Z
 ---
 
 variant-inc/iaac-talos-flux-platform **PR #73** "Chore/flux argocd repo sync" by ifagbemi-usxpress (Idris) → op-dev. +67,612/−1, 17 files, 5 commits, 6/6 checks pass. Reviewer dare-x.
@@ -141,3 +141,11 @@ has to carry it.
 ⚠️ **INFRA-1639 (Argo CD SSO for app teams) is blocked behind this, not beside it.** SSO is
 moot while there is no route: app teams cannot reach the UI to log in either way. Order is
 route first, then the Entra app registration.
+
+**INFRA-1622 DONE 2026-08-20** (supersedes "Istio VS still TODO"). `argocd.op-qa.usxpress.io`
+→ 200 from all three gateway IPs, VirtualService on `istio-ingress/shared-http` →
+`argocd-server.argocd.svc.cluster.local:**80**` (not 443 — chart runs `server.insecure: true`,
+TLS ends at the gateway). Merged as iaac-talos-flux-platform **#99** then **#101** (#101 added
+the `external-dns.alpha.kubernetes.io/target` annotation without which the route exists, Flux
+reports Ready, and the name never resolves — see [[onprem-networking-ingress]]).
+**op-usxpress-prod has neither this route nor a Git credential.**

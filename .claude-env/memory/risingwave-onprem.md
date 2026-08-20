@@ -5,8 +5,22 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 161fed6b-7af8-49e8-9abf-c06ed6494c28
-  modified: 2026-08-13T19:55:04.247Z
+  modified: 2026-08-20T20:15:00.000Z
 ---
+
+## ⚠️ 2026-08-20 — the postgres tunnel has never worked, on EITHER cluster (INFRA-1654)
+
+`ghostunnel-rw-postgres` runs `--listen=:4567` while its Service is `5432 -> targetPort 5432`,
+so nothing listens where traffic arrives. Copy of the rw-sql tunnel's listen flag.
+`variant-inc/iaac-risingwave-onprem`, **both** `manifests/op-usxpress-dev/ghostunnel-rw-postgres.yaml:93`
+and `manifests/op-usxpress-qa/...:69`. So `rw-postgres.op-dev.usxpress.io` has resolved and
+served nothing since Phase 1 closed 2026-06-01 — 11 weeks.
+⚠️ Invisible because the readinessProbe is `tcpSocket: {port: status}` (ghostunnel's 9090
+status listener) — it cannot see the data port. Both pods report `READY true, 0 restarts`.
+**Fix needs BOTH lines**: `--listen=:5432` AND a probe on the data port; without the probe the
+next copy is equally undetectable. See [[adjacent-step-green-signals]].
+`rw-sql` on 4567 is fine and verified serving on QA 2026-08-20 (INFRA-1645).
+
 
 ## ✅ 2026-08-13 — QA RisingWave IS UP. Supersedes the 2026-08-03 block below.
 

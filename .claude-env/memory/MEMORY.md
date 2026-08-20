@@ -23,6 +23,7 @@
 - [No test pods in prod](no-test-pods-in-prod.md) — never `kubectl run`/`debug` throwaways in a prod cluster; read telemetry or exec into an already-running pod
 - [Route every prompt through skills](route-every-prompt-through-skills.md) — check the router every turn; the misses are always mid-flow
 - [No AI attribution in git](no-ai-attribution-in-git.md) — never add "Generated with Claude Code" to PR bodies or Co-Authored-By trailers to commits
+- [Adjacent-step green signals](adjacent-step-green-signals.md) — the recurring family: a true success report about the step NEXT to the one that matters; 10 instances, only executable checks catch it
 - [ESO SecretSynced ≠ valid content](eso-secretsynced-not-content-check.md) — green ExternalSecret proves the sync ran, not that the value works; bit us on Wiz + QA etcd-backup
 - [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
 - [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod

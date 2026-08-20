@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 161fed6b-7af8-49e8-9abf-c06ed6494c28
-  modified: 2026-08-13T19:49:28.315Z
+  modified: 2026-08-20T19:45:00.000Z
 ---
 
 On-prem ingress + cert plane on `op-usxpress-dev`. NOTE: supersedes the old "Steve message not yet sent" status — the May 13 draft was overtaken by an actual May 29 call, and networking Phase 1 has since closed.
@@ -27,6 +27,23 @@ and proves nothing about who owns a record. Don't use it as the instrument ([[pr
 Cross-env safety rests entirely on the per-cluster `txt-owner-id`: sync policy + zone-wide filter
 means a duplicated owner ID would let one cluster silently DELETE another's records. Tighten
 `--domain-filter` per env when prod's external-dns is built.
+
+**Verifying a route (op-qa, 2026-08-20).** Use `scripts/check-onprem-route.sh <host> --context <ctx>`.
+It checks each link separately: VirtualService + target annotation, backend Service + endpoints,
+the **authoritative nameserver queried apart from the local resolver**, and HTTP by `--resolve`
+against each target IP, plus a diff against a working route on the same gateway.
+⚠️ The `external-dns.../target` requirement above was ALREADY written here before INFRA-1622,
+and I still shipped a VirtualService without it — copied the `spec`, left the `metadata`. A note
+did not prevent it; the script is the thing that goes red. Reach for it when writing the route,
+not when debugging it.
+⚠️ **A negative DNS answer outlives the defect.** After an hour of querying `argocd.op-qa` while
+it did not exist, the WSL workstation returned NXDOMAIN for ~1h after the record was live and the
+route served 200. WSL forwards to the **Windows** resolver — no Linux-side flush helps; `ipconfig
+/flushdns` or wait. Never conclude "route broken" from workstation `dig`/`curl` alone.
+⚠️ `curl` `000` conflates "did not resolve" with "resolved, did not connect". `--resolve
+<host>:443:<ip>` separates them.
+⚠️ external-dns `Desired change: CREATE` is logged **before** `ChangeResourceRecordSets` returns —
+an intention, not a receipt. Confirm against the zone.
 
 **May 29 networking + CySec call** (Steve Duck/Networking, Brendan Buschel/CySec, Steve Vives/Wiz+security, Doke) — decisions:
 - Let's Encrypt stays the on-prem CA; rotation automated + Prometheus expiry alerting (manual rotation flagged as #1 ops risk).
