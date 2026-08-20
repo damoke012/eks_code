@@ -53,3 +53,9 @@ spec:
             - name: PG_PASSWORD
               valueFrom:
                 secretKeyRef: { name: etl-pipeline-credentials, key: PG_PASSWORD }
+            # `env` overrides `envFrom`, so this wins over any PG_USER left in the
+            # endpoints ConfigMap. Username and password travel together or not
+            # at all.
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef: { name: etl-pipeline-credentials, key: PG_USER }

@@ -20,3 +20,6 @@ patches:
       - op: replace
         path: /spec/data/1/remoteRef/key
         value: op-usxpress-qa/risingwave/postgres
+      - op: replace
+        path: /spec/data/2/remoteRef/key
+        value: op-usxpress-qa/risingwave/postgres
