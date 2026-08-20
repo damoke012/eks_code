@@ -88,3 +88,40 @@ KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml \
 `op-usxpress-prod/talosconfig` from Secrets Manager in 937464026810. Worth doing once the dev
 result is known — if dev is also affected, that is a pattern rather than an accident and prod
 should be checked immediately rather than opportunistically.
+
+---
+
+## Added 20:40Z — two more things in his namespaces, and one apology
+
+**INFRA-1654: `rw-postgres` has never worked, on dev or QA.**
+
+> One more, and this one is older than today. While bringing up the QA L4 routes I found that
+> `ghostunnel-rw-postgres` is started with `--listen=:4567` while the Service in front of it is
+> `5432 -> targetPort 5432`. Nothing has ever been listening where traffic arrives.
+>
+> `manifests/op-usxpress-dev/ghostunnel-rw-postgres.yaml:93` is identical, so
+> `rw-postgres.op-dev.usxpress.io` has resolved to your seven workers and served nothing since
+> Phase 1 closed on 2026-06-01. If anyone tried the dev Postgres endpoint in the last eleven
+> weeks they'd have got a connection that opens and dies — which reads like a network problem,
+> not a config one.
+>
+> It stayed hidden because the readiness probe is `tcpSocket: {port: status}` — ghostunnel's
+> 9090 listener. Both pods report `READY true, 0 restarts` while serving nothing.
+>
+> The fix needs **both** lines, in `variant-inc/iaac-risingwave-onprem`:
+>   `--listen=:5432`, and a readiness probe on the data port.
+> Without the probe change the next copy of this manifest will look equally healthy.
+> Happy to raise the PR if you'd rather I did — it's your repo, so I haven't.
+
+**INFRA-1645: I changed the QA L4 routes without asking you first.**
+
+> The two RisingWave L4 VirtualServices on op-qa were dev copies — they advertised the dev
+> hostnames against dev's seven worker IPs, and they selected a Gateway that had never been
+> ported to the QA branch, so they'd been bound to nothing since the branch was created. I
+> fixed both and added the Gateway, merged as iaac-talos-flux-platform#102.
+>
+> It only creates objects in `istio-ingress` and changes nothing inside `risingwave`, and
+> `rw-sql.op-qa.usxpress.io` now serves. But `risingwave` on QA is yours under INFRA-1624 and
+> I should have checked with you before merging rather than after. Dev's records are untouched
+> — I confirmed both dev names still resolve to all seven workers afterwards, because renaming
+> them in one PR rather than two was the difference between that and deleting your dev DNS.
