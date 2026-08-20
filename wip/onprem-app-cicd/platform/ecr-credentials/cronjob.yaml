@@ -128,7 +128,7 @@ spec:
               configMap: {name: ecr-credentials-sync-script, defaultMode: 0555}
           containers:
             - name: ecr-credentials-sync
-              image: ECR_AWSCLI_IMAGE_PINNED_BY_DIGEST
+              image: public.ecr.aws/aws-cli/aws-cli@sha256:9e94ede8b677fe5456a152fd6698a6726810160497882123bfd9dd40a5671d74
               env: [{name: HOME, value: /tmp}]
               securityContext:
                 allowPrivilegeEscalation: false
@@ -170,7 +170,7 @@ spec:
           configMap: {name: ecr-credentials-sync-script, defaultMode: 0555}
       containers:
         - name: ecr-credentials-sync
-          image: ECR_AWSCLI_IMAGE_PINNED_BY_DIGEST
+          image: public.ecr.aws/aws-cli/aws-cli@sha256:9e94ede8b677fe5456a152fd6698a6726810160497882123bfd9dd40a5671d74
           env: [{name: HOME, value: /tmp}]
           securityContext:
             allowPrivilegeEscalation: false
