@@ -14,7 +14,13 @@ metadata:
       Workloads in namespaces delivered by Argo CD must pin images by sha256 digest so that what
       runs in prod is provably the artefact that passed in QA.
 spec:
-  validationFailureAction: Audit
+  # Enforce as of 2026-08-20 (INFRA-1640). Held at Audit until a real application
+  # deployed cleanly through the whole path, so the first thing these blocked
+  # would be a mistake rather than the pipeline's own bring-up. That happened on
+  # 2026-08-20: risingwave-etl built, pushed by digest, pulled cross-account and
+  # ran its smoke payload (INFRA-1648). Both policies were observed firing in
+  # Audit against a real tagged image before the flip.
+  validationFailureAction: Enforce
   background: true
   rules:
     - name: digest-required

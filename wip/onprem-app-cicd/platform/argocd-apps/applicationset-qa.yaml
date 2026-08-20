@@ -45,5 +45,16 @@ spec:
         automated:
           prune: true
           selfHeal: true
+        # INFRA-1653. Argo CD's default is five automatic retries, and with a Sync
+        # hook each retry recreates the hook Job -- destroying the previous
+        # attempt's pod and its logs. On 2026-08-20 that took three separate
+        # attempts to read one failure, and on final failure the Job was removed
+        # entirely. One retry, then stop: the failure persists until someone
+        # deliberately re-syncs, which is when they are ready to read it.
+        retry:
+          limit: 1
+          backoff:
+            duration: 30s
+            maxDuration: 2m
         syncOptions:
           - CreateNamespace=false     # the platform owns app-* namespaces

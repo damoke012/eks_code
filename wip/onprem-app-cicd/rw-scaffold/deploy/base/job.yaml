@@ -12,12 +12,17 @@ metadata:
   name: etl-pipeline-apply
   annotations:
     argocd.argoproj.io/hook: Sync
-    # HookSucceeded, not BeforeHookCreation: a FAILED hook Job must survive so its
-    # pod and logs can be read. BeforeHookCreation deletes the failed Job at the
-    # start of the next retry, so on a backoff of minutes the evidence is gone
-    # every time you look — which is exactly when you need it. Successful runs are
-    # still cleaned up automatically.
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # BOTH policies, and the pairing is the point (INFRA-1653):
+    #   HookSucceeded       — a successful run cleans itself up.
+    #   BeforeHookCreation  — a FAILED Job survives until the NEXT deliberate sync,
+    #                         then is removed so it cannot block the new one with
+    #                         AlreadyExists.
+    # HookSucceeded alone was tried on 2026-08-20 and is wrong in both directions:
+    # it deletes the evidence of success, and a retained failure blocks the next
+    # sync. BeforeHookCreation alone loses the evidence of failure, because Argo
+    # CD's automatic retries recreate the hook. The retry limit on the
+    # ApplicationSet is the other half of this fix.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 1
   ttlSecondsAfterFinished: 86400
