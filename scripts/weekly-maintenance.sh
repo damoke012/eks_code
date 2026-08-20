@@ -31,7 +31,9 @@ section "3. Upstream skills — is the pin still current?"
 if [ -f "$HOME/.claude/skills/.mattpocock-skills.install.json" ]; then
   pin=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/skills/.mattpocock-skills.install.json')))['commit'])")
   head=$(git ls-remote https://github.com/mattpocock/skills.git HEAD 2>/dev/null | cut -f1)
-  if [ -n "$head" ] && [ "$pin" != "$head" ]; then
+  # Compare by PREFIX: the recorded pin may be a short SHA while ls-remote returns all 40.
+  # A literal != between the two forms never matches and reports "moved" forever.
+  if [ -n "$head" ] && [ "${head#$pin}" = "$head" ] && [ "${pin#$head}" = "$pin" ]; then
     fence "upstream moved: pinned ${pin:0:8}, HEAD ${head:0:8} — review, then re-run bootstrap.sh --force"
     findings=$((findings+1))
   else
