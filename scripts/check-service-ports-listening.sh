@@ -100,6 +100,7 @@ while IFS=$'\t' read -r SVC PORT TARGET PNAME; do
     printf '%-34s %-7s %-9s %-9s %s\n' "$SVC" "$PORT" "$TARGET" "$EPS" "yes"
   else
     printf '%-34s %-7s %-9s %-9s %s\n' "$SVC" "$PORT" "$TARGET" "$EPS" "NO — nothing bound"
+    BROKEN="${BROKEN:-} $SVC"
     FAIL=1
   fi
 done < <(k -n "$NS" get svc -o json | jq -r '
@@ -112,8 +113,13 @@ if [ "$FAIL" = 0 ]; then
 else
   echo "A 'NO' row means the Service has healthy endpoints and still routes to a port"
   echo "nothing binds. Compare the Service's targetPort against the container's listen"
-  echo "flag, and check whether the readinessProbe is watching a different port:"
-  echo "  kubectl --context $CTX -n $NS get deploy <name> \\"
-  echo "      -o jsonpath='{.spec.template.spec.containers[0].args}{\"\\n\"}{.spec.template.spec.containers[0].readinessProbe}{\"\\n\"}'"
+  echo "flag, and check whether the readinessProbe is watching a different port."
+  echo
+  echo "Run these — the names are the ones that failed above, not placeholders:"
+  for B in $(echo "${BROKEN:-}" | tr ' ' '\n' | sort -u); do
+    [ -n "$B" ] || continue
+    echo "  kubectl ${KCFG:+--kubeconfig=$KCFG} --context $CTX -n $NS get deploy $B \\"
+    echo "      -o jsonpath='{.spec.template.spec.containers[0].args}{\"\\n\"}{.spec.template.spec.containers[0].readinessProbe}{\"\\n\"}'"
+  done
 fi
 exit "$FAIL"

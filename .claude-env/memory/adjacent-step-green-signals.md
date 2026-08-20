@@ -7,8 +7,7 @@ metadata:
 ---
 
 The single most expensive pattern in on-prem platform work: a green signal that is **true**,
-about a step **next to** the one you care about. Ten instances found by 2026-08-20, most of
-them in one day.
+about a step **next to** the one you care about. Eleven instances found by 2026-08-20, all but one in a single day.
 
 | Reports | Actually proves | Does NOT prove |
 |---|---|---|
@@ -22,6 +21,7 @@ them in one day.
 | `secretKeyRef` env present | the pod resolved it at creation | it matches the secret now ([[pod-env-secret-resolution]]) |
 | `kubectl get gateway` empty | that API group has none | the Istio one is absent (wrong group) |
 | a `curl` `000` | curl got no response | whether DNS or connect failed — `--resolve` separates them |
+| a connect to `kubectl port-forward`'s local socket | kubectl bound a local port | that the **pod** listens — kubectl binds before contacting the pod, and reports the pod-side outcome only on its own stderr |
 
 **Why:** each signal is emitted by a component reporting on its own job, which it did. Nothing
 in the stack is responsible for asserting the end-to-end property, so nothing does.
@@ -34,3 +34,11 @@ the `external-dns` target requirement was already written down in
 → HTTP or SNI handshake), `scripts/check-postgres-secret-usable.sh` (authenticates, not
 compares), `scripts/check-foreign-cluster-ids.sh` ([[manifests-copied-across-branches]]).
 When a fix is found, ask what check would have gone red, and write that instead of a paragraph.
+
+⚠️ **And then watch the check go red.** Instance 11 was inside
+`scripts/check-service-ports-listening.sh` — the detector written *for this family* — which
+reported a known-dead port as healthy on its first run. It was argument-tested, reasoned
+about, and structurally incapable of finding the one bug it existed for. The only reason this
+surfaced is that it was pointed at a namespace where the answer was already known by an
+independent method. **A check nobody has seen fail is a hypothesis.** Validate every new check
+against a defect you have already confirmed some other way, before trusting it anywhere.
