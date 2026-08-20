@@ -142,6 +142,44 @@ account ID, role ARN, OIDC issuer, hostname, node address — must be changed on
 Four defects from exactly this were found on 2026-08-18. The failure mode is always silent:
 the Flux Kustomization reports `Ready` while the workload cannot authenticate or route.
 
+### 4.2b Two settings that decide whether you can debug this later
+
+**Argo CD needs a Git credential per cluster.** QA has one as of 2026-08-20: a repository
+**deploy key**, `secret-type: repository`, matched to one exact `ssh://` URL. It is owned by
+the repository — no expiry, unaffected by offboarding, and creating one needs admin on that
+repo rather than ownership of the org. The trade is scope: per-repository, so app number two
+needs its own until an org GitHub App exists (`REQUEST-GITHUB-APP-OWNER.md`). A fine-grained
+PAT cannot meet "not tied to a person" — it is owned by a user account even when the
+resource owner is the org.
+
+⚠️ An `https://` Application will not match an `ssh://` credential, and the failure is
+`authentication required` — identical to having no credential at all. The ApplicationSet
+entry and the credential URL must move together, in one PR.
+
+**Set `hook-delete-policy: BeforeHookCreation,HookSucceeded` and lower the ApplicationSet
+retry limit.** With `BeforeHookCreation` alone, Argo CD's five automatic retries each destroy
+the previous attempt's pod and logs, so a failing hook deletes its own evidence — three
+separate attempts to read one failure on 2026-08-20. With `HookSucceeded` alone, a retained
+failed Job blocks the next sync with `AlreadyExists`, and successes delete the evidence *of
+success*. Both, plus a low retry limit, gives: a failure stops at once and persists until
+someone deliberately re-syncs.
+
+### 4.2c Verify the credential opens the thing, before the app does
+
+`SecretSynced` proves the sync ran. `Synced Healthy` proves manifests match git. Neither is a
+statement about whether the value works — on 2026-08-20 four consumers held identical
+passwords and none of them matched the database.
+
+```bash
+KUBECONFIG=$HOME/.kube/op-usxpress-qa-sso.yaml \
+  bash scripts/check-postgres-secret-usable.sh op-usxpress-qa-sso risingwave \
+    op-usxpress-qa/risingwave/postgres usx-qa
+```
+
+Run `scripts/verify-overlay-endpoints.sh` on the overlay in the same pass — it resolves every
+`*.svc.cluster.local` name against the target cluster and lists the real services when one
+misses.
+
 ### 4.3 What the app team does
 
 1. Copy `app-template/job/` or `app-template/service/`

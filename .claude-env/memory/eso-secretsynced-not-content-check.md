@@ -24,3 +24,13 @@ aws secretsmanager get-secret-value --profile <p> --secret-id <id> --query Secre
 kubectl -n <ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d | head -c 20; echo
 ```
 Uniform short lengths (every field 6 chars = `<real>`) or a `PLACEHOLDER`/`REAL` prefix means it was never populated. Cross-check `LastChangedDate` on the SM secret to see whether the real owner has written yet. Related: [[usx-github-enterprise-not-personal]].
+
+**Third and fourth instances, 2026-08-20 (op-usxpress-qa):**
+* Four consumers reported `SecretSynced` on a Postgres password the database had never
+  accepted — see [[qa-postgres-password-drift]]. Sync status cannot see the far end.
+* Argo CD reported `Synced Healthy` while the Job it had just created sat in
+  `ImagePullBackOff`. Sync status means "manifests match git"; it is not a statement about
+  the workload.
+
+The check that answers it: `scripts/check-postgres-secret-usable.sh` — it authenticates,
+rather than reading a status field.

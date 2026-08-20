@@ -1,6 +1,6 @@
 ---
 name: onprem-app-cicd
-description: On-prem app delivery path (build in GHA → ECR → Argo CD); platform + build/push proven; first deploy blocked on Argo CD having no Git credential (INFRA-1647)
+description: On-prem app delivery path (build in GHA → ECR → Argo CD) — PROVEN END TO END on op-usxpress-qa 2026-08-20; prod still has no Git credential or ApplicationSet
 metadata:
   type: project
 ---
@@ -31,7 +31,20 @@ Merged: platform#96, risingwave-pipeline#9/#10/#11. Three defects found by doing
 push role needed READ on its own repo (buildx reads the manifest back), the inherited
 Octopus `build.yaml` was failing every push in that repo, and —
 
-**The current blocker: Argo CD holds NO Git credential on op-usxpress-qa** (no secret with
+**✅ END TO END ON QA 2026-08-20.** `pipeline_applied` on QA's Postgres holds
+`smoke/001-connectivity.rw | 4b65ef49e1c4 | 2026-08-20 16:26:47+00 | argocd-qa` — written
+only if every link held: GHA build → ECR by digest → cross-account pull → Argo CD reading an
+internal repo → sync-hook Job in-cluster → ESO credentials → Postgres → RisingWave.
+INFRA-1647 and INFRA-1648 done. Six defects found by running it, all recorded in
+`wip/onprem-app-cicd/FINDINGS-2026-08-20.md`; the two that generalise are ECR's
+per-repository authorisation and [[qa-postgres-password-drift]].
+
+The credential is a **repository deploy key** (`secret-type: repository`, exact `ssh://`
+URL), not the intended org GitHub App — `dare-x` is a member of `variant-inc`, not an owner.
+Deploy key = repo-owned, no expiry, no person attached, but per-repository. The App request
+is drafted in `REQUEST-GITHUB-APP-OWNER.md`.
+
+**Superseded 2026-08-19 note:** Argo CD held NO Git credential on op-usxpress-qa (no secret with
 `argocd.argoproj.io/secret-type`), so it cannot read the INTERNAL `risingwave-pipeline`
 repo. Blocks every private app repo; invisible until the first real deploy because the
 Application pointed at a non-existent path and never got as far as authenticating.

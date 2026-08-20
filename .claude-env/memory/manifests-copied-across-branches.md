@@ -34,3 +34,19 @@ diff it against the branch it was copied from and grep for account IDs, role ARN
 issuer URLs and cluster names. Verify with the workload's own logs, never the
 Kustomization status. See [[eso-secretsynced-not-content-check]] and
 [[onprem-app-cicd]].
+
+**Instances five and six, 2026-08-20** — the family is not limited to platform branches; app
+overlays inherit the same way:
+* `deploy/overlays/qa/endpoints.yaml` carried `postgres-postgresql…`, a dev service name.
+  QA runs `pg-postgresql`.
+* The same file asserted `PG_USER: postgres` and `PG_DB: postgres`; Secrets Manager held
+  username `risingwave` and the StatefulSet's `POSTGRES_DB` is `risingwave`.
+
+**Check now written:** `scripts/verify-overlay-endpoints.sh <endpoints.yaml> <context>` —
+resolves every `*.svc.cluster.local` name against the target cluster and lists the real
+services when one misses. Run it before the PR, not after the failed sync.
+
+**Rule learned the hard way:** a username and password that live in one secret must travel
+together. Split across a ConfigMap and Secrets Manager they drift, and the error names the
+wrong cause — `password authentication failed for user "postgres"` when the real user is
+`risingwave`.
