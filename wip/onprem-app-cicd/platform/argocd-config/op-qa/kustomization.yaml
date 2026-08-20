@@ -14,3 +14,6 @@ resources:
   - appprojects.yaml
   - admin-externalsecret.yaml
   - repo-creds-externalsecret.yaml
+  # INFRA-1622 — the UI route. Needs no new Kustomization: argocd-config is
+  # already wired, and the Gateway it binds to has existed for 43 days.
+  - virtualservice-argocd.yaml

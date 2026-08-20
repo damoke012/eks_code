@@ -1,0 +1,31 @@
+---
+# INFRA-1622 — the Argo CD UI on op-usxpress-qa.
+#
+# One object. The gateway it binds to already exists and already works:
+# `istio-ingress/shared-http` serves `*.op-qa.usxpress.io` on 80 and 443 and
+# terminates TLS with `wildcard-op-qa-tls` (verified 2026-08-20 —
+# https://risingwave-dashboard.op-qa.usxpress.io/ returns 200 through it).
+#
+# Routes to port 80 deliberately. The HelmRelease sets `server.insecure: true`,
+# so argocd-server speaks plain HTTP and expects TLS to terminate at the gateway.
+# Routing to 443 would be TLS inside TLS and fail in a way that looks like a
+# certificate problem.
+#
+# Same shape as risingwave-dashboard, which is the one on this cluster known to
+# serve — copied from a working route rather than composed from documentation.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  gateways:
+    - istio-ingress/shared-http
+  hosts:
+    - argocd.op-qa.usxpress.io
+  http:
+    - route:
+        - destination:
+            host: argocd-server.argocd.svc.cluster.local
+            port:
+              number: 80
