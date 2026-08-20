@@ -39,8 +39,9 @@ echo
 printf '%-38s %-26s %-10s %s\n' NAME REF HELD STATE
 printf '%-38s %-26s %-10s %s\n' "----" "---" "----" "-----"
 
-FAIL=0
-while IFS=$'\t' read -r NAME URL BRANCH TAG SEMVER COMMIT HELD READY; do
+FAIL=0; UNKNOWN=0
+while IFS=$'\037' read -r NAME URL BRANCH TAG SEMVER COMMIT HELD READY; do
+  for v in BRANCH TAG SEMVER COMMIT HELD; do [ "${!v}" = "-" ] && eval "$v=''"; done
   REF="${BRANCH:-}"; KIND=branch
   [ -n "${TAG:-}"    ] && { REF="$TAG";    KIND=tag; }
   [ -n "${SEMVER:-}" ] && { REF="$SEMVER"; KIND=semver; }
@@ -62,6 +63,7 @@ while IFS=$'\t' read -r NAME URL BRANCH TAG SEMVER COMMIT HELD READY; do
   REMOTE=$(timeout 25 git ls-remote "$URL" "$REF" 2>/dev/null | awk 'NR==1{print $1}')
   if [ -z "$REMOTE" ]; then
     printf '%-38s %-26s %-10s %s\n' "$NAME" "$REF" "$SHORT" "UNKNOWN — could not read the remote"
+    UNKNOWN=$((UNKNOWN + 1))
     continue
   fi
 
@@ -71,20 +73,39 @@ while IFS=$'\t' read -r NAME URL BRANCH TAG SEMVER COMMIT HELD READY; do
     printf '%-38s %-26s %-10s %s\n' "$NAME" "$REF" "$SHORT" "BEHIND — remote is ${REMOTE:0:12}"
     FAIL=1
   fi
+# NOT @tsv read with IFS=tab: tab is an IFS *whitespace* character, so bash
+# collapses runs of it. Every source here has empty tag/semver/commit fields;
+# those consecutive tabs collapsed, every column shifted left, and the first
+# version of this script read the Ready status into REF and reported all four
+# sources NOT READY. A check that goes red for its own reasons is worse than no
+# check. Unit separator (0x1f), and empty fields become "-".
 done < <(k get gitrepository -A -o json | jq -r '
+  def dash: if . == null or . == "" then "-" else . end;
   .items[] | [
-    .metadata.name, .spec.url,
-    (.spec.ref.branch // ""), (.spec.ref.tag // ""), (.spec.ref.semver // ""), (.spec.ref.commit // ""),
-    (.status.artifact.revision // ""),
-    ((.status.conditions // [])[] | select(.type=="Ready") | .status) // "Unknown"
-  ] | @tsv')
+    (.metadata.name            | dash),
+    (.spec.url                 | dash),
+    (.spec.ref.branch          | dash),
+    (.spec.ref.tag             | dash),
+    (.spec.ref.semver          | dash),
+    (.spec.ref.commit          | dash),
+    (.status.artifact.revision | dash),
+    ((.status.conditions // []) | map(select(.type == "Ready")) | .[0].status | dash)
+  ] | join("\u001f")')
 
 echo
-if [ "$FAIL" = 0 ]; then
+if [ "$FAIL" = 0 ] && [ "$UNKNOWN" = 0 ]; then
   echo "every comparable source holds the remote's current commit."
+elif [ "$FAIL" = 0 ]; then
+  # Saying "all current" while N sources could not be reached is the exact
+  # adjacent-step success report this whole family of checks exists to prevent.
+  echo "$UNKNOWN source(s) could NOT be checked — see UNKNOWN above. Nothing is"
+  echo "claimed about those. Run from a machine whose git credentials reach them;"
+  echo "for variant-inc remotes that means WSL, not the codespace."
+  UNKNOWN=1
 else
   echo "A 'BEHIND' source keeps reconciling its LAST GOOD artifact and reports Ready=True"
   echo "while doing it, so every Kustomization under it silently applies old state."
   echo "An 'UNKNOWN' is not a pass — it means this machine could not read that remote."
 fi
+[ "$FAIL" = 0 ] && [ "$UNKNOWN" != 0 ] && exit 2
 exit "$FAIL"
