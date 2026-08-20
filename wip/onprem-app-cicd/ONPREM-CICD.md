@@ -152,6 +152,13 @@ needs its own until an org GitHub App exists (`REQUEST-GITHUB-APP-OWNER.md`). A 
 PAT cannot meet "not tied to a person" — it is owned by a user account even when the
 resource owner is the org.
 
+⚠️ **A VirtualService on these clusters needs
+`external-dns.alpha.kubernetes.io/target`.** external-dns takes the record's target from the
+ingress gateway's LoadBalancer address, and `istio-ingressgateway` here is ClusterIP with
+`hostNetwork` — there is no address to take. Without the annotation the route is created, Flux
+reports Ready, and the hostname never resolves. Copy the value from a route that works
+(`risingwave-dashboard` on op-qa) rather than choosing node addresses.
+
 ⚠️ An `https://` Application will not match an `ssh://` credential, and the failure is
 `authentication required` — identical to having no credential at all. The ApplicationSet
 entry and the credential URL must move together, in one PR.

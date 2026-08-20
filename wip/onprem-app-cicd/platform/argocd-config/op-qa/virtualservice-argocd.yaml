@@ -18,6 +18,18 @@ kind: VirtualService
 metadata:
   name: argocd
   namespace: argocd
+  annotations:
+    # REQUIRED on this cluster. external-dns runs with --source=istio-virtualservice
+    # and normally takes the record's target from the ingress gateway's
+    # LoadBalancer address — but istio-ingressgateway here is ClusterIP with
+    # hostNetwork, so there is no address to take. Without this annotation
+    # external-dns silently writes no record: the VirtualService is created, Flux
+    # reports Ready, and the hostname simply never resolves.
+    #
+    # Same three node addresses the working routes use (risingwave-dashboard,
+    # risingwave-overview) — copied deliberately rather than picked, so all the
+    # QA routes agree.
+    external-dns.alpha.kubernetes.io/target: "10.10.82.106,10.10.82.139,10.10.82.23"
 spec:
   gateways:
     - istio-ingress/shared-http
