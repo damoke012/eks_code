@@ -187,7 +187,8 @@ finish() {
 # INFRA-1647 · Argo CD Git credential · op-usxpress-qa ONLY.
 #
 # Deliberately hardcoded to QA. Every AWS call pins --profile usx-qa and every
-# kubectl call pins --context op-usxpress-qa; there is no environment switch,
+# kubectl call goes through kq(), which pins the kubeconfig AND the context
+# resolved by API endpoint rather than by name; there is no environment switch,
 # because a wizard that can be pointed at prod eventually is. The prod run is a
 # separate script, written when INFRA-1636 lands and prod has an Application
 # that needs a credential.
@@ -208,7 +209,39 @@ touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
 PLATFORM_REPO="${PLATFORM_REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
 PACK="${PACK:-$HOME/onprem-app-cicd}"
 SM_SECRET="op-usxpress-qa/platform/argocd"
-KUBE_QA="$HOME/.kube/op-usxpress-qa-sso.yaml"
+# op-usxpress-qa's API endpoint. This, not a filename and not a context name, is
+# what identifies the cluster: ~/.kube here has merged multi-cluster files, and
+# one of them carries prod. Prod is 10.10.82.52 — ONE DIGIT away. Read it twice.
+QA_ENDPOINT="https://10.10.82.51:6443"
+QA_KUBECONFIG=""
+QA_CTX=""
+
+# resolve_qa scans every kubeconfig for the context whose cluster server is
+# exactly $QA_ENDPOINT. A filename that says "qa" proves nothing — op-usxpress-qa
+# had no kubeconfig at all until the SSO path went live, and qa-one-eks.yaml is a
+# merged file holding four servers including production.
+resolve_qa() {
+  local f ctx cl srv
+  for f in "$HOME"/.kube/*.yaml "$HOME"/.kube/*.yml "$HOME"/.kube/config; do
+    [[ -f "$f" ]] || continue
+    while read -r ctx cl; do
+      [[ -n "$ctx" ]] || continue
+      srv=$(kubectl --kubeconfig="$f" config view \
+              -o jsonpath="{.clusters[?(@.name==\"$cl\")].cluster.server}" 2>/dev/null)
+      if [[ "$srv" == "$QA_ENDPOINT" ]]; then
+        QA_KUBECONFIG="$f"; QA_CTX="$ctx"; return 0
+      fi
+    done < <(kubectl --kubeconfig="$f" config view \
+               -o jsonpath='{range .contexts[*]}{.name}{" "}{.context.cluster}{"\n"}{end}' 2>/dev/null)
+  done
+  return 1
+}
+
+# kq runs kubectl against op-usxpress-qa, pinned by BOTH file and context on
+# every single call. Nothing here depends on an exported KUBECONFIG: a failed
+# export leaves the previous value in place and the next command silently runs
+# against whatever was there before.
+kq() { kubectl --kubeconfig="$QA_KUBECONFIG" --context "$QA_CTX" "$@"; }
 
 banner "INFRA-1647 · Argo CD Git credential · op-usxpress-qa"
 
@@ -246,24 +279,45 @@ else
   exit 1
 fi
 
-if [[ -f "$KUBE_QA" ]] && KUBECONFIG="$KUBE_QA" kubectl --context op-usxpress-qa get ns argocd >/dev/null 2>&1; then
-  step "op-usxpress-qa reachable ✓"
+if resolve_qa; then
+  step "op-usxpress-qa: context '$QA_CTX' in $(basename "$QA_KUBECONFIG")"
+  step "endpoint: $QA_ENDPOINT  (prod is .52 — this is .51)"
 else
-  warn "cannot reach op-usxpress-qa with $KUBE_QA"
-  note "refresh SSO cluster access first; see the wsl-kubeconfig-churn notes"
+  warn "no context anywhere in ~/.kube serves $QA_ENDPOINT"
+  note "what exists right now:"
+  for f in "$HOME"/.kube/*.yaml "$HOME"/.kube/*.yml "$HOME"/.kube/config; do
+    [[ -f "$f" ]] || continue
+    note "  $(basename "$f"): $(kubectl --kubeconfig="$f" config view \
+        -o jsonpath='{.clusters[*].cluster.server}' 2>/dev/null)"
+  done
+  note ""
+  note "corp VPN reachable?   nc -vz -w 5 10.10.82.51 6443"
+  note "no kubeconfig at all? derive one from the Terraform state (streams it,"
+  note "never saves it — the state holds every secret in plaintext):"
+  note "  aws s3 cp s3://lazy-tf-state-425rbol87rmn6c7m/iaac/talos/op-usxpress-qa.tfstate - \\"
+  note "    --profile usx-qa | jq -r '.outputs.kubeconfig.value' > \$HOME/.kube/op-usxpress-qa.yaml"
+  note "  chmod 600 \$HOME/.kube/op-usxpress-qa.yaml"
+  exit 1
+fi
+
+if kq get ns argocd >/dev/null 2>&1; then
+  step "argocd namespace reachable ✓"
+else
+  warn "found the context but cannot reach the cluster or read it"
+  kq cluster-info 2>&1 | head -3 | while read -r l; do note "  $l"; done
+  note "corp VPN:  nc -vz -w 5 10.10.82.51 6443"
+  note "SSO creds: kq auth whoami   (want sso:doke@usxpress.com)"
   exit 1
 fi
 
 say ""
 say "Confirming the defect is still real, rather than assuming it:"
-FOUND=$(KUBECONFIG="$KUBE_QA" kubectl --context op-usxpress-qa -n argocd get secret \
-          -l argocd.argoproj.io/secret-type --no-headers 2>/dev/null | wc -l)
+FOUND=$(kq -n argocd get secret -l argocd.argoproj.io/secret-type --no-headers 2>/dev/null | wc -l)
 if [[ "$FOUND" -eq 0 ]]; then
   step "no secret carries argocd.argoproj.io/secret-type — the credential gap is real"
 else
   warn "$FOUND secret(s) already carry that label:"
-  KUBECONFIG="$KUBE_QA" kubectl --context op-usxpress-qa -n argocd get secret \
-    -l argocd.argoproj.io/secret-type
+  kq -n argocd get secret -l argocd.argoproj.io/secret-type
   confirm "Something already exists. Continue anyway?" || exit 0
 fi
 pause "Press Enter to start."
@@ -398,8 +452,7 @@ stage "Checks — before the PR, not after the merge"
 cd "$DEST"
 K1=$(grep -c '^kind:' repo-creds-externalsecret.yaml || true)
 K2=$(kubectl kustomize . | grep -c '^kind:' || true)
-K3=$(kubectl kustomize . | KUBECONFIG="$KUBE_QA" kubectl --context op-usxpress-qa apply \
-       --dry-run=client -f - -o name 2>/dev/null | wc -l || true)
+K3=$(kubectl kustomize . | kq apply --dry-run=client -f - -o name 2>/dev/null | wc -l || true)
 say "documents in the new file : $K1   (want 1)"
 say "objects kustomize builds  : $K2   (want 4)"
 say "objects the API accepts   : $K3   (want 4)"
@@ -462,30 +515,31 @@ fi
 
 # ──────────────────────────────────────────────────────────────────────────
 stage "Verify — and SecretSynced is not the check"
-export KUBECONFIG="$KUBE_QA"
-command -v flux >/dev/null 2>&1 && flux -n flux-system reconcile kustomization argocd-config --with-source || \
-  note "flux CLI not present — waiting for the 10m interval instead"
+command -v flux >/dev/null 2>&1 \
+  && KUBECONFIG="$QA_KUBECONFIG" flux --context "$QA_CTX" -n flux-system \
+       reconcile kustomization argocd-config --with-source \
+  || note "flux CLI not present or reconcile failed — waiting for the 10m interval instead"
 
 say ""
 say "1. ESO synced the secret:"
-kubectl --context op-usxpress-qa -n argocd get externalsecret argocd-repo-creds-variant-inc || true
+kq -n argocd get externalsecret argocd-repo-creds-variant-inc || true
 
 say ""
 say "2. The LABEL is on the Secret. ESO does not copy labels from the"
 say "   ExternalSecret, so without this Argo CD ignores a perfectly good"
 say "   credential and says nothing:"
-kubectl --context op-usxpress-qa -n argocd get secret argocd-repo-creds-variant-inc \
+kq -n argocd get secret argocd-repo-creds-variant-inc \
   -o jsonpath='{.metadata.labels}{"\n"}' || true
 
 say ""
 say "3. The url is a PREFIX of the Application's repoURL, character for character:"
-kubectl --context op-usxpress-qa -n argocd get secret argocd-repo-creds-variant-inc \
+kq -n argocd get secret argocd-repo-creds-variant-inc \
   -o jsonpath='{.data.url}' 2>/dev/null | base64 -d; echo
 note "want https://github.com/variant-inc — no trailing slash, no .git"
 
 say ""
 say "4. THE check — Argo CD actually reads the repository:"
-kubectl --context op-usxpress-qa -n argocd get application risingwave-etl \
+kq -n argocd get application risingwave-etl \
   -o jsonpath='{.status.sync.status}{"  "}{.status.health.status}{"\n"}' || true
 note "want: Synced Healthy"
 
@@ -494,8 +548,8 @@ say "Still failing? The symptom names the cause:"
 note "  authentication required     → the url prefix does not match (check 3)"
 note "  could not parse private key → the PEM lost its newlines"
 note "  404 on the installation     → the App was created but never installed"
-note "  repo-server logs:  kubectl --context op-usxpress-qa -n argocd \\"
-note "                       logs deploy/argocd-repo-server --tail=50"
+note "  repo-server logs:  kubectl --kubeconfig=$QA_KUBECONFIG --context $QA_CTX \\"
+note "                       -n argocd logs deploy/argocd-repo-server --tail=50"
 pause
 
 # ──────────────────────────────────────────────────────────────────────────
