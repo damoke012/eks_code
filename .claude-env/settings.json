@@ -1,0 +1,171 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rev-list *)",
+      "Bash(ls -ld /workspace)",
+      "Read(//workspaces/**)",
+      "Bash(ls -ld /)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(sudo -n true)",
+      "Bash(git push *)",
+      "Bash(echo \"=== EXIT: $? ===\")",
+      "Bash(sudo ln -s /workspaces /workspace)",
+      "Read(//workspace/**)",
+      "Read(//home/codespace/.claude/**)",
+      "Read(//home/codespace/.claude/projects/**)",
+      "Bash(rm /home/codespace/.claude/projects/-workspaces-eks-code/memory/risingwave-phase1-networking.md)",
+      "Bash(gh auth *)",
+      "Bash(gh pr *)",
+      "Bash(mkdir -p wip/argocd-repo-sync && echo created)",
+      "Bash(cd /workspaces/eks_code *)",
+      "Bash(mkdir -p wip/standup-2026-07-13 && echo ok)",
+      "Bash(python3 -m py_compile scripts/file-standup-jul13-tickets.py)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(git mv *)",
+      "Bash(python3 -m py_compile scripts/reconcile-tickets.py)",
+      "Bash(python3 -m py_compile scripts/add-to-sprint.py)",
+      "Bash(python3 -m py_compile scripts/file-secret-rotation-tickets.py)",
+      "Bash(git commit -q -m 'qa-standup: add STATE completion tracker \\(INFRA-1585/1589\\) *)",
+      "Bash(git commit -q -m 'qa-standup: refactor already done+validated in repo \\(branch 5492f9b\\) \u2014 mark drafts superseded *)",
+      "Bash(git commit -q -m 'qa-standup: QA deployed via Octopus \\(.201\\); INFRA-1589 finding \u2014 pool labels/taints only on system, Talos reconcile gap *)",
+      "Bash(git commit -q -m 'qa-standup: clarify 2 remaining tracks \u2014 Rook/storage \\(grafana Pending on ceph-block\\) + pool isolation \\(1589\\) *)",
+      "Bash(git commit -q -m 'qa-standup: draft op-qa Rook-Ceph additions \\(raw-device OSDs on application pool\\) \u2014 unblocks grafana *)",
+      "Bash(git commit -q -m 'qa-standup: storage chain resume point \u2014 local-path SC prereq before Rook; device=sdb confirmed *)",
+      "Bash(git commit -q -m 'qa-standup: draft QA storage tier \\(codified local-path + rook wiring\\) \u2014 INFRA-1585/1589 *)",
+      "Bash(git commit -q -m 'qa-standup: QA storage track DONE \u2014 Rook HEALTH_OK, ceph-block PVCs bound \\(INFRA-1585\\) *)",
+      "Bash(git -C /workspaces/eks_code add wip/qa-cluster-standup/STATE.md)",
+      "Bash(git -C /workspaces/eks_code commit -q -m 'qa-standup: grafana Running \u2014 fixed stale dev SM paths in op-qa ExternalSecrets \\(INFRA-1585\\) *)",
+      "Bash(git -C /workspaces/eks_code log --oneline -1)",
+      "Bash(chmod +x wip/qa-cluster-standup/apply-irsa-grafana-codify.sh)",
+      "Bash(git commit -q -m 'qa-standup: draft grafana SM codify + enable_irsa landmine fix \\(INFRA-1589\\) *)",
+      "Bash(chmod +x wip/qa-cluster-standup/octopus-qa-env-setup/add-qa-grafana-vars.py)",
+      "Bash(git commit -q -m 'qa-standup: octopus add-qa-grafana-vars.py \\(2 TF_VARs\\) + fix enable_irsa=true landmine in add-qa-vars.py \\(INFRA-1589\\) *)",
+      "Bash(git commit -q -m 'qa-standup: draft item D \u2014 TF writes real talosconfig SM value \\(etcd-backup fix\\) INFRA-1589 *)",
+      "Bash(chmod +x wip/qa-cluster-standup/iaac-full-teardown/apply-full-teardown.sh)",
+      "Bash(git commit -q -m 'qa-standup: full-teardown-clean IaC \u2014 secret value-writes + rebuild runbook \\(INFRA-1589\\) *)",
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)",
+      "Bash(env)",
+      "Bash(sed -E 's/=\\(.{0,4}\\).*/=\\\\1****/')",
+      "Read(//home/codespace/**)",
+      "Bash(git config *)",
+      "Bash(cat -A /dev/null; wc -l /tmp/claude-1000/-workspaces-eks-code/161fed6b-7af8-49e8-9abf-c06ed6494c28/scratchpad/confluence-body.xml)",
+      "Read(//dev/**)",
+      "Bash(cd /tmp/claude-1000/-workspaces-eks-code/161fed6b-7af8-49e8-9abf-c06ed6494c28/scratchpad *)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(curl -sS -u doke@usxpress.com:__TRACKED_VAR__ -G --data-urlencode 'jql=assignee = currentUser\\(\\) AND sprint in openSprints\\(\\) ORDER BY status ASC' --data-urlencode maxResults=50 --data-urlencode fields=key,summary,status,priority,duedate https://usxpress.atlassian.net/rest/api/3/search/jql)",
+      "Bash(python3 /tmp/fmt.py)",
+      "Bash(env | grep -iE \"atlassian|confluence|jira|token\" | sed 's/=.*/=<set>/'; echo \"---\"; ls -la ~/.atlassian* ~/.jira* 2>/dev/null; echo \"---files---\"; grep -rlniE \"ATATT3xFf|CONFLUENCE_TOKEN=|ATLASSIAN_TOKEN=\" /workspaces/eks_code 2>/dev/null | grep -vi __pycache__ | head; echo \"---tmp---\"; ls -la /tmp/jira_update.py 2>/dev/null)",
+      "Read(//tmp/**)",
+      "Bash(grep -rhoiE \"ATATT3xFf[A-Za-z0-9_=+/.-]{20,}\" /workspaces/eks_code)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(401 = reachable, just needs auth\\)\\\\n\" -m 10 https://usxpress.atlassian.net/rest/agile/1.0/board/322/sprint)",
+      "Bash(git check-ignore *)",
+      "Bash(gh api *)",
+      "Bash(git fetch *)",
+      "Bash(kubectl config *)",
+      "Bash(git commit -q -m 'qa-standup: prod zero-manual automation inventory + etcd snapshot staleness alerts \\(INFRA-1589/1621/1623\\) *)",
+      "Bash(git commit -q -m 'qa-rw: review fix set for iaac-risingwave-onprem feat/qa-platform-layer \\(INFRA-1624\\) *)",
+      "Bash(mkdir -p /workspaces/eks_code/iaac-drafts/qa-risingwave-jul20/qa-fixes)",
+      "Bash(chmod +x iaac-drafts/qa-risingwave-jul20/qa-fixes/apply-qa-fixes.sh)",
+      "Bash(git commit -q -m 'qa-rw: apply script + fixed files for feat/qa-platform-layer review \\(INFRA-1624\\) *)",
+      "Bash(chmod +x wip/qa-cluster-standup/apply-doke-queue.sh iaac-drafts/argocd-onprem-jul22/seed-argocd-repo.sh)",
+      "Bash(bash -n wip/qa-cluster-standup/apply-doke-queue.sh)",
+      "Bash(bash -n iaac-drafts/argocd-onprem-jul22/seed-argocd-repo.sh)",
+      "Bash(git commit -q -m 'prod: kickoff plan \\(INFRA-1621\\) + apply scripts for Doke queue and argocd seed *)",
+      "Bash(git commit -q -m 'qa-rw: terraform for the 5 RisingWave SM secrets \\(INFRA-1624\\) *)",
+      "Bash(python3 -c \"import ast,sys; ast.parse\\(open\\('iaac-drafts/qa-risingwave-jul20/qa-fixes/add-random-provider.py'\\).read\\(\\)\\)\")",
+      "Bash(git commit -q -m 'qa-rw: fix duplicate required_providers in secrets.tf *)",
+      "Bash(rm -f manifests/base/externalsecret-repo-creds.yaml)",
+      "Bash(cat)",
+      "Bash(sed -i 's|^  - target:\\\\n      kind: ExternalSecret||' manifests/op-usxpress-dev/kustomization.yaml)",
+      "Bash(python3 -)",
+      "Bash(git commit -q -m 'alerts: fix etcd-snapshot-age rule label and namespace \\(INFRA-1623\\) *)",
+      "Bash(git commit *)",
+      "Bash(kubectl kustomize *)",
+      "Bash(python3 -c \"import ast;ast.parse\\(open\\('wip/qa-cluster-standup/octopus-qa-env-setup/inspect-octopus-projects.py'\\).read\\(\\)\\)\")",
+      "Bash(python3 -c \"import ast;ast.parse\\(open\\('wip/qa-cluster-standup/octopus-qa-env-setup/setup-octopus-rw.py'\\).read\\(\\)\\)\")",
+      "Bash(git -C /workspaces/eks_code add -A wip/)",
+      "Bash(git -C /workspaces/eks_code commit -q -m 'qa-rw: cluster-wiring block for op-usxpress-qa \\(INFRA-1624\\) *)",
+      "Bash(git -C /workspaces/eks_code push -q origin main)",
+      "Bash(git -C /workspaces/eks_code commit -q -m 'argocd: dev adoption review \u2014 live split-brain + raw install + half-wired fold-in \\(INFRA-1622\\) *)",
+      "Bash(mkdir -p /workspaces/eks_code/wip/argocd-dev-adoption/infrastructure-argocd)",
+      "Bash(bash -n wip/prod-standup/validate-register.sh)",
+      "Bash(python3 -m py_compile add-prod-vars.py)",
+      "Bash(python3 -m py_compile wip/prod-standup/preflight-deploy.py)",
+      "Bash(OCTOPUS_API_KEY=dummy timeout 30 python3 wip/prod-standup/preflight-deploy.py)",
+      "Bash(chmod +x wip/prod-standup/fix-op-prod-literals.sh)",
+      "Bash(bash -n wip/prod-standup/fix-op-prod-literals.sh)",
+      "Bash(REPO=/tmp/nonexistent bash wip/prod-standup/fix-op-prod-literals.sh)",
+      "Bash(python3 -m py_compile wip/prod-standup/add-prod-lifecycle-phase.py)",
+      "Bash(chmod +x wip/onprem-qa-access/sign-csr-qa.sh)",
+      "Bash(bash -n wip/onprem-qa-access/sign-csr-qa.sh)",
+      "Bash(python3 -c ' *)",
+      "Bash(gh repo *)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(python3 -m py_compile wip/prod-standup/fix-prod-vars.py)",
+      "Bash(git reset *)",
+      "Bash(git restore *)",
+      "Bash(python3 -m py_compile wip/prod-standup/seed-argocd-admin.py)",
+      "Bash(python3 -c \"import ast;ast.parse\\(open\\('wip/onprem-qa-access/aws-sso-webhook/add-octopus-var.py'\\).read\\(\\)\\);print\\('syntax OK'\\)\")",
+      "Bash(python3 -c \"import yaml;list\\(yaml.safe_load_all\\(open\\('wip/onprem-qa-access/aws-sso-webhook/daemonset.yaml'\\)\\)\\);print\\('daemonset parses'\\)\")",
+      "WebFetch(domain:status.mongodb.com)",
+      "Bash(mkdir -p /workspaces/eks_code/wip/onprem-upgrade && echo ok)",
+      "Edit(/.claude/skills/prod-auth-triage/**)",
+      "Bash(aws sts *)",
+      "Bash(go mod *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go run *)",
+      "Bash(rm -rf /tmp/solve)",
+      "Bash(cp -r /workspaces/eks_code/wip/interview-senior-platform-2026-08/exercises/01-go-spec-guard /tmp/solve)",
+      "Bash(gofmt -w internal/spec/spec.go)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(mkdir -p /workspaces/eks_code/wip/interview-senior-platform-2026-08-private/ex01-solved)",
+      "Bash(cp /tmp/solve/internal/spec/spec.go /tmp/solve/internal/spec/spec_test.go /workspaces/eks_code/wip/interview-senior-platform-2026-08-private/ex01-solved/)",
+      "Bash(awk '{print $NF}' 02-consumers.txt)",
+      "Bash(awk 'NF && $1 !~ /^#/ {split\\($2,c,\"T\"\\); split\\($3,l,\"T\"\\); if \\(c[1]==l[1]\\) print \" RECREATED: \" $0; }' 04-secret-timestamps.txt)"
+    ],
+    "additionalDirectories": [
+      "/workspaces/eks_code/wip",
+      "/workspaces/eks_code/iaac-drafts/qa-risingwave-jul20",
+      "/workspaces/eks_code/wip/qa-cluster-standup/octopus-qa-env-setup"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/codespace/.claude/skills-router/inject.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspaces/eks_code/.claude/hooks/guard-mutations.sh"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/claude-env-backup.sh >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

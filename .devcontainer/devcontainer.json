@@ -1,0 +1,5 @@
+{
+  "name": "eks_code",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "postCreateCommand": "bash .devcontainer/post-create.sh"
+}

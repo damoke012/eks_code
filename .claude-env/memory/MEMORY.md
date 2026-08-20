@@ -1,0 +1,30 @@
+# Memory index
+
+- [User: Doke / on-prem platform](user-doke-onprem-platform.md) — who the user is (US Xpress cloud/platform engineer Dare Oke, owns Talos on-prem; no Azure access)
+- [Repo branch topology](repo-branch-topology-recovery.md) — main is now canonical, holds all 120 commits (fast-forwarded 2026-07-10); repo layout
+- [QA cluster stand-up](qa-cluster-standup.md) — INFRA-1585 / epic INFRA-1560, deliberate Prod-standard mirror of Dev
+- [Deploy via Octopus only](onprem-deploy-via-octopus.md) — iaac-talos deployed through Octopus ONLY; never local terraform apply
+- [QA vs Dev delta](qa-vs-dev-delta.md) — accounts, DNS, node pools, CP sizing differences
+- [RisingWave on-prem](risingwave-onprem.md) — risingwave (Idris) + risingwave-2 (Tim) namespaces; Phase 1 handoff done
+- [On-prem networking/ingress](onprem-networking-ingress.md) — Phase 1 INFRA-1494 CLOSED 2026-06-01; May 29 networking/CySec call decisions
+- [Entra secret rotation](entra-secret-rotation.md) — ACTIVE: 11 app-reg secrets expiring Jul–Aug 2026; rotate in-use, confirm all before cleanup
+- [Argo CD on-prem (INFRA-1622)](pr73-argocd-repo-sync-review.md) — ✅ platform stack COMPLETE on dev + QA 2026-07-24; app-* guardrail proven; Istio VS still TODO
+- [Data-lake Kafka→S3 monitoring](datalake-kafka-s3-monitoring.md) — NEW: Nathaniel/Anthony Confluent→S3 migration wants Kafka Connect + S3 alerting via Grafana; ticket pending
+- [EKS K8s upgrade](eks-k8s-upgrade.md) — NEW 2026-07-13: assess EKS version (~1.34/1.35), automate fleet-style upgrade dev→QA→prod
+- [Prod stand-up](prod-standup.md) — INFRA-1589/1621; ✅ cluster UP + full platform reconciled 2026-07-29 (ESO/IRSA/Istio/ArgoCD green); 4 source gaps open before destroy→rebuild
+- [EKS human access model](eks-human-access-model.md) — grant kubectl via AWS SSO permission set mapped to aws-auth `view` group; NEVER hand-edit aws-auth
+- [On-prem human access model](onprem-human-access-model.md) — ✅ AWS SSO LIVE on op-usxpress-qa 2026-07-28 via self-hosted aws-iam-authenticator; certs demoted to break-glass; Entra OIDC dropped (no Azure access)
+- [Octopus green ≠ applied](octopus-green-but-no-apply.md) — iaac-talos deploys print the plan, skip apply, report Success; TfApply=false everywhere but production
+- [Cloud EKS platform doc](cloud-eks-platform-doc.md) — Confluence + artifact refs; ⚠️ idris-kt KT repo trees are STALE (real iaac-eks / terraform-variant-apps structure)
+- [RW/platform SSO via Entra](rw-platform-sso-entra.md) — NEW 2026-07-13: reusable dev service-account Entra SSO pattern, RisingWave first consumer
+- [Wiz sensor on-prem dev](wiz-sensor-onprem-dev.md) — INFRA-1586: eBPF sensor live on op-dev, CP exclusion verified (7 wk/0 CP), blocked on real Wiz token
+- [WSL kubeconfig churn](wsl-kubeconfig-churn.md) — reconnect steps + cluster endpoint fingerprints (verify before running; prod=BF7BD089, qa=D0E66C, op-dev=10.10.82.50)
+- [USX GHE ≠ personal GitHub](usx-github-enterprise-not-personal.md) — all USX/variant-inc repo work is corp GHE on WSL; codespace damoke012 token must never reach USX repos
+- [No test pods in prod](no-test-pods-in-prod.md) — never `kubectl run`/`debug` throwaways in a prod cluster; read telemetry or exec into an already-running pod
+- [No AI attribution in git](no-ai-attribution-in-git.md) — never add "Generated with Claude Code" to PR bodies or Co-Authored-By trailers to commits
+- [ESO SecretSynced ≠ valid content](eso-secretsynced-not-content-check.md) — green ExternalSecret proves the sync ran, not that the value works; bit us on Wiz + QA etcd-backup
+- [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
+- [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod
+- [DX deploy failure ≠ clean release](dx-deploy-failure-not-clean-release.md) — the three real DX-Apply failure modes and their identity-safe fixes
+- [On-prem app CI/CD](onprem-app-cicd.md) — build in GHA → ECR → Argo CD; ✅ QA + prod wired and proven 2026-08-18; app-side repo work outstanding
+- [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring
