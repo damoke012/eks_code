@@ -10,7 +10,7 @@ data:
   RW_PORT: "4567"
   RW_DB:   dev
   RW_USER: root
-  PG_HOST: postgres-postgresql.risingwave.svc.cluster.local
+  PG_HOST: pg-postgresql.risingwave.svc.cluster.local   # QA's actual service; dev's is named differently
   PG_PORT: "5432"
   PG_DB:   postgres
   PG_USER: postgres
