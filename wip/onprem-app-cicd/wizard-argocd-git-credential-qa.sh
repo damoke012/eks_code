@@ -230,8 +230,11 @@ step "platform repo: $PLATFORM_REPO"
 
 if [[ ! -f "$PACK/platform/argocd-config/op-qa/repo-creds-externalsecret.yaml" ]]; then
   warn "manifest pack not found at $PACK"
-  note "get it with:  mkdir -p ~/onprem-app-cicd && git archive origin/main wip/onprem-app-cicd \\"
-  note "                | tar -x --strip-components=2 -C ~/onprem-app-cicd"
+  note "get it with, FROM THE NOTES REPO — not from a platform clone, which has"
+  note "no main branch:"
+  note "  cd /home/doke/work/eks_code && git fetch origin"
+  note "  mkdir -p ~/onprem-app-cicd && git archive origin/main wip/onprem-app-cicd \\"
+  note "    | tar -x --strip-components=2 -C ~/onprem-app-cicd"
   exit 1
 fi
 step "manifest pack: $PACK"
