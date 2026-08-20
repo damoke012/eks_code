@@ -36,6 +36,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$HOST" ] || { echo "usage: $0 <hostname> [--kubeconfig P] [--context C] [--control H] [--tls-port N]" >&2; exit 2; }
+# An unknown flag falls through to the positional branch and silently becomes the
+# hostname -- which is how an older copy of this script, lacking --tls-port, went
+# looking for a host named "4567". Refuse anything that cannot be a hostname.
+case "$HOST" in
+  -*)  echo "!! '$HOST' is a flag, not a hostname. This copy of the script may predate it;" >&2
+       echo "   refresh with: git show origin/main:scripts/check-onprem-route.sh > \"$0\"" >&2
+       exit 2 ;;
+  *.*) : ;;
+  *)   echo "!! '$HOST' is not a hostname (no dot). Did an unrecognised flag land here?" >&2
+       exit 2 ;;
+esac
 [ -n "$CONTEXT_ARG" ] || { echo "!! refusing to run without --context: this must be pinned to one cluster" >&2; exit 2; }
 
 k() { kubectl ${KUBECONFIG_ARG:+--kubeconfig="$KUBECONFIG_ARG"} --context "$CONTEXT_ARG" "$@"; }
