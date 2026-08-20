@@ -50,3 +50,9 @@ services when one misses. Run it before the PR, not after the failed sync.
 together. Split across a ConfigMap and Secrets Manager they drift, and the error names the
 wrong cause — `password authentication failed for user "postgres"` when the real user is
 `risingwave`.
+
+**Check written 2026-08-20 (INFRA-1646, closed):**
+`scripts/check-foreign-cluster-ids.sh <platform-checkout> <op-dev|op-qa|op-prod> [--diff <base>]`
+scans for the other clusters' account IDs, OIDC issuers, API node addresses and DNS suffixes
+and exits non-zero on a hit; `--diff` limits it to changed files for pre-merge use. The
+shared ECR account 064859874041 is deliberately not flagged. Run it before every platform PR.

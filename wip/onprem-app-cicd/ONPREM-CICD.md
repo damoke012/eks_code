@@ -176,7 +176,9 @@ KUBECONFIG=$HOME/.kube/op-usxpress-qa-sso.yaml \
     op-usxpress-qa/risingwave/postgres usx-qa
 ```
 
-Run `scripts/verify-overlay-endpoints.sh` on the overlay in the same pass — it resolves every
+Run `scripts/check-foreign-cluster-ids.sh <platform-repo> <branch> --diff origin/<branch>`
+before every platform PR, and `scripts/verify-overlay-endpoints.sh` on the overlay in the
+same pass — it resolves every
 `*.svc.cluster.local` name against the target cluster and lists the real services when one
 misses.
 

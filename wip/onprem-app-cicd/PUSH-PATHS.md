@@ -22,6 +22,16 @@ mkdir -p ~/onprem-app-cicd && git archive origin/main wip/onprem-app-cicd \
 SRC=~/onprem-app-cicd
 ```
 
+**Before every platform PR**, on the branch you are about to merge into:
+
+```bash
+bash scripts/check-foreign-cluster-ids.sh ~/iaac-talos-flux-platform op-qa --diff origin/op-qa
+```
+
+It scans the changed files for another cluster's account ID, OIDC issuer, API node or DNS
+suffix, and exits non-zero on a hit. Six defects of that class by 2026-08-20, every one of
+them silent — the Kustomization reports Ready and the workload cannot authenticate or route.
+
 The platform repo carries **one branch per cluster** (`op-dev`, `op-qa`, `op-prod`). Files land on
 the branch for the cluster they're for. That's why the same directory is pushed more than once.
 
