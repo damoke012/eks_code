@@ -1,3 +1,8 @@
+---
+name: prod-auth-triage
+description: Triage 401s and token/audience failures on the AWS EKS prod cluster usxpress-prod — "IDX10214 Audience validation failed", AADSTS500011, AADSTS501051, blanket 401s from a prod API, "returns 401 on everything but the pods are healthy", or a prod auth outage after an Entra app registration was recreated. Check identity before Kubernetes.
+---
+
 # /prod-auth-triage
 
 Triage 401 / audience / token failures on the AWS EKS prod cluster (`usxpress-prod`), where the

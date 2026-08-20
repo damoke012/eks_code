@@ -1,3 +1,8 @@
+---
+name: azure-oidc-federation
+description: Fix a GitHub Actions to Azure OIDC login failure — "AADSTS700213 No matching federated identity record found for presented assertion subject", azure/login failing on a new branch or environment, "does my branch need to be whitelisted", a federated credential subject-claim mismatch, or an Azure deploy blocked by what looks like a permissions error but is a subject string mismatch.
+---
+
 # /azure-oidc-federation
 
 Unblock and permanently fix GitHub Actions → Azure OIDC failures, where the error reads like
