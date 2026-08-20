@@ -266,9 +266,33 @@ def do_create(spec):
         print(f"  !! create failed {s}: {r}")
 
 
+def preflight():
+    """Prove the token works before attempting any mutation.
+
+    Jira answers an unauthenticated request with 404 on an issue -- it will not
+    confirm the issue exists -- and 400 on create. Both read like permission
+    problems rather than auth ones. On 2026-08-20 a --go run made eleven calls
+    and failed all eleven that way, because ATLASSIAN_TOKEN had been set to the
+    literal placeholder text from an instruction."""
+    s, r = api("GET", "/rest/api/3/myself")
+    if s != 200:
+        tok = os.environ.get("ATLASSIAN_TOKEN", "")
+        print(f"!! cannot authenticate to {BASE} as {EMAIL}  (HTTP {s})")
+        if tok in ("...", "<token>", "") or len(tok) < 20:
+            print(f"   ATLASSIAN_TOKEN looks wrong: {len(tok)} characters.")
+            print("   Set it without typing it into history:")
+            print("     read -rsp 'Atlassian API token: ' ATLASSIAN_TOKEN; export ATLASSIAN_TOKEN; echo")
+        else:
+            print("   The token is a plausible length, so it may be expired or revoked.")
+            print("   Mint a new one: https://id.atlassian.com/manage-profile/security/api-tokens")
+        sys.exit(1)
+    print(f"authenticated as {r.get('displayName')} <{r.get('emailAddress', EMAIL)}>\n")
+
+
 def main():
     mode = "EXECUTING" if GO else "DRY RUN (pass --go to execute)"
     print(f"== close-sprint3-tickets  [{mode}]\n")
+    preflight()
 
     print("-- closing (AC met, evidence commented) --")
     for issue, comment in CLOSE:
