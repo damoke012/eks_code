@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Applied by the `argocd-config` Kustomization, which dependsOn `argocd`
+# (wait: true) so the argoproj.io CRDs exist before these AppProjects apply.
+#
+# INFRA-1647 added repo-creds-externalsecret.yaml. It needs no CRD from the Argo
+# CD chart — it is an ExternalSecret producing a plain labelled Secret — so its
+# position here is safe on a greenfield cluster.
+#
+# Ship EITHER repo-creds-externalsecret.yaml (GitHub App) OR
+# repo-creds-externalsecret-pat.yaml, never both: they target the same Secret
+# name, and two ExternalSecrets owning one Secret fight over it forever.
+resources:
+  - appprojects.yaml
+  - admin-externalsecret.yaml
+  - repo-creds-externalsecret.yaml

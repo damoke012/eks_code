@@ -1,0 +1,35 @@
+---
+# G2 — neuter the built-in permissive `default` project. It ships with '*'
+# destinations; without this override every other guardrail is decorative.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  description: "Neutered. Every Application must declare an explicit project."
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []
+---
+# G1 — the only project apps may use. `app-*` cannot match risingwave,
+# flux-system, velero, rook-ceph, istio-*, prometheus, grafana, etcd-backup...
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  description: "App-team self-service. MUST NOT overlap any Flux-managed namespace."
+  sourceRepos:
+    - "ssh://git@github.com/variant-inc/*"
+    - "https://github.com/variant-inc/*"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "app-*"
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange

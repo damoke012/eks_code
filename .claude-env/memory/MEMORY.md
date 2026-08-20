@@ -26,5 +26,5 @@
 - [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
 - [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod
 - [DX deploy failure ≠ clean release](dx-deploy-failure-not-clean-release.md) — the three real DX-Apply failure modes and their identity-safe fixes
-- [On-prem app CI/CD](onprem-app-cicd.md) — build in GHA → ECR → Argo CD; ✅ QA + prod wired and proven 2026-08-18; app-side repo work outstanding
+- [On-prem app CI/CD](onprem-app-cicd.md) — build in GHA → ECR → Argo CD; platform + GHA→ECR build/push proven; first deploy blocked — Argo CD has no Git credential (INFRA-1647)
 - [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring

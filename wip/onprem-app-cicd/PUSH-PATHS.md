@@ -76,8 +76,8 @@ Do **not** merge this before PR 1 — the workflow assumes the role and the repo
 ```
 platform/cluster-wiring-block.yaml  →  append into iaac-talos-flux-cluster (master)
                                        clusters/bm-dev/flux-system/infra.yaml
-                                       clusters/<qa>/flux-system/infra.yaml
-                                       clusters/<prod>/flux-system/infra.yaml
+                                       clusters/op-usxpress-qa/flux-system/infra.yaml
+                                       clusters/op-usxpress-prod/flux-system/infra.yaml
 ```
 
 Append the whole block; it defines both `app-namespaces` and `argocd-apps`.
@@ -90,6 +90,12 @@ kubectl get ns app-risingwave -o jsonpath='{.metadata.labels}' ; echo
 ```
 
 ## PR 5 — the QA ApplicationSet
+
+⚠️ An ApplicationSet alone does not produce a working deploy. Argo CD holds no Git
+credential on either cluster, so an Application pointing at an internal repository fails
+with `ComparisonError: authentication required`. **PR 8 is a prerequisite for this one
+being useful**, not a follow-up.
+
 
 ```
 platform/argocd-apps/applicationset-qa.yaml  →  iaac-talos-flux-platform:op-qa/infrastructure/argocd-apps/
@@ -153,3 +159,37 @@ kubectl -n app-risingwave get sa default -o jsonpath='{.imagePullSecrets}' ; ech
 Sync QA **twice** before raising PR 7. First run applies, second must report `0 applied, N
 unchanged`. If it re-applies, stop — Argo CD re-syncs on its own and a pipeline that re-runs DDL
 will eventually recreate a streaming job and re-read the topic from `earliest`.
+
+---
+
+## PR 8 — the Argo CD Git credential (INFRA-1647) — required before ANY deploy works
+
+Full procedure, including the Secrets Manager merge and the verification that is not
+`SecretSynced`: [`ARGOCD-GIT-CREDENTIAL.md`](ARGOCD-GIT-CREDENTIAL.md).
+
+```
+platform/argocd-config/op-qa/repo-creds-externalsecret.yaml
+  → iaac-talos-flux-platform:op-qa/infrastructure/argocd-config/
+platform/argocd-config/op-prod/repo-creds-externalsecret.yaml
+  → iaac-talos-flux-platform:op-prod/infrastructure/argocd-config/
+```
+
+Plus one line — `  - repo-creds-externalsecret.yaml` — in each branch's existing
+`infrastructure/argocd-config/kustomization.yaml`. **Do not copy this pack's
+`kustomization.yaml`, `appprojects.yaml` or `admin-externalsecret.yaml` over the branch's
+own files.** They are here so the directory builds standalone for validation; only the
+ExternalSecret is new.
+
+Ship the GitHub App variant or `…-pat.yaml`, never both — they own the same Secret name.
+
+Verify (QA):
+
+```bash
+export KUBECONFIG=$HOME/.kube/op-usxpress-qa-sso.yaml   # QA · SSO
+kubectl --context op-usxpress-qa -n argocd get secret argocd-repo-creds-variant-inc \
+  -o jsonpath='{.metadata.labels}{"\n"}'
+kubectl --context op-usxpress-qa -n argocd get application risingwave-etl \
+  -o jsonpath='{.status.sync.status}{"  "}{.status.health.status}{"\n"}'
+```
+
+Want the `argocd.argoproj.io/secret-type: repo-creds` label present, and `Synced Healthy`.

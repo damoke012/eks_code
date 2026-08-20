@@ -32,7 +32,11 @@ spec:
       project: apps
       source:
         repoURL: '{{.repoURL}}'
-        targetRevision: main
+        # The repository's ACTUAL default branch. `risingwave-pipeline` is
+        # `master`; several variant-inc repos are. A wrong revision fails BEFORE
+        # authentication, which masked the missing Git credential (INFRA-1647)
+        # for a full day. Corrected on the cluster by platform#96.
+        targetRevision: master
         path: '{{.path}}'
       destination:
         server: https://kubernetes.default.svc
