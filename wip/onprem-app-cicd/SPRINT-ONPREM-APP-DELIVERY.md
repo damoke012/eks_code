@@ -9,11 +9,14 @@ its unfinished work moved into UI Sprint 3. A separate sprint 6155 "On-Prem App 
 was created first and then emptied — the work was consolidated into UI Sprint 3 so the
 team runs one sprint, with the epic doing the grouping.
 
+**Status 2026-08-20** — closed via `scripts/close-sprint3-tickets.py`, evidence in
+`FINDINGS-2026-08-20.md`. Four follow-ups filed for what the work uncovered.
+
 | # | Key | Ticket |
 |---|---|---|
-| 1 | INFRA-1633 | ECR repository + GitHub OIDC push role — **BLOCKED** |
-| 2 | INFRA-1634 | RisingWave ETL application repository |
-| 3 | INFRA-1635 | Deploy overlays for QA and prod, pinned by digest |
+| 1 | INFRA-1633 | ECR repository + GitHub OIDC push role — ✅ **DONE**, but the repo and its policy are outside Terraform; successor ticket filed |
+| 2 | INFRA-1634 | RisingWave ETL application repository — ✅ **DONE**, premise was wrong (the repo existed); re-scoped work shipped as #9/#10/#11 |
+| 3 | INFRA-1635 | Deploy overlays for QA and prod, pinned by digest — 🟡 **open**: AC met on QA, but `PIPELINE_DIR` is still the smoke payload |
 | 4 | INFRA-1636 | ApplicationSet for op-usxpress-prod |
 | 5 | INFRA-1637 | **SECURITY** — rotate the Confluent Cloud credentials |
 | 6 | INFRA-1638 | Extend AWS SSO to op-usxpress-dev and op-usxpress-prod |
@@ -22,6 +25,8 @@ team runs one sprint, with the epic doing the grouping.
 | 9 | INFRA-1641 | Harden ecr-credentials-sync |
 | 10 | INFRA-1642 | Flux Git token at source + alert on stale sources |
 | 11 | INFRA-1643 | Review the shared ECR registry policy |
+| 12 | INFRA-1647 | Argo CD Git credential — ✅ **DONE on QA** 2026-08-20 (deploy key; prod outstanding) |
+| 13 | INFRA-1648 | Smoke test — ✅ **DONE** 2026-08-20, `pipeline_applied` row is the proof |
 
 
 **Goal.** An app team can build an image and have it deployed to QA and prod through a
