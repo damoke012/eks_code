@@ -5,7 +5,10 @@ metadata:
   type: project
 ---
 
-Jira: epic **INFRA-1632**, stories INFRA-1633…1648, in sprint **959 "UI Sprint 3"**
+Jira: epic **INFRA-1632**, stories INFRA-1633…1653. Closed 2026-08-20: 1633, 1634, 1647,
+1648. Filed same day: **1650** prod credential + ApplicationSet, **1651** ECR Terraform
+bootstrap, **1652** QA postgres password drift, **1653** hook-delete-policy. Stories
+INFRA-1633…1648, in sprint **959 "UI Sprint 3"**
 (board 322, 2026-08-17 → 2026-08-28). 1633–1643 created 2026-08-18; 1644–1648 added
 2026-08-19 from doing the first real build.
 

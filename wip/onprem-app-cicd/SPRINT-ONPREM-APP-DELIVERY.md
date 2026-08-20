@@ -28,6 +28,15 @@ team runs one sprint, with the epic doing the grouping.
 | 12 | INFRA-1647 | Argo CD Git credential — ✅ **DONE on QA** 2026-08-20 (deploy key; prod outstanding) |
 | 13 | INFRA-1648 | Smoke test — ✅ **DONE** 2026-08-20, `pipeline_applied` row is the proof |
 
+**Filed 2026-08-20** from what the work uncovered, all parented to INFRA-1632:
+
+| Key | Ticket |
+|---|---|
+| INFRA-1650 | Argo CD Git credential + ApplicationSet on op-usxpress-prod |
+| INFRA-1651 | Bootstrap a Terraform path into ECR account 064859874041, adopt the hand-made repo and policy |
+| INFRA-1652 | QA Postgres never learned its rotated password — recreate the meta pod, check dev and prod |
+| INFRA-1653 | Argo CD sync hooks delete their own evidence — `BeforeHookCreation,HookSucceeded` + retry limit |
+
 
 **Goal.** An app team can build an image and have it deployed to QA and prod through a
 path they can see and troubleshoot themselves, with the platform owning namespaces,
