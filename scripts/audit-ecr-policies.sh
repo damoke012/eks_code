@@ -13,12 +13,13 @@
 #   scripts/audit-ecr-policies.sh --profile infra-common --region us-east-1
 set -uo pipefail
 
-PROFILE=""; REGION="us-east-2"; EXPECT_ACCOUNT="064859874041"
+PROFILE=""; REGION="us-east-2"; EXPECT_ACCOUNT="064859874041"; SUMMARY_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="$2"; shift 2 ;;
     --region)  REGION="$2";  shift 2 ;;
     --account) EXPECT_ACCOUNT="$2"; shift 2 ;;
+    --summary) SUMMARY_ONLY=1; shift ;;
     -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -47,13 +48,20 @@ WRITE_ACTIONS='PutImage|InitiateLayerUpload|UploadLayerPart|CompleteLayerUpload|
 FINDINGS=0
 
 echo
-echo "== registry-level policy"
+echo "== registry PERMISSIONS policy (get-registry-policy, not describe-registry --"
+echo "   describe-registry returns replication config and says nothing about who may push)"
+a ecr get-registry-policy --query policyText --output text 2>/dev/null | python3 -m json.tool \
+  || echo "  (no registry-level policy — authorisation is entirely per-repository)"
+echo
+echo "== registry replication"
 a ecr describe-registry --output json 2>/dev/null | python3 -m json.tool || echo "  (none)"
 
 echo
 printf '%-46s %-9s %-8s %s\n' REPOSITORY MUTABLE SCAN POLICY
 printf '%-46s %-9s %-8s %s\n' "----------" "-------" "----" "------"
 
+TALLY=$(mktemp)
+trap 'rm -f "$TALLY"' EXIT
 REPOS=$(a ecr describe-repositories --output json 2>/dev/null)
 [ -z "$REPOS" ] && { echo "!! could not list repositories" >&2; exit 1; }
 
@@ -65,8 +73,10 @@ for r in json.load(sys.stdin)["repositories"]:
                      str(r.get("imageScanningConfiguration", {}).get("scanOnPush", "?"))]))
 ' | while IFS=$'\t' read -r NAME MUT SCAN; do
     POL=$(a ecr get-repository-policy --repository-name "$NAME" --query policyText --output text 2>/dev/null)
+    echo "$MUT $SCAN" >> "$TALLY.mut"
     if [ -z "$POL" ]; then
-      printf '%-46s %-9s %-8s %s\n' "$NAME" "$MUT" "$SCAN" "NONE — unreadable cross-account"
+      [ "$SUMMARY_ONLY" = 1 ] || printf '%-46s %-9s %-8s %s\n' "$NAME" "$MUT" "$SCAN" "NONE — unreadable cross-account"
+      echo "NOPOLICY $NAME" >> "$TALLY"
       continue
     fi
     SUMMARY=$(echo "$POL" | python3 -c '
@@ -97,8 +107,40 @@ for st in p.get("Statement", []):
         bits.append(f"read to {scope}")
 print("; ".join(bits) if bits else "no Allow statements")
 ')
-    printf '%-46s %-9s %-8s %s\n' "$NAME" "$MUT" "$SCAN" "$SUMMARY"
+    case "$SUMMARY" in
+      *"WRITE"*"org "*)        echo "ORGWRITE $NAME" >> "$TALLY" ;;
+      *"WRITE"*"ANY PRINCIPAL"*) echo "ANYWRITE $NAME" >> "$TALLY" ;;
+      *"WRITE"*)               echo "ACCTWRITE $NAME" >> "$TALLY" ;;
+      *)                       echo "READONLY $NAME" >> "$TALLY" ;;
+    esac
+    [ "$SUMMARY_ONLY" = 1 ] || printf '%-46s %-9s %-8s %s\n' "$NAME" "$MUT" "$SCAN" "$SUMMARY"
   done
+
+echo
+echo "== tally for $REGION"
+TOTAL=$(wc -l < "$TALLY" 2>/dev/null || echo 0)
+printf '  %-38s %s\n' "repositories" "$TOTAL"
+for kind in ORGWRITE ANYWRITE ACCTWRITE READONLY NOPOLICY; do
+  n=$(grep -c "^$kind " "$TALLY" 2>/dev/null || echo 0)
+  case $kind in
+    ORGWRITE)  label="write granted to the whole org" ;;
+    ANYWRITE)  label="write granted to ANY principal" ;;
+    ACCTWRITE) label="write granted to named accounts" ;;
+    READONLY)  label="read-only (correctly scoped)" ;;
+    NOPOLICY)  label="NO policy (unreadable cross-account)" ;;
+  esac
+  printf '  %-38s %s\n' "$label" "$n"
+done
+if [ -f "$TALLY.mut" ]; then
+  printf '  %-38s %s\n' "IMMUTABLE tags" "$(grep -c '^IMMUTABLE' "$TALLY.mut" || echo 0)"
+  printf '  %-38s %s\n' "scanOnPush enabled" "$(grep -c 'True$' "$TALLY.mut" || echo 0)"
+  rm -f "$TALLY.mut"
+fi
+echo
+echo "  read-only repositories (the ones scoped the way a shared registry should be):"
+grep '^READONLY ' "$TALLY" 2>/dev/null | sed 's/^READONLY /    /' || echo "    none"
+echo "  repositories with no policy at all:"
+grep '^NOPOLICY ' "$TALLY" 2>/dev/null | sed 's/^NOPOLICY /    /' || echo "    none"
 
 echo
 echo "Read the WRITE rows in full before deciding — a write grant to a named"
