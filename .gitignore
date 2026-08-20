@@ -1,3 +1,12 @@
 scripts/push-to-confluence.sh
 wip/prod-standup/__pycache__/
 __pycache__/
+
+# Terraform working state. A .tfplan is a serialised plan: it embeds resource
+# attributes, and for anything reading a secret it embeds the value. Never
+# commit one. .terraform/ is provider binaries and a cached backend config
+# carrying the state bucket and role.
+.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.*
