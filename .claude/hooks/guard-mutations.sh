@@ -36,7 +36,13 @@ while i < len(lines):
             i += 1
         i += 1
 print("\n".join(out))
-' 2>/dev/null)
+' 2>/dev/null); parse_rc=$?
+# FAIL CLOSED. If the parser errored, or returned nothing while the payload was non-empty,
+# scan the RAW payload instead of trusting an empty result. A payload we cannot read is not
+# evidence of a safe command. A false block is recoverable; a false allow is not.
+if [ "$parse_rc" -ne 0 ] || { [ -z "$cmd" ] && [ -n "$payload" ]; }; then
+  cmd="$payload"
+fi
 [ -z "$cmd" ] && exit 0
 
 if printf '%s' "$cmd" | grep -qiE "$MUTATING" && printf '%s' "$cmd" | grep -qiE "$PROTECTED"; then

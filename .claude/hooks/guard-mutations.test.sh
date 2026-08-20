@@ -30,4 +30,21 @@ else
   # Regression: a runbook that merely QUOTES a protected command must not self-block.
   check 0 'heredoc quoting a prod command'  "$(printf 'cat > n.md <<%sEOF%s\nnever run kubectl --context=%s apply\nEOF' "'" "'" "$PROT")"
 fi
+
+# --- fail-open regression (added 2026-08-20) --------------------------------------
+# The parser is piped with 2>/dev/null. Before this, any payload it could not read
+# produced an empty $cmd and was ALLOWED without ever being inspected. A malformed
+# payload carrying a real prod mutation bypassed the guard entirely.
+echo "== must FAIL CLOSED on unreadable payloads"
+raw() { # raw <expected-exit> <label> <payload>
+  local want=$1 label=$2 got
+  printf '%s' "$3" | bash "$HOOK" >/dev/null 2>&1; got=$?
+  if [ "$got" = "$want" ]; then pass=$((pass+1)); printf '  ok   %-48s (exit %s)\n' "$label" "$got"
+  else fail=$((fail+1)); printf '  FAIL %-48s (want %s, got %s)\n' "$label" "$want" "$got"; fi
+}
+raw 0 'garbage, no mutation'          "not json"
+raw 2 'TRUNCATED json, prod mutation' "{\"tool_input\":{\"command\":\"terraform apply -var acct=$ACCT\"}"
+raw 2 'mutation under unexpected key' "{\"tool_input\":{\"cmd\":\"terraform destroy -var acct=$ACCT\"}}"
+raw 2 'control: well-formed'          "{\"tool_input\":{\"command\":\"terraform apply -var acct=$ACCT\"}}"
+
 echo; echo "passed $pass, failed $fail"; [ "$fail" = 0 ]
