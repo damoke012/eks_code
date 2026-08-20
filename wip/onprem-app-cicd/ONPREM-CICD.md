@@ -107,18 +107,31 @@ Equally, the platform does not review application code or decide when a release 
 3. **Shape** — service or job
 4. **Dependencies** — which in-cluster services, which secrets, whether it needs to be reachable from outside
 
-### 4.2 What platform does — five changes, ~1 hour
+### 4.2 What platform does — six changes, ~1 hour
 
 | # | Repo / system | Change |
 |---|---|---|
 | 1 | ECR account IaC | repository + GitHub OIDC push role |
+| 1b | ECR account IaC | **repository policy allowing the cluster accounts to PULL** |
 | 2 | `iaac-talos-flux-platform` (per env branch) | `infrastructure/app-namespaces/app-<name>.yaml` |
 | 3 | `iaac-talos-flux-platform` (per env branch) | ApplicationSet entry — four lines |
 | 4 | AWS Secrets Manager | per-environment secret paths |
 | 5 | `iaac-talos-flux-platform` (per env branch) | **Argo CD repo credential** — a `repo-creds` secret scoped to `https://github.com/variant-inc`, from Secrets Manager via ExternalSecret. One-time per cluster, not per app |
 | 6 | — | hand back the ECR URI and the push role ARN |
 
-⚠️ Step 5 is **not yet done on any cluster** (INFRA-1647). Argo CD currently holds no Git
+⚠️ **Step 1b is not optional and is invisible until the first pull.** ECR authorises
+per REPOSITORY. A new repository has no policy, so no other account can read it, and the
+kubelet reports `403 Forbidden` on the manifest HEAD — which reads as a broken pull secret.
+It is not: the pull secret authenticates to the *registry*. Push is unaffected, because the
+GitHub OIDC role is in the same account as the registry and IAM alone covers it. This cost
+a full sync on 2026-08-20 and no earlier test could have caught it — the 2026-08-18 pull
+test used `lazy/api`, which already had a permissive policy.
+
+⚠️ Step 5 is **done on op-usxpress-qa as of 2026-08-20** (INFRA-1647), by deploy key
+rather than the intended org GitHub App — see `ARGOCD-GIT-CREDENTIAL.md`. Prod still has
+no Git credential.
+
+⚠️ Superseded note, kept for the record — Step 5 was **not yet done on any cluster**. Argo CD currently holds no Git
 credential at all, so it cannot read a private application repository. An app team can do
 everything correctly and still see `ComparisonError: authentication required`. This was
 invisible until the first real deploy, because the Application pointed at a path that did

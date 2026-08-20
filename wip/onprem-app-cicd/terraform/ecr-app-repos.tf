@@ -14,7 +14,7 @@ locals {
     "risingwave-etl" = {
       ecr_repository = "risingwave/etl-pipeline"
       github_repo    = "variant-inc/risingwave-pipeline"
-      github_branch  = "main"
+      github_branch  = "master"  # risingwave-pipeline's actual default branch
     }
   }
   # -----------------------------------------------------------------------------
@@ -35,6 +35,46 @@ resource "aws_ecr_repository" "onprem_app" {
     Delivery = "argocd"
     Platform = "on-prem"
   }
+}
+
+# Cross-account pull for the three on-prem cluster accounts, and NOTHING else.
+#
+# Why this exists: a repository with no policy is unreadable from any other
+# account, and the symptom is a kubelet `403 Forbidden` on the manifest HEAD —
+# which reads like a broken pull secret. It is not. The pull secret authenticates
+# to the REGISTRY; this authorises a specific repository. Cost us a full sync on
+# 2026-08-20, and it is invisible until the first cross-account pull.
+#
+# Push needs no entry here: the GitHub OIDC role lives in 064859874041, the same
+# account as the registry, so IAM alone covers it.
+#
+# ⚠️ Deliberately NOT modelled on the existing repositories. `lazy/api` grants
+# PutImage, InitiateLayerUpload and CompleteLayerUpload to every principal in
+# org o-yza5l1xhrc — so anything in the org can publish into it (INFRA-1643).
+# This grants the three read actions, to three named accounts, and no write.
+resource "aws_ecr_repository_policy" "onprem_app_pull" {
+  for_each = local.onprem_apps
+
+  repository = aws_ecr_repository.onprem_app[each.key].name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "OnPremClustersPullOnly"
+      Effect = "Allow"
+      Principal = {
+        AWS = [
+          "arn:aws:iam::700736442855:root", # op-usxpress-dev
+          "arn:aws:iam::527101283767:root", # op-usxpress-qa
+          "arn:aws:iam::937464026810:root", # op-usxpress-prod
+        ]
+      }
+      Action = [
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "ecr:BatchCheckLayerAvailability",
+      ]
+    }]
+  })
 }
 
 resource "aws_ecr_lifecycle_policy" "onprem_app" {
