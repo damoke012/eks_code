@@ -50,7 +50,7 @@ FINDINGS=0
 echo
 echo "== registry PERMISSIONS policy (get-registry-policy, not describe-registry --"
 echo "   describe-registry returns replication config and says nothing about who may push)"
-a ecr get-registry-policy --query policyText --output text 2>/dev/null | python3 -m json.tool \
+a ecr get-registry-policy --query policyText --output text 2>/dev/null | python3 -m json.tool 2>/dev/null \
   || echo "  (no registry-level policy — authorisation is entirely per-repository)"
 echo
 echo "== registry replication"
