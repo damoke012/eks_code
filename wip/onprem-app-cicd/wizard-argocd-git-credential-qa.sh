@@ -215,6 +215,7 @@ SM_SECRET="op-usxpress-qa/platform/argocd"
 QA_ENDPOINT="https://10.10.82.51:6443"
 QA_KUBECONFIG=""
 QA_CTX=""
+QA_EXEC_PROFILE=""
 
 # resolve_qa scans every kubeconfig for the context whose cluster server is
 # exactly $QA_ENDPOINT. A filename that says "qa" proves nothing — op-usxpress-qa
@@ -229,7 +230,16 @@ resolve_qa() {
       srv=$(kubectl --kubeconfig="$f" config view \
               -o jsonpath="{.clusters[?(@.name==\"$cl\")].cluster.server}" 2>/dev/null)
       if [[ "$srv" == "$QA_ENDPOINT" ]]; then
-        QA_KUBECONFIG="$f"; QA_CTX="$ctx"; return 0
+        QA_KUBECONFIG="$f"; QA_CTX="$ctx"
+        # Which AWS profile the aws-iam-authenticator exec plugin uses. It is
+        # NOT necessarily the profile Secrets Manager needs, and each has its own
+        # SSO session: usx-qa can be freshly logged in while this one is expired.
+        local usr
+        usr=$(kubectl --kubeconfig="$f" config view \
+                -o jsonpath="{.contexts[?(@.name==\"$ctx\")].context.user}" 2>/dev/null)
+        QA_EXEC_PROFILE=$(kubectl --kubeconfig="$f" config view --raw \
+          -o jsonpath="{.users[?(@.name==\"$usr\")].user.exec.env[?(@.name=='AWS_PROFILE')].value}" 2>/dev/null)
+        return 0
       fi
     done < <(kubectl --kubeconfig="$f" config view \
                -o jsonpath='{range .contexts[*]}{.name}{" "}{.context.cluster}{"\n"}{end}' 2>/dev/null)
@@ -300,13 +310,33 @@ else
   exit 1
 fi
 
+# The cluster and Secrets Manager authenticate through DIFFERENT profiles, each
+# with its own SSO session. Check the cluster's one explicitly rather than
+# inferring it from the usx-qa check above — that inference cost a round trip.
+if [[ -n "$QA_EXEC_PROFILE" ]]; then
+  if aws --profile "$QA_EXEC_PROFILE" sts get-caller-identity >/dev/null 2>&1; then
+    step "cluster exec profile '$QA_EXEC_PROFILE' ✓"
+  else
+    warn "the cluster authenticates with AWS profile '$QA_EXEC_PROFILE', and that"
+    warn "session is expired — separate from usx-qa, which is fine."
+    note "  aws sso login --profile $QA_EXEC_PROFILE"
+    exit 1
+  fi
+else
+  note "exec plugin sets no AWS_PROFILE — it uses the default profile or its own args"
+fi
+
 if kq get ns argocd >/dev/null 2>&1; then
   step "argocd namespace reachable ✓"
+  step "identity: $(kq auth whoami -o jsonpath='{.status.userInfo.username}' 2>/dev/null || echo unknown)"
 else
   warn "found the context but cannot reach the cluster or read it"
   kq cluster-info 2>&1 | head -3 | while read -r l; do note "  $l"; done
-  note "corp VPN:  nc -vz -w 5 10.10.82.51 6443"
-  note "SSO creds: kq auth whoami   (want sso:doke@usxpress.com)"
+  note ""
+  note "corp VPN:        nc -vz -w 5 10.10.82.51 6443"
+  note "exec plugin:     kubectl --kubeconfig=$QA_KUBECONFIG config view --raw \\"
+  note "                   -o jsonpath='{.users[*].user.exec}{\"\\n\"}'"
+  note "identity check:  kubectl --kubeconfig=$QA_KUBECONFIG --context $QA_CTX auth whoami"
   exit 1
 fi
 
