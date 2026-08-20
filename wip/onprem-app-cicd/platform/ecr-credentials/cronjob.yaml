@@ -1,0 +1,185 @@
+# ECR credential sync — INFRA-1641 hardening, 2026-08-20.
+#
+# Four things were wrong, two of them stated in comments that described
+# behaviour the file did not have:
+#
+#   schedule: "*/5 * * * *"   commented "Every 6 hours"  -> 288 runs/day
+#   ttlSecondsAfterFinished: 300  commented "24h"        -> Flux recreates the
+#       init Job every 5 minutes, so it re-ran perpetually beside the CronJob.
+#       Observed live 2026-08-20 20:16Z: the init Job was Running 63s after a
+#       CronJob run completed the identical work.
+#   image: aws-cli:latest, twice                         -> unpinned
+#   no concurrencyPolicy                                 -> overlapping runs
+#
+# The script was also duplicated verbatim between the CronJob and the init Job.
+# That is the same shape as the ghostunnel-rw-postgres defect found today
+# (INFRA-1654): two copies of one thing, one of them silently wrong. It now
+# lives once, in a ConfigMap, mounted by both.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecr-credentials-sync-script
+  namespace: ecr-credentials
+data:
+  sync.sh: |
+    #!/bin/bash
+    # Refresh the cross-account ECR pull secret in every namespace, and make
+    # sure every ServiceAccount references it.
+    set -euo pipefail
+
+    AWS_ACCOUNT="064859874041"
+    SECRET_NAME="ecr-pull-secret"
+    KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    KUBE_CA=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    KUBE_API="https://kubernetes.default.svc"
+    FAILED=0
+
+    kube() { curl -sS --cacert "${KUBE_CA}" -H "Authorization: Bearer ${KUBE_TOKEN}" "$@"; }
+
+    echo "Fetching ECR authorization tokens (images exist in both regions)..."
+    TOKEN_USE1=$(aws ecr get-login-password --region us-east-1)
+    TOKEN_USE2=$(aws ecr get-login-password --region us-east-2)
+
+    # A token that decodes is not a token that works. Probe the registry before
+    # writing the token to every namespace -- an authorization token can be
+    # issued to a principal that cannot read the repository (INFRA-1633).
+    #
+    # ADVISORY, NOT FATAL, deliberately: describe-registry is a different IAM
+    # action from GetAuthorizationToken, and if the IRSA role lacks it then
+    # making this fatal would break a sync that otherwise works. Grant
+    # ecr:DescribeRegistry on the role and this becomes a real gate; until then
+    # it is a warning in the log.
+    if aws ecr describe-registry --region us-east-2 >/dev/null 2>&1; then
+      echo "Token verified against the registry."
+    else
+      echo "WARNING: could not verify the token (ecr:DescribeRegistry may not be granted)."
+    fi
+
+    NAMESPACES=$(kube "${KUBE_API}/api/v1/namespaces" | python3 -c \
+      "import sys,json; [print(ns['metadata']['name']) for ns in json.load(sys.stdin)['items'] \
+       if ns['metadata']['name'] not in ['kube-system','kube-public','kube-node-lease','flux-system']]")
+
+    AUTH_USE1=$(echo -n "AWS:${TOKEN_USE1}" | base64 -w0)
+    AUTH_USE2=$(echo -n "AWS:${TOKEN_USE2}" | base64 -w0)
+    R1="${AWS_ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com"
+    R2="${AWS_ACCOUNT}.dkr.ecr.us-east-2.amazonaws.com"
+    DOCKERJSON="{\"auths\":{\"${R1}\":{\"auth\":\"${AUTH_USE1}\"},\"${R2}\":{\"auth\":\"${AUTH_USE2}\"}}}"
+    DOCKERJSON_B64=$(echo -n "${DOCKERJSON}" | base64 -w0)
+    SECRET_BODY="{\"apiVersion\":\"v1\",\"kind\":\"Secret\",\"metadata\":{\"name\":\"${SECRET_NAME}\"},\"type\":\"kubernetes.io/dockerconfigjson\",\"data\":{\".dockerconfigjson\":\"${DOCKERJSON_B64}\"}}"
+
+    for NS in ${NAMESPACES}; do
+      CODE=$(kube -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" \
+        -X PUT "${KUBE_API}/api/v1/namespaces/${NS}/secrets/${SECRET_NAME}" -d "${SECRET_BODY}")
+      if [ "${CODE}" = "404" ]; then
+        CODE=$(kube -o /dev/null -w "%{http_code}" -H "Content-Type: application/json" \
+          -X POST "${KUBE_API}/api/v1/namespaces/${NS}/secrets" -d "${SECRET_BODY}")
+      fi
+      # The old script printed the code and carried on, so a namespace that
+      # rejected the write looked exactly like one that accepted it.
+      case "${CODE}" in
+        200|201) ;;
+        *) echo "  FAILED ${NS}: HTTP ${CODE}"; FAILED=$((FAILED + 1)) ;;
+      esac
+    done
+
+    SA_PATCH="{\"imagePullSecrets\":[{\"name\":\"${SECRET_NAME}\"}]}"
+    for NS in ${NAMESPACES}; do
+      SA_NAMES=$(kube "${KUBE_API}/api/v1/namespaces/${NS}/serviceaccounts" | python3 -c \
+        "import sys,json; [print(sa['metadata']['name']) for sa in json.load(sys.stdin).get('items',[])]" 2>/dev/null || true)
+      for SA in ${SA_NAMES}; do
+        kube -o /dev/null -H "Content-Type: application/strategic-merge-patch+json" \
+          -X PATCH "${KUBE_API}/api/v1/namespaces/${NS}/serviceaccounts/${SA}" -d "${SA_PATCH}"
+      done
+    done
+
+    if [ "${FAILED}" -gt 0 ]; then
+      echo "ECR credential sync FAILED in ${FAILED} namespace(s)."
+      exit 1
+    fi
+    echo "ECR credentials synced to all namespaces (us-east-1 and us-east-2)."
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ecr-credentials-sync
+  namespace: ecr-credentials
+spec:
+  # Every 6 hours. ECR authorization tokens are valid for 12h, so this refreshes
+  # at half the expiry and tolerates one missed run.
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          serviceAccountName: ecr-credentials-sync
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile: {type: RuntimeDefault}
+          volumes:
+            - name: script
+              configMap: {name: ecr-credentials-sync-script, defaultMode: 0555}
+          containers:
+            - name: ecr-credentials-sync
+              image: ECR_AWSCLI_IMAGE_PINNED_BY_DIGEST
+              env: [{name: HOME, value: /tmp}]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: ["ALL"]}
+                runAsNonRoot: true
+                seccompProfile: {type: RuntimeDefault}
+              command: ["/scripts/sync.sh"]
+              volumeMounts:
+                - {name: script, mountPath: /scripts}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits:   {cpu: 200m, memory: 128Mi}
+---
+# Seeds credentials on a fresh cluster, where waiting up to 6h for the first
+# CronJob run would leave every image pull failing.
+#
+# ttlSecondsAfterFinished was 300, with a comment claiming 24h. Flux recreates
+# the Job as soon as the TTL removes it, so at 300s it re-ran every few minutes
+# forever, duplicating the CronJob. At 24h it re-runs about daily, which is
+# harmless and keeps the bootstrap property.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ecr-credentials-sync-init
+  namespace: ecr-credentials
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 6
+  template:
+    spec:
+      serviceAccountName: ecr-credentials-sync
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: script
+          configMap: {name: ecr-credentials-sync-script, defaultMode: 0555}
+      containers:
+        - name: ecr-credentials-sync
+          image: ECR_AWSCLI_IMAGE_PINNED_BY_DIGEST
+          env: [{name: HOME, value: /tmp}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            runAsNonRoot: true
+            seccompProfile: {type: RuntimeDefault}
+          command: ["/scripts/sync.sh"]
+          volumeMounts:
+            - {name: script, mountPath: /scripts}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits:   {cpu: 200m, memory: 128Mi}
