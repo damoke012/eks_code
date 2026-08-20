@@ -39,7 +39,27 @@ KUBECONFIG at its PREVIOUS value, so the next command silently runs against the 
 Bit us 2026-07-24: a dev CRD query actually returned QA's. **Always `kubectl cluster-info |
 head -1` after export, and read the result — not just run it.**
 
-**On-prem QA `op-usxpress-qa` has NO kubeconfig in `~/.kube` and no context** — it is not in the default config at all. Derive it from the Terraform state's `kubeconfig` output (there is **no** `talosconfig` output — see [[qa-cluster-standup]]):
+**On-prem QA `op-usxpress-qa`** — ✅ **verified 2026-08-20**: `~/.kube/op-usxpress-qa-sso.yaml`,
+context **`op-usxpress-qa-sso`**, serving `https://10.10.82.51:6443`. (Superseded the earlier note
+that it had no kubeconfig at all — that predated the SSO path going live 2026-07-28.)
+
+⚠️ **TWO AWS profiles, two independent SSO sessions, and a green one tells you nothing about the
+other.** The cluster authenticates through the `aws-iam-authenticator` exec plugin with
+`AWS_PROFILE=op-qa`; Secrets Manager, S3 and the rest of the AWS API use `usx-qa`. On 2026-08-20
+`aws --profile usx-qa sts get-caller-identity` succeeded while every `kubectl` failed, and the
+symptom is an STS `SSO session has expired` buried inside an exec-plugin stack trace — which reads
+like an unreachable cluster, not a login. Log in to **both**:
+```
+aws sso login --profile usx-qa    # AWS API
+aws sso login --profile op-qa     # the cluster
+```
+Read the exec block rather than guessing which profile a kubeconfig uses:
+```
+kubectl --kubeconfig=$HOME/.kube/op-usxpress-qa-sso.yaml config view --raw \
+  -o jsonpath='{.users[*].user.exec}{"\n"}'
+```
+
+If the file is ever lost, derive it again — it is not in the default config: Derive it from the Terraform state's `kubeconfig` output (there is **no** `talosconfig` output — see [[qa-cluster-standup]]):
 ```
 aws s3 cp s3://lazy-tf-state-425rbol87rmn6c7m/iaac/talos/op-usxpress-qa.tfstate - --profile usx-qa \
   | jq -r '.outputs.kubeconfig.value' > ~/.kube/op-usxpress-qa.yaml && chmod 600 ~/.kube/op-usxpress-qa.yaml
