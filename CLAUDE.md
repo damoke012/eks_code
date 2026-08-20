@@ -23,7 +23,13 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
 6. **No placeholders in runnable commands.** Never hand over `<foo>`, `…`, or an unset `$VAR`.
 7. **Never add AI attribution to git.** No "Generated with Claude Code" in PR bodies, no
    `Co-Authored-By` trailers on commits.
-8. **Corp GHE is not personal GitHub.** USX and variant-inc repo work happens on WSL against
+8. **Route every prompt through the skills catalog first.** The router lists what fits;
+   load it and follow it. Done means a skill ran, or the catalog was read and nothing
+   matched. The miss is always mid-flow, never at the start — the second fix of one class
+   (`diagnosing-bugs`), the third `git archive` around an unmergeable tree
+   (`resolving-merge-conflicts`), follow-ups written by hand (`to-tickets`). Judging "I am
+   nearly done, this one is quick" is the signal to load the skill, not to skip it.
+9. **Corp GHE is not personal GitHub.** USX and variant-inc repo work happens on WSL against
    corporate GitHub Enterprise. The codespace `damoke012` token must never reach a USX repo.
 
 ## Skills (`.claude/skills/`)
