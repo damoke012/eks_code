@@ -159,6 +159,14 @@ ingress gateway's LoadBalancer address, and `istio-ingressgateway` here is Clust
 reports Ready, and the hostname never resolves. Copy the value from a route that works
 (`risingwave-dashboard` on op-qa) rather than choosing node addresses.
 
+**Verify a new route with `scripts/check-onprem-route.sh <host> --context <ctx>`, not with a
+plain `curl`.** Four separate things reported success on the Argo CD route while it was
+broken, and then the workstation's DNS cache made it look broken for an hour after it worked.
+The script checks each link on its own: VirtualService and annotation, backend Service and
+endpoints, the authoritative nameserver *separately from* the local resolver, and HTTP by
+`--resolve` against each target address. It also diffs against a working route on the same
+gateway, which is what rules out split-horizon DNS.
+
 ⚠️ An `https://` Application will not match an `ssh://` credential, and the failure is
 `authentication required` — identical to having no credential at all. The ApplicationSet
 entry and the credential URL must move together, in one PR.
