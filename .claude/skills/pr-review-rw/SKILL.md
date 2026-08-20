@@ -35,9 +35,17 @@ This skill encodes the workflow proven on PR #7 review (2026-05-29) where indepe
 
 ### Phase 2 — Identify the target namespace (Tim coord gate)
 
-The rule (from [[feedback_protect_rw_onprem_workload]]):
+The rule (from [[feedback_protect_rw_onprem_workload]]).
 
-| Target ns | Tim coord required? |
+⚠️ **This table is about `op-usxpress-dev` only.** It was written 2026-05-29, when dev was the
+only on-prem cluster. On 2026-08-20 it read as contradicting the `risingwave-onprem` memory;
+neither was stale — both describe dev and neither said so. On **op-qa** and **op-prod** the
+`risingwave` namespace is created and reconciled by `iaac-talos-flux-platform`'s own
+`risingwave-operator` Kustomization and carries no owner label, so no dev-era coordination gate
+applies. Check `kubectl get ns <ns> -o jsonpath='{.metadata.labels}'` for the managing
+Kustomization before assuming an owner, and scope every ownership claim to a named cluster.
+
+| Target ns (op-dev) | Tim coord required? |
 |---|---|
 | `risingwave` (Tim's) | ✅ Yes |
 | `risingwave-2` (Doke's IaC) | ❌ No |
