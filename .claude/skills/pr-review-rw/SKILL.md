@@ -153,6 +153,15 @@ Two scripts live under `scripts/` to speed up Phase 3:
 - [ ] For every HelmRelease change, I checked the live release name + version.
 - [ ] For JSON patch ops (`add` to `env/-`, `replace` to specific paths), I checked the source for whether the path / array currently exists.
 - [ ] I gave Idris (or whoever) a concrete `kubectl` line to confirm — not just "please verify yourself."
+- [ ] **For every workload with a listener: does the readiness probe target the port that
+      carries traffic?** A probe on a sidecar/admin/status port proves nothing about the data
+      port. INFRA-1654: `ghostunnel-rw-postgres` ran `--listen=:4567` behind a Service that is
+      `5432 -> targetPort 5432`, with `readinessProbe.tcpSocket.port: status` (9090). Both pods
+      reported `READY true, 0 restarts` while serving nothing, on dev **and** QA, for eleven
+      weeks. Check with `scripts/check-service-ports-listening.sh <ns> --context <ctx>`.
+- [ ] **Do the container's listen flags agree with the Service's `targetPort`?** A numeric
+      `targetPort` needs no matching `containerPort`, so Kubernetes will not complain about a
+      Service that points at a port nothing binds.
 
 ## Anti-patterns to avoid
 

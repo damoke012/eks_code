@@ -89,3 +89,39 @@ proves nothing. If restoring the bug does not turn the suite red, the suite is d
 
 `[[capture-learning]]` — when a gate fails, the fourth question ("could a check have caught
 it?") is this skill.
+
+## The inverse: adding a gate to a path that already works
+
+Everything above is about a gate that fails **open** — it passes because it never ran. There is
+a mirror failure, and it bites when you *harden* something rather than build it.
+
+A new check added to a working path fails **closed**, and takes the working path with it.
+
+INFRA-1641, 2026-08-20: hardening `ecr-credentials-sync` I added
+`aws ecr describe-registry` as a token verification, under `set -e`. `DescribeRegistry` is a
+different IAM action from `GetAuthorizationToken`, and the IRSA role does not grant it. As a
+hard gate that check would have failed the first run and every run after it, and the cluster
+would have lost its image-pull credential within 12 hours — a hardening PR causing the outage
+it was written to prevent. It shipped advisory and logged
+`WARNING: could not verify the token (ecr:DescribeRegistry may not be granted)` on the very
+first run.
+
+**The rule.** A check added to a path that already works starts advisory. It becomes a gate
+only once you have seen it pass — on real inputs, with the real identity. State the promotion
+condition in the code, so the warning is not permanent by accident:
+
+```bash
+# ADVISORY, NOT FATAL, deliberately: <the permission or precondition that is unproven>.
+# Grant <X> and this becomes a real gate; until then it is a warning in the log.
+```
+
+**And verify by running it, not by merging it.** A CronJob change is not verified by a green
+Flux reconcile — that proves the manifest applied. Trigger one run and read the log:
+
+```bash
+kubectl -n <ns> create job --from=cronjob/<name> <name>-verify-<ticket>
+kubectl -n <ns> logs job/<name>-verify-<ticket>
+kubectl -n <ns> delete job <name>-verify-<ticket>
+```
+
+Otherwise the next run is at 06:00 and nobody is watching.

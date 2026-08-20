@@ -19,7 +19,10 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
    the sync ran, not that the content works. Check the value. This has bitten us twice —
    Wiz, and QA etcd-backup.
 5. **An empty grep is not evidence of absence.** Verify the selector and the target resolve
-   before concluding something is not there.
+   before concluding something is not there. **And one sample is not a population** — on
+   2026-08-20 one ECR repository's policy became "a repo not to copy from" when enumerating
+   showed 515 of 517 were identical. Count before characterising; a claim about a fleet, a
+   registry or a namespace needs the sweep, not the example that prompted it.
 6. **No placeholders in runnable commands.** Never hand over `<foo>`, `…`, or an unset `$VAR`.
 7. **Never add AI attribution to git.** No "Generated with Claude Code" in PR bodies, no
    `Co-Authored-By` trailers on commits.
