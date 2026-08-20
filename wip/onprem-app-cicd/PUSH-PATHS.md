@@ -165,7 +165,9 @@ will eventually recreate a streaming job and re-read the topic from `earliest`.
 ## PR 8 — the Argo CD Git credential (INFRA-1647) — required before ANY deploy works
 
 Full procedure, including the Secrets Manager merge and the verification that is not
-`SecretSynced`: [`ARGOCD-GIT-CREDENTIAL.md`](ARGOCD-GIT-CREDENTIAL.md).
+`SecretSynced`: [`ARGOCD-GIT-CREDENTIAL.md`](ARGOCD-GIT-CREDENTIAL.md). Or run
+[`wizard-argocd-git-credential-qa.sh`](wizard-argocd-git-credential-qa.sh), which does the
+whole of it including these checks — on WSL, not from this repo.
 
 ```
 platform/argocd-config/op-qa/repo-creds-externalsecret.yaml

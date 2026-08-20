@@ -1,5 +1,17 @@
 # INFRA-1647 — the Argo CD Git credential
 
+**Decided 2026-08-20:** GitHub App, not a PAT. QA first, prod after `risingwave-etl` is
+green. `…-pat.yaml` stays in the pack as a documented fallback and is not kept in sync.
+
+**Run it with the wizard:** [`wizard-argocd-git-credential-qa.sh`](wizard-argocd-git-credential-qa.sh)
+walks all nine steps — it re-checks that the defect is still real before asking for
+anything, validates the PEM with `openssl` before it can reach Secrets Manager, prints the
+key list before and after the merge, runs the three document-count checks and the
+foreign-identifier grep before the PR, and ends on `risingwave-etl`'s sync status rather
+than on `SecretSynced`. It is hardcoded to QA, on purpose. Run it **on WSL** — this repo's
+`guard-mutations.sh` blocks the AWS write, correctly, and the codespace GitHub token must
+never touch a variant-inc repo.
+
 **Status:** manifests drafted 2026-08-20, nothing applied. Blocks INFRA-1648 (smoke test),
 INFRA-1635 (real pipeline tree) and INFRA-1636 (prod). Nothing else in the sprint depends
 on it, and it depends on nothing.
