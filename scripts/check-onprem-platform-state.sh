@@ -140,10 +140,22 @@ fi
 NSALL=$(k get ns -o json 2>/dev/null | jq -r '.items[].metadata.name
           | select(. != "kube-system" and . != "kube-public"
                    and . != "kube-node-lease" and . != "flux-system")' | sort)
-NSSEC=$(k get secret ecr-pull-secret -A -o json 2>/dev/null \
-          | jq -r '.items[].metadata.namespace' | sort)
+# NOT `get secret ecr-pull-secret -A`: kubectl REFUSES to fetch a resource by
+# name across all namespaces ("a resource cannot be retrieved by name across all
+# namespaces"). With stderr discarded that error became an empty list, and the
+# first run of this script reported the secret missing from 31 of 31 namespaces
+# 20 minutes after the CronJob had succeeded. A field selector is the query that
+# actually works, and the exit status is checked rather than assumed.
+SECJSON=$(k get secret -A --field-selector "metadata.name=ecr-pull-secret" -o json 2>&1)
+SECRC=$?
+if [ "$SECRC" -ne 0 ]; then
+  unkn "could not query ecr-pull-secret — $(printf '%s' "$SECJSON" | head -1)"
+  NSALL=""
+else
+  NSSEC=$(printf '%s' "$SECJSON" | jq -r '.items[].metadata.namespace' | sort)
+fi
 if [ -z "$NSALL" ]; then
-  unkn "could not enumerate namespaces — pull-secret coverage not checked"
+  [ "$SECRC" -eq 0 ] && unkn "could not enumerate namespaces — pull-secret coverage not checked"
 else
   TOTAL=$(printf '%s\n' "$NSALL" | grep -c .)
   HAVE=$(printf  '%s\n' "$NSSEC" | grep -c . )
