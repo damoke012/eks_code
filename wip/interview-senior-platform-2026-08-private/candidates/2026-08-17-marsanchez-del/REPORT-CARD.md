@@ -14,9 +14,10 @@
 > interviewer's line *"He did well with 1."* Everything else in those two sections is
 > inferred from the code, which is a poor instrument for either.
 >
-> **Scores 1 and 4 are therefore provisional and the interviewer's own recollection
-> outranks them.** Scores 2 and 3 are firm — they rest on the artefact and were verified
-> against a Go toolchain on 2026-08-21.
+> **Scores 1 and 2 were set by the interviewer on 2026-08-21**, overriding the compiled
+> 18 and 7. He was in the room; this card was not. Score 1 rests on recollection alone.
+> Scores 3 and 4 are as compiled — 3 from the artefact, verified against a Go toolchain;
+> 4 barely evidenced either way.
 >
 > **Do not compare this card to a candidate who submitted a clean `git diff`** without
 > adjusting for that, or the comparison is rigged against him.
@@ -55,7 +56,7 @@ and it is exactly what the missing `git diff` would confirm or overturn.
 
 ---
 
-## 1. Understands the problem — 18 / 25
+## 1. Understands the problem — 23 / 25  *(interviewer; compiled score was 18)*
 
 **What earns it.**
 
@@ -88,7 +89,7 @@ other line here.
 
 ---
 
-## 2. Coding skills — 7 / 25
+## 2. Coding skills — 10 / 25  *(interviewer; compiled score was 7)*
 
 Verified against go1.26.4 on 2026-08-21, not taken on trust.
 
