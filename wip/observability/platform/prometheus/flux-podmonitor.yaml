@@ -1,0 +1,70 @@
+# PodMonitor — scrape the Flux controllers, so the Flux alert rules can fire.
+#
+# INFRA-1657. platform-alerts.yaml has shipped FluxKustomizationFailed,
+# FluxHelmReleaseFailed and FluxGitRepositoryFailed since INFRA-1503. All three
+# key on gotk_reconcile_condition. On op-usxpress-dev, 2026-08-21:
+#
+#     gotk_reconcile_condition series:  0
+#     flux-system scrape targets:       0
+#
+# Nothing has ever scraped flux-system. A PrometheusRule whose expression
+# selects a metric that is never ingested is valid, healthy, permanently
+# 'inactive', and dead — kubectl shows it present, the Kustomization shipping it
+# is Ready=True, and Prometheus reports no rule error, because an expression
+# matching zero series is a perfectly good expression that returns nothing.
+#
+# Consequence, observed: flux-system/risingwave and flux-system/wiz-sensor held
+# Ready=False for 2 days 18 hours and the rule written for exactly that case
+# never fired. Found by hand instead.
+#
+# ⚠️ THE LABEL IS LOAD-BEARING. kube-prometheus-stack sets
+# podMonitorSelectorNilUsesHelmValues: true, so the Prometheus CR selects
+# PodMonitors by matchLabels {release: prometheus-stack} — the same convention
+# platform-alerts.yaml documents for ruleSelector. WITHOUT `release:
+# prometheus-stack` BELOW, this object applies cleanly, the Kustomization goes
+# Ready=True, and it is never selected: the exact silent failure this ticket
+# exists to fix, reproduced in its own fix.
+#
+# Verify with:
+#   scripts/check-alert-delivery.sh --context <ctx>
+# and then make a Kustomization fail deliberately on dev and watch
+# FluxKustomizationFailed reach 'firing'. A rule that has never been seen to go
+# red is not a rule anyone should trust.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flux-controllers
+  namespace: prometheus
+  labels:
+    release: prometheus-stack
+    app.kubernetes.io/part-of: platform
+spec:
+  # The controllers run in flux-system; this object lives in the prometheus
+  # namespace, so the selection has to cross namespaces explicitly.
+  namespaceSelector:
+    matchNames:
+      - flux-system
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - source-controller
+          - kustomize-controller
+          - helm-controller
+          - notification-controller
+          - image-automation-controller
+          - image-reflector-controller
+  podMetricsEndpoints:
+    # Every Flux controller exposes Prometheus metrics on the container port
+    # named http-prom (8080). Naming the port rather than the number means this
+    # survives a controller that moves it.
+    - port: http-prom
+      path: /metrics
+      interval: 30s
+      relabelings:
+        # Carry the pod name through as `pod`, so an alert names the controller
+        # that is failing rather than just the namespace.
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+          action: replace
