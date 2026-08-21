@@ -111,7 +111,11 @@ design in his head and lost the round to syntax.
 
 **One thing that would worry me in week one:**
 
-**Recommendation:** advance to 02-05 / hold / decline
+**Recommendation:** advance to 02-05 / **hold, pending the real `git diff`** / decline
+
+Scored 2026-08-21 in `REPORT-CARD.md` — 52/100 (understanding 18, coding 7, architecture 12,
+effort 15). Scores for understanding and effort are provisional: they were observed in
+conversation and never written down, so the interviewer's recollection outranks them.
 
 ---
 
