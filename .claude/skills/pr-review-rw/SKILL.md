@@ -159,6 +159,12 @@ Two scripts live under `scripts/` to speed up Phase 3:
       `5432 -> targetPort 5432`, with `readinessProbe.tcpSocket.port: status` (9090). Both pods
       reported `READY true, 0 restarts` while serving nothing, on dev **and** QA, for eleven
       weeks. Check with `scripts/check-service-ports-listening.sh <ns> --context <ctx>`.
+- [ ] **Did I read the WHOLE diff, including hunks I did not intend?** A PR assembled by
+      copying a file wholesale carries every difference between the two copies, not just the
+      change you meant. `iaac-talos-flux-platform#100` was a Kyverno change that also reverted
+      an ApplicationSet's `repoURL` from `ssh://` to `https://` and took delivery down for 18
+      hours. Check with `scripts/check-argocd-repo-credentials.sh` after any argocd-apps or
+      argocd-config change.
 - [ ] **Do the container's listen flags agree with the Service's `targetPort`?** A numeric
       `targetPort` needs no matching `containerPort`, so Kubernetes will not complain about a
       Service that points at a port nothing binds.

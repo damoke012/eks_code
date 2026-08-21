@@ -24,15 +24,21 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
    showed 515 of 517 were identical. Count before characterising; a claim about a fleet, a
    registry or a namespace needs the sweep, not the example that prompted it.
 6. **No placeholders in runnable commands.** Never hand over `<foo>`, `…`, or an unset `$VAR`.
-7. **Never add AI attribution to git.** No "Generated with Claude Code" in PR bodies, no
+7. **This repo is not a staging area for platform manifests.** Files under `wip/` are drafts and
+   notes; the cluster branch is the source of truth. Build every platform PR **from the branch**,
+   and read `git diff origin/<base>` in full before pushing — including the lines you did not
+   mean to change. On 2026-08-20 a PR about Kyverno was assembled by copying a stale `wip/` file
+   over the branch and silently reverted an ApplicationSet's Git URL, breaking delivery for 18
+   hours with every status field green.
+8. **Never add AI attribution to git.** No "Generated with Claude Code" in PR bodies, no
    `Co-Authored-By` trailers on commits.
-8. **Route every prompt through the skills catalog first.** The router lists what fits;
+9. **Route every prompt through the skills catalog first.** The router lists what fits;
    load it and follow it. Done means a skill ran, or the catalog was read and nothing
    matched. The miss is always mid-flow, never at the start — the second fix of one class
    (`diagnosing-bugs`), the third `git archive` around an unmergeable tree
    (`resolving-merge-conflicts`), follow-ups written by hand (`to-tickets`). Judging "I am
    nearly done, this one is quick" is the signal to load the skill, not to skip it.
-9. **Corp GHE is not personal GitHub.** USX and variant-inc repo work happens on WSL against
+10. **Corp GHE is not personal GitHub.** USX and variant-inc repo work happens on WSL against
    corporate GitHub Enterprise. The codespace `damoke012` token must never reach a USX repo.
 
 ## Skills (`.claude/skills/`)

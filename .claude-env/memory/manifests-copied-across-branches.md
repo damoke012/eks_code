@@ -56,3 +56,11 @@ wrong cause — `password authentication failed for user "postgres"` when the re
 scans for the other clusters' account IDs, OIDC issuers, API node addresses and DNS suffixes
 and exits non-zero on a hit; `--diff` limits it to changed files for pre-merge use. The
 shared ECR account 064859874041 is deliberately not flagged. Run it before every platform PR.
+
+**2026-08-21 — it also happens WITHIN one branch, and the stale copy can live in the notes
+repo.** `wip/onprem-app-cicd/platform/` was treated as a staging mirror of the cluster branch.
+It is not maintained as one. PR #100 copied a stale file from there over the branch and
+reverted an ApplicationSet's `repoURL` from `ssh://` to `https://`, taking op-qa delivery down
+for 18 hours. `check-foreign-cluster-ids.sh` passed it — that check looks for *another
+cluster's* identifiers, not for a regression against what is already deployed. Now CLAUDE.md
+rule 7. See [[onprem-app-cicd]].

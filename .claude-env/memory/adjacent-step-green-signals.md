@@ -7,7 +7,7 @@ metadata:
 ---
 
 The single most expensive pattern in on-prem platform work: a green signal that is **true**,
-about a step **next to** the one you care about. Eleven instances found by 2026-08-20, all but one in a single day.
+about a step **next to** the one you care about. Twelve instances by 2026-08-21, all but one found in two days.
 
 | Reports | Actually proves | Does NOT prove |
 |---|---|---|
@@ -21,6 +21,7 @@ about a step **next to** the one you care about. Eleven instances found by 2026-
 | `secretKeyRef` env present | the pod resolved it at creation | it matches the secret now ([[pod-env-secret-resolution]]) |
 | `kubectl get gateway` empty | that API group has none | the Istio one is absent (wrong group) |
 | a `curl` `000` | curl got no response | whether DNS or connect failed — `--resolve` separates them |
+| Argo CD `operationState: Succeeded` | a sync succeeded **once, at some past time** | that the app can reach its repo now — it sat there 18h while `sync=Unknown` (2026-08-21) |
 | a connect to `kubectl port-forward`'s local socket | kubectl bound a local port | that the **pod** listens — kubectl binds before contacting the pod, and reports the pod-side outcome only on its own stderr |
 
 **Why:** each signal is emitted by a component reporting on its own job, which it did. Nothing

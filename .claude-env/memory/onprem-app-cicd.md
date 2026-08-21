@@ -68,3 +68,28 @@ IRSA roles live in its OWN account; Talos OIDC issuers are CloudFront
 (dev d3a7wcnazdrd6p, qa d2t7d36wmf0hbm, prod d3rxit8f4yvshu).
 
 See [[eso-secretsynced-not-content-check]] — same false-green family.
+
+## ⚠️ 2026-08-21 — the QA path broke 1h after being "proven", and stayed broken 18h
+
+`iaac-talos-flux-platform#100` (Kyverno Enforce + retry limit) was built by copying
+`wip/onprem-app-cicd/platform/argocd-apps/applicationset-qa.yaml` over the branch. That copy
+still said `repoURL: https://…`; the `ssh://` fix lived only on the branch. A PR about Kyverno
+therefore reverted the Git URL.
+
+The credential is a deploy key — `secret-type: repository`, **exact** url match. `https://`
+matched nothing → no credential → GitHub replies **"Repository not found"** for a private repo,
+which reads like deletion, not auth. Argo CD showed `sync=Unknown`, `health=Healthy`, and
+`operationState=Succeeded` **from the previous day**. Fixed by #105, verified `sync=Synced`.
+
+**Rules that came out of it** (now CLAUDE.md rule 7): `wip/` is drafts, the cluster branch is
+truth; build platform PRs FROM the branch and read `git diff origin/<base>` in full, including
+hunks you did not intend.
+
+**Check**: `scripts/check-argocd-repo-credentials.sh --context <ctx>` — matches every
+Application and ApplicationSet element against every credential's url using Argo CD's own
+rules (`repository` = exact, `repo-creds` = prefix) and names the other-URL-form credential
+when one exists. Validated red against this defect and green after the fix.
+
+⚠️ **"Proven end to end" was a statement about one execution, not about the system.** The
+`pipeline_applied` row was real; an hour later the path was dead. See
+[[adjacent-step-green-signals]].
