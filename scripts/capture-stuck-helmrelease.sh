@@ -131,19 +131,33 @@ k -n "$NS" get pvc 2>/dev/null | sed 's/^/  /' || echo "  (none)"
 # sync ran, not that the content works (CLAUDE.md rule 4) — length is the
 # cheapest tell for a placeholder that synced happily.
 hdr "SECRETS — referenced by these pods (existence and length, never values)"
+# imagePullSecrets are included deliberately: the first version of this script
+# looked only at env/envFrom and printed nothing at all for wiz-sensor, whose
+# entire failure was a 401 from the registry. The secret that matters is the one
+# the kubelet uses, and it is never an env var.
 printf '%s' "${PODS:-{\"items\":[]\}}" | jq -r '[.items[]
-    | (.spec.containers // [])[], (.spec.initContainers // [])[]
-    | ((.env // [])[] | select(.valueFrom.secretKeyRef) | .valueFrom.secretKeyRef.name),
-      ((.envFrom // [])[] | select(.secretRef) | .secretRef.name)] | unique[]' 2>/dev/null \
+    | ((.spec.imagePullSecrets // [])[] | .name),
+      ((.spec.containers // [])[], (.spec.initContainers // [])[]
+       | ((.env // [])[] | select(.valueFrom.secretKeyRef) | .valueFrom.secretKeyRef.name),
+         ((.envFrom // [])[] | select(.secretRef) | .secretRef.name))] | unique[]' 2>/dev/null \
   | while read -r S; do
       [ -n "$S" ] || continue
       J=$(k -n "$NS" get secret "$S" -o json 2>/dev/null)
       if [ -z "$J" ]; then echo "  $S — ABSENT"; continue; fi
-      printf '%s' "$J" | jq -r --arg s "$S" '.data | to_entries[]
-        | "  \($s)/\(.key)  \((.value|@base64d|length)) chars"' 2>/dev/null \
+      TYPE=$(printf '%s' "$J" | jq -r '.type // "Opaque"')
+      printf '%s' "$J" | jq -r --arg s "$S" --arg t "$TYPE" '.data | to_entries[]
+        | "  \($s) [\($t)] \(.key)  \((.value|@base64d|length)) chars"' 2>/dev/null \
         || echo "  $S — present, could not measure"
+      # For a pull secret, WHICH registries it carries auth for is the diagnosis.
+      # Hosts only — never the credential.
+      if [ "$TYPE" = "kubernetes.io/dockerconfigjson" ]; then
+        printf '%s' "$J" | jq -r '.data[".dockerconfigjson"] // empty | @base64d
+          | (fromjson? // {}) | (.auths // {}) | keys[]
+          | "      auth for: \(.)"' 2>/dev/null
+      fi
     done
-k -n "$NS" get externalsecrets 2>/dev/null | sed 's/^/  /'
+echo "  ExternalSecrets in $NS (SecretSynced proves the sync ran, not the value):"
+k -n "$NS" get externalsecrets 2>/dev/null | sed 's/^/    /'
 
 # -------------------------------------------------------------- verdict ------
 hdr "VERDICT"
