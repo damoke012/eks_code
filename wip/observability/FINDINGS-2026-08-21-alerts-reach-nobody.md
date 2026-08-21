@@ -151,16 +151,16 @@ handover. The runnable form is `scripts/check-alert-delivery.sh`, which takes `-
 
 ## The work this implies
 
-Three separate pieces, in dependency order. None is a one-liner and none should be folded
-into another:
+Three separate pieces, in dependency order, filed 2026-08-21 under epic INFRA-1632.
+None is a one-liner and none should be folded into another:
 
-1. **Scrape `flux-system`.** A PodMonitor for the Flux controllers on all three branches.
+1. **INFRA-1657 — scrape `flux-system`.** A PodMonitor for the Flux controllers on all three branches.
    Without it every Flux rule stays dead, delivered or not. Smallest of the three.
-2. **Triage the 54.** Before delivery is switched on. Decide per alert: real and to be
+2. **INFRA-1658 — triage the 54.** Before delivery is switched on. Decide per alert: real and to be
    fixed, real and to be silenced with a reason, or a false positive whose rule needs
    correcting (`KubeControllerManagerDown` on Talos is the archetype). Delivering an
    unreviewed backlog is how an alerting channel dies in its first week.
-3. **Deliver.** Alertmanager, or a routing integration, on all three clusters, to a
+3. **INFRA-1659 — deliver.** Alertmanager, or a routing integration, on all three clusters, to a
    destination someone watches. This is a design decision — Teams vs PagerDuty vs email,
    who is on the other end, what severity routes where — not a config change.
 
