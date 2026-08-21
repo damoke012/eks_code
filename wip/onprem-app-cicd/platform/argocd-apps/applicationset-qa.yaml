@@ -20,7 +20,18 @@ spec:
           # ---- onboard here -------------------------------------------------
           - name: risingwave-etl
             namespace: app-risingwave
-            repoURL: https://github.com/variant-inc/risingwave-pipeline.git
+            # ssh://, NOT https://. The credential is a deploy key, secret-type
+            # repository, bound to this EXACT url. An https:// element does not
+            # match it, gets no credential, and GitHub answers an unauthenticated
+            # request for a private repo with "Repository not found" -- which
+            # reads like a deleted repo, not an auth failure.
+            #
+            # This file said https:// while the branch said ssh://, and PR #100
+            # copied this file over the branch and reverted it, breaking delivery
+            # about an hour after it was proven working. Verify with
+            # scripts/check-argocd-repo-credentials.sh before shipping a change
+            # to this file.
+            repoURL: ssh://git@github.com/variant-inc/risingwave-pipeline.git
             path: deploy/overlays/qa
           # -------------------------------------------------------------------
   template:
