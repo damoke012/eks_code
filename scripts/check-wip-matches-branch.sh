@@ -37,24 +37,45 @@ echo "wip drafts vs origin/$BRANCH"
 echo
 SAME=0; DIFF=0; ABSENT=0
 while IFS= read -r f; do
+  REL="${f#$PACK/}"
   BASE=$(basename "$f")
-  # the pack keeps per-cluster dirs (argocd-config/op-qa); the branch does not
-  MATCHES=$(printf '%s\n' "$BRANCH_FILES" | grep "/${BASE}$" || true)
+  DIR=$(dirname "$REL")
+  CLUSTERDIR=$(basename "$DIR")
+
+  # A draft under argocd-config/op-<x>/ describes cluster op-<x>. Comparing it
+  # against a different cluster's branch is meaningless and was the bulk of this
+  # report's noise on the first run.
+  case "$CLUSTERDIR" in
+    op-*) [ "$CLUSTERDIR" = "$BRANCH" ] || { continue; }
+          DIR=$(dirname "$DIR") ;;
+  esac
+
+  # Match on the last TWO components, not the basename: 27 files on the branch
+  # are called kustomization.yaml and basename matching cannot tell them apart.
+  GROUP=$(basename "$DIR")
+  if [ "$GROUP" = "." ] || [ "$GROUP" = "platform" ]; then
+    MATCHES=$(printf '%s\n' "$BRANCH_FILES" | grep -E "/${BASE}$" || true)
+  else
+    MATCHES=$(printf '%s\n' "$BRANCH_FILES" | grep -E "/${GROUP}/${BASE}$" || true)
+    # op-dev ships argocd-config's contents under infrastructure/argocd/
+    [ -z "$MATCHES" ] && [ "$GROUP" = "argocd-config" ] && \
+      MATCHES=$(printf '%s\n' "$BRANCH_FILES" | grep -E "/argocd/${BASE}$" || true)
+  fi
   N=$(printf '%s\n' "$MATCHES" | grep -c . || true)
 
   if [ "$N" -eq 0 ]; then
-    printf '  %-52s %s\n' "${f#$PACK/}" "not on this branch (draft, or another cluster's)"
+    printf '  %-52s %s\n' "$REL" "not on this branch (draft, or another cluster's)"
     ABSENT=$((ABSENT + 1)); continue
   fi
   if [ "$N" -gt 1 ]; then
-    printf '  %-52s %s\n' "${f#$PACK/}" "AMBIGUOUS — $N files share this name on the branch"
+    printf '  %-52s %s\n' "$REL" "AMBIGUOUS — $N files share this name on the branch"
     continue
   fi
   if git -C "$CHECKOUT" show "origin/$BRANCH:$MATCHES" 2>/dev/null | diff -q - "$f" >/dev/null 2>&1; then
-    printf '  %-52s %s\n' "${f#$PACK/}" "same as $MATCHES"
+    printf '  %-52s %s\n' "$REL" "same as $MATCHES"
     SAME=$((SAME + 1))
   else
-    printf '  %-52s %s\n' "${f#$PACK/}" "DIFFERS from $MATCHES"
+    printf '  %-52s %s\n' "$REL" "DIFFERS from $MATCHES"
     DIFF=$((DIFF + 1))
     if [ "$SHOW" = 1 ]; then
       git -C "$CHECKOUT" show "origin/$BRANCH:$MATCHES" 2>/dev/null \
