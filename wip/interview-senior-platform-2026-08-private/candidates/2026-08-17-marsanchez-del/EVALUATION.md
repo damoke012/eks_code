@@ -12,6 +12,14 @@
 
 **Interviewer's assessment during the round: "He did well with 1."**
 
+> ⚠️ **2026-08-21 — this was never filled in, and the round was 2026-08-17.** Every score below is
+> still blank, as is the recommendation. This document warned on the day that criteria 1 and 2 were
+> assessed *by conversation* and that the evidence would be gone by the next day. Four days have
+> passed. Write down whatever is still recalled, mark clearly that it is a four-day-old recollection
+> rather than a contemporaneous note, or accept that criteria 1 and 2 cannot be scored for him at
+> all — and if they cannot, they must not be scored for the next candidate either, or the comparison
+> is rigged.
+
 Fill in his own words here — the quote is the evidence, and it's what makes this comparable
 against the next candidate.
 
@@ -45,19 +53,39 @@ judgement call, and it should be re-checked against his real diff if one is reco
 **Would not compile:**
 
 - Three named `func` declarations nested inside `validateUI`. Go has no nested named functions
-- `regexp.MustCompile(...)` called with a trailing comma → too many arguments
+- ~~`regexp.MustCompile(...)` called with a trailing comma → too many arguments~~
+  **WRONG, corrected 2026-08-21.** A trailing comma in a call argument list is **legal Go**
+  when the closing paren is on the next line. Verified against go1.26.4: `gofmt` parses it and
+  the program runs. This item must not be counted against him
 - `fmt.Errorf("ui.configVars". %s ...` — `.` where a `,` belongs, and a string literal broken
   across lines
 - `func(s*Spec) Validate () []error` — malformed receiver, and it **redeclares** the `Validate`
   already in the file with a different signature
 - `var errors []errors` — the package name used as a type; also shadows the imported `errors`
 - `if s.UI! =nil` — `!=` split by a space
-- `regexp` and `strings` not added to the import block
+- ~~`regexp` and `strings` not added to the import block~~ **UNVERIFIABLE, 2026-08-21.** The
+  transcription starts at `func validateUI`; the import block is not in the captured artefact.
+  Cannot be claimed either way without his real file
 
-**Would panic at runtime even once it compiled:**
+**Would panic at runtime even once it compiled:** — ~~heading wrong~~ see below
 
-- Regex reads `{12$}` — the `$` is inside the quantifier. `MustCompile` panics on an invalid repeat
-  count. This survives compilation and dies on first call
+- ~~Regex reads `{12$}` — the `$` is inside the quantifier. `MustCompile` panics on an invalid
+  repeat count. This survives compilation and dies on first call~~
+  **WRONG, corrected 2026-08-21, and the truth is worse.** Go's regexp does **not** panic: when the
+  brace content is not a valid repeat count it treats `{` as a **literal**. The pattern compiles
+  cleanly and then requires a literal `{12$}` in the value, so `looksLikeManagedIdentity` returns
+  **false for every input**. No panic, no error, no test failure — the guard is simply inert.
+  Verified against go1.26.4.
+
+- **MISSED ENTIRELY at the time — the regex is short one group.** It reads 8-4-4-**12**; a GUID is
+  8-4-4-**4**-12. Even with the `$` moved outside the brace it still matches no GUID at all.
+  Verified: the corrected-and-completed pattern matches
+  `11111111-2222-3333-4444-555555555555`; his does not, with or without the `$` fixed.
+
+  **Consequence worth thinking about before scoring criterion 2.** Because the predicate is
+  always-false, the `VITE_AUTH_TENANT_ID` false positive — described above as *"the exercise's main
+  discriminator"* — **would never have fired**. He does not pass that discriminator; the check
+  never runs. Any credit or penalty on it has to come from what he *said*, not from this code.
 
 **Structural:**
 
