@@ -93,3 +93,21 @@ when one exists. Validated red against this defect and green after the fix.
 ⚠️ **"Proven end to end" was a statement about one execution, not about the system.** The
 `pipeline_applied` row was real; an hour later the path was dead. See
 [[adjacent-step-green-signals]].
+
+## 2026-08-21 — three Flux/Kubernetes facts that cost a broken Kustomization
+
+* **A Job's pod template is immutable.** Changing an existing Job's image, command or TTL makes
+  Flux's **server-side dry run** fail with `field is immutable`, and the **whole Kustomization
+  aborts** — nothing else in that directory applies either.
+* **The fix is `kustomize.toolkit.fluxcd.io/force: "enabled"`.** The value is `enabled`/`disabled`.
+  ⚠️ `"true"` is **silently ignored** — no warning, no event, you just get the immutable error.
+  Shipped as `"true"` and op-dev's `ecr-credentials` sat `Ready=False` until corrected.
+  Verified working with `enabled`: Flux deleted and recreated the Job.
+* **`iaac-talos-flux-platform` auto-merges on green.** "Ship to dev, verify, then prod" is not
+  achievable by intent — a prod PR lands as soon as checks pass. Every PR is an immediate
+  deploy to its branch's cluster. Filed as its own ticket.
+
+**And the recurring shape**: INFRA-1640 and INFRA-1641 were both closed after fixing **one
+cluster of three**. Neither ticket's acceptance said which cluster. Check the other branches
+before closing anything platform-wide — `scripts/check-wip-matches-branch.sh <checkout> <branch>`
+finds it mechanically. See [[manifests-copied-across-branches]].

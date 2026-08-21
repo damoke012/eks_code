@@ -152,6 +152,14 @@ needs its own until an org GitHub App exists (`REQUEST-GITHUB-APP-OWNER.md`). A 
 PAT cannot meet "not tied to a person" — it is owned by a user account even when the
 resource owner is the org.
 
+⚠️ **Changing an existing Job needs `kustomize.toolkit.fluxcd.io/force: "enabled"`.** A Job's
+pod template is immutable, so altering its image, command or TTL fails Flux's server-side dry
+run with `field is immutable` and aborts the **entire** Kustomization — every other file in that
+directory stops applying too. The annotation value is `enabled`; `"true"` is silently ignored.
+
+⚠️ **This repo auto-merges on green.** There is no "ship to dev, verify, then prod" — a PR
+against `op-prod` deploys as soon as checks pass. Author prod changes as live changes.
+
 ⚠️ **A VirtualService on these clusters needs
 `external-dns.alpha.kubernetes.io/target`.** external-dns takes the record's target from the
 ingress gateway's LoadBalancer address, and `istio-ingressgateway` here is ClusterIP with
