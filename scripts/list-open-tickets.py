@@ -28,17 +28,30 @@ JQL = (f'project = INFRA AND (parent = {EPIC} OR sprint in openSprints()) '
 
 
 def search(jql):
-    """Try the current search endpoint, fall back to the classic one."""
+    """Try the current search endpoint, fall back to the classic one.
+
+    m.api returns a (status, json) TUPLE, not a dict. Testing `"issues" in r`
+    against the tuple is always False, so the first version of this fell through
+    both endpoints silently and then crashed reporting an error it never had.
+    """
     fields = "summary,status,assignee,updated,labels"
     q = urllib.parse.urlencode({"jql": jql, "fields": fields, "maxResults": 100})
+    tried = []
     for path in (f"/rest/api/3/search/jql?{q}", f"/rest/api/3/search?{q}"):
         try:
-            r = m.api("GET", path)
-            if r and "issues" in r:
-                return r["issues"]
+            status, body = m.api("GET", path)
         except Exception as e:              # noqa: BLE001 - either endpoint may be gone
-            last = e
-    print(f"!! could not search Jira: {last}", file=sys.stderr)
+            tried.append((path.split("?")[0], "exception", str(e)[:160]))
+            continue
+        if status == 200 and isinstance(body, dict) and "issues" in body:
+            return body["issues"]
+        detail = body.get("errorMessages") or body.get("raw") or body if isinstance(body, dict) else body
+        tried.append((path.split("?")[0], status, str(detail)[:160]))
+
+    print("!! could not search Jira. Endpoints tried:", file=sys.stderr)
+    for p, s, d in tried:
+        print(f"     {p}  ->  {s}  {d}", file=sys.stderr)
+    print(f"   JQL was: {jql}", file=sys.stderr)
     sys.exit(2)
 
 
