@@ -9,6 +9,11 @@ its unfinished work moved into UI Sprint 3. A separate sprint 6155 "On-Prem App 
 was created first and then emptied — the work was consolidated into UI Sprint 3 so the
 team runs one sprint, with the epic doing the grouping.
 
+> ⚠️ **This table is a snapshot, and snapshots rot.** It was accurate on 2026-08-20.
+> Read the board with `python3 scripts/list-open-tickets.py` (read-only) before
+> deciding anything from it. On 2026-08-21 the live board had six tickets this file
+> does not mention. Decisions on every open ticket: `DECISIONS-2026-08-21.md`.
+
 **Status 2026-08-20** — closed via `scripts/close-sprint3-tickets.py`, evidence in
 `FINDINGS-2026-08-20.md`. Four follow-ups filed for what the work uncovered.
 

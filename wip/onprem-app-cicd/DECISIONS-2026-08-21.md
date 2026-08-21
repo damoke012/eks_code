@@ -195,6 +195,29 @@ without it every Flux rule stays permanently inactive no matter how good deliver
 
 ---
 
+## Outcome — applied 2026-08-21
+
+All twelve decisions recorded on their tickets via
+`scripts/decide-and-close-2026-08-21.py`.
+
+- **INFRA-1656 CLOSED.** Branch protection applied to `op-prod`:
+  `required_approving_review_count: 1`, `dismiss_stale_reviews: true`,
+  `enforce_admins: false`. The script verified it against the GitHub API before closing —
+  it would have refused on no protection, protection without a review block, or a review
+  block requiring zero approvals.
+- **INFRA-1660 filed** — migrate deploy keys to an org GitHub App, the deferred scaling work.
+- **INFRA-1642 re-scoped** to *"Fix the Flux Git credential at source: move it off a PAT to
+  a deploy key"*.
+- **Ten tickets assigned** to Dare. Three deliberately left: 1637 (Idris, In Progress),
+  1644 (Tim), 1655 (needs a named cloud-platform owner).
+
+⚠️ **What the branch protection actually costs, now that it is live.** Auto-merge on
+`op-prod` no longer completes without a review, which is the point. `enforce_admins: false`
+means an admin can still merge deliberately — so for a one-person team this is a **speed
+bump, not a wall**: it converts an accidental prod deploy into a conscious override. That
+is what option (a) was chosen to do, and it is worth being clear it is not an enforcement
+boundary against ourselves.
+
 ## What this changes on the board
 
 | Was | Now |
