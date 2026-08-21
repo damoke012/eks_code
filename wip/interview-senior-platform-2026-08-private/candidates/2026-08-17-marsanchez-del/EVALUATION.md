@@ -113,9 +113,10 @@ design in his head and lost the round to syntax.
 
 **Recommendation:** advance to 02-05 / **hold, pending the real `git diff`** / decline
 
-Scored 2026-08-21 in `REPORT-CARD.md` — 52/100 (understanding 18, coding 7, architecture 12,
-effort 15). Scores for understanding and effort are provisional: they were observed in
-conversation and never written down, so the interviewer's recollection outranks them.
+Scored 2026-08-21 in `REPORT-CARD.md` — **60/100** (understanding **23**, coding **10**,
+architecture 12, effort 15). Understanding and coding were set by the interviewer, overriding
+the compiled 18 and 7. Understanding at 23 rests on recollection alone and is the strongest
+line on the card — capture the supporting quote before it is lost.
 
 ---
 

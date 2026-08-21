@@ -25,16 +25,33 @@
 
 ## Scores
 
-| # | Dimension | Score | Confidence |
-|---|---|---:|---|
-| 1 | Understands the problem | **18 / 25** | Low — inferred, not observed |
-| 2 | Coding skills | **7 / 25** | High — verified mechanically |
-| 3 | Architectural decisions | **12 / 25** | High — visible in the artefact |
-| 4 | Effort | **15 / 25** | Very low — barely evidenced |
-| | **Total** | **52 / 100** | |
+| # | Dimension | Score | Band | Set by |
+|---|---|---:|---|---|
+| 1 | Understands the problem | **23 / 25** | Senior-strong | **Interviewer** (was 18 on inference) |
+| 2 | Coding skills | **10 / 25** | Materially short | **Interviewer** (was 7 on the artefact) |
+| 3 | Architectural decisions | **12 / 25** | Below bar for senior | Artefact |
+| 4 | Effort | **15 / 25** | Below bar for senior | Weakly evidenced |
+| | **Total** | **60 / 100** | | |
 
-**Band:** below the bar for Senior Platform Engineer **on this evidence**. Not a clear
-decline — see *Recommendation*.
+**Two scores were set by the interviewer on 2026-08-21, overriding the compiled ones**, and
+that is the correct direction of authority — he was in the room and this card was not.
+
+- **Understanding 18 → 23.** My 18 was capped by *missing evidence*, not by anything he did
+  wrong; the card said so and said his recollection outranks it. 23 puts him in the
+  senior-strong band and implies he **did** engage with the tenant-ID discriminator that the
+  written record left blank. **Worth writing down what he actually said** — at 23 it is the
+  strongest thing on this card and it currently rests on memory alone.
+- **Coding 7 → 10.** The interviewer's adjustment, presumably weighting the transcription
+  artefacts more heavily than the compiled score did. Note it stays inside the same band
+  (6–11, *materially short*), so the reading of the round does not change — the guard still
+  does not guard, and the tests were still neither written nor run.
+
+**Band overall:** below the bar for Senior Platform Engineer on this evidence, carried by a
+strong understanding score against weak execution. Not a decline — see *Recommendation*.
+
+**The shape of this card is now unambiguous:** he understands the problem at senior level
+(23/25) and does not yet execute at it (10 and 12 of 25). That gap is the entire finding,
+and it is exactly what the missing `git diff` would confirm or overturn.
 
 ---
 
@@ -60,9 +77,14 @@ decline — see *Recommendation*.
   no"*) were left blank, so we cannot say he missed it — only that nothing records him
   getting it.
 
-**Why 18 and not higher:** the ceiling on this dimension is set by the missing evidence,
+~~**Why 18 and not higher:** the ceiling on this dimension is set by the missing evidence,
 not by anything he did wrong. If the interviewer recalls him naming the tenant-ID trap, this
-should move to 22–24.
+should move to 22–24.~~
+
+**Scored 23 by the interviewer, 2026-08-21** — the condition above was met. This is now the
+highest score on the card and the only one resting entirely on recollection. Capture the
+supporting quote before it goes: at 23 it is doing more work in the hiring decision than any
+other line here.
 
 ---
 
@@ -169,6 +191,7 @@ The thinnest dimension. Stated plainly so nobody mistakes this for a measurement
 
 **Why 15:** the positive signals are real but modest; the "did not run the tests" point is
 the one that matters at senior level, because it is a habit rather than a skill.
+Confirmed unchanged by the interviewer, 2026-08-21.
 
 ---
 
@@ -184,6 +207,12 @@ cheap:
    label it as a four-day-old recollection, not a contemporaneous note. If it cannot be
    reconstructed, then **criteria 1 and 4 must not be scored for the next candidate either**,
    or the comparison is rigged in the next person's favour.
+
+**One interaction worth noticing now that understanding is 23.** If he articulated the
+tenant-ID trap out loud and still wrote a value-only rule with no key-name condition, that is
+*knew it, did not implement it* — a different and more recoverable failing than not seeing it.
+It also slightly softens §3, which was written assuming the silence meant he missed it.
+Architecture is left at 12 per the interviewer, but the reasoning behind it has shifted.
 
 **My read, holding those caveats:** the design instinct is that of a competent engineer —
 the right seam, the right anchor, the right error message, and an unprompted reach for a
