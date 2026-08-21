@@ -156,14 +156,18 @@ metadata:
   namespace: ecr-credentials
   annotations:
     # A Job's pod template is immutable. Changing the image, command or TTL of a
-    # Job that already exists makes the apply fail with "field is immutable", and
-    # Flux reports the whole Kustomization failed. This annotation tells Flux to
-    # delete and recreate instead.
+    # Job that already exists makes Flux's server-side DRY RUN fail with "field is
+    # immutable", and the whole Kustomization aborts -- so none of the other
+    # changes in the same directory apply either.
     #
-    # On op-qa this change happened to apply cleanly because ttl was 300 and the
-    # Job was usually absent at that moment. That is luck, not a property, and it
-    # will not hold on a cluster where the Job is present when Flux reconciles.
-    kustomize.toolkit.fluxcd.io/force: "true"
+    # The value is "enabled", NOT "true". Flux's force annotation takes
+    # enabled/disabled; any other value is silently ignored and you get the
+    # immutable error anyway. Shipped as "true" on 2026-08-21 and op-dev's
+    # ecr-credentials Kustomization went Ready=False until it was corrected.
+    #
+    # On op-qa the original change applied cleanly only because ttl was 300 and
+    # the Job happened to be absent at that moment. Timing, not correctness.
+    kustomize.toolkit.fluxcd.io/force: "enabled"
 spec:
   ttlSecondsAfterFinished: 86400
   backoffLimit: 6
