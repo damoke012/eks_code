@@ -78,13 +78,17 @@ if [ "$DRIFTED" -eq 0 ]; then
   exit 0
 fi
 
-echo "!! $DRIFTED of $TOTAL Kustomizations are BEHIND their source."
-echo "   Do not trust the 'ready' message above -- it is the reason from the last failed"
-echo "   attempt and may name a dependency that is healthy right now. Check the revisions."
-echo
+NEVER=$(printf '%s' "$REPORT" | jq '[.[] | select(.drift and (.suspended|not)
+                                       and .applied == "<never applied>")] | length')
+BEHIND=$((DRIFTED - NEVER))
+[ "$BEHIND" -eq 0 ] || echo "!! $BEHIND of $TOTAL Kustomizations are BEHIND their source."
+[ "$NEVER"  -eq 0 ] || echo "!! $NEVER of $TOTAL have NEVER applied -- blocked from the start,"
+[ "$NEVER"  -eq 0 ] || echo "   not drifted. Their message is usually accurate."
 
-# Which named dependencies are actually fine? That contrast is the whole point.
-printf '%s' "$REPORT" | jq -r '
+# Which named dependencies are actually fine? That contrast is the whole point --
+# and it is the ONLY case where the message should be distrusted. Warning about
+# stale messages when the message is accurate just teaches people to ignore them.
+STALE=$(printf '%s' "$REPORT" | jq -r '
   (map({key: .name, value: {ready: .ready, applied: .applied, serving: .serving}}) | from_entries) as $all
   | .[] | select(.drift and (.suspended|not))
   | . as $k
@@ -92,7 +96,14 @@ printf '%s' "$REPORT" | jq -r '
   | select($c != null)
   | ($all[$c.dep] // null) as $d
   | select($d != null and $d.ready == "True" and $d.applied == $d.serving)
-  | "   \($k.name) blames \($c.dep) -- but \($c.dep) is Ready=True and CURRENT (stale message)"'
+  | "   \($k.name) blames \($c.dep) -- but \($c.dep) is Ready=True and CURRENT (stale message)"')
+if [ -n "$STALE" ]; then
+  echo
+  echo "   STALE MESSAGES -- these name a dependency that is healthy and current right now."
+  echo "   The reason shown is the one recorded at the last failed attempt. Reconcile from"
+  echo "   the ROOT of the chain; do not go debugging the component being blamed."
+  printf '%s\n' "$STALE"
+fi
 
 if [ "$PRINT_FIX" = "yes" ]; then
   echo
