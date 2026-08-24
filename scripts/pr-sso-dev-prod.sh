@@ -214,15 +214,19 @@ EOF
   done
   echo "   platform repo: guards pass, kustomize builds"
 
+  git -C "$PLAT" add -A infrastructure/rbac infrastructure/aws-iam-authenticator
+
+  # AFTER git add. Untracked files do not appear in `git diff <base>`, so running
+  # this first scanned zero files and reported success about an empty set --
+  # which is exactly what it did on the first run of this script.
   if [ -x "$(dirname "${BASH_SOURCE[0]}")/check-foreign-cluster-ids.sh" ]; then
     "$(dirname "${BASH_SOURCE[0]}")/check-foreign-cluster-ids.sh" "$PLAT" "$B" --diff "origin/$B" \
       || { echo "!! check-foreign-cluster-ids.sh flagged $B. SKIPPING."
-           git -C "$PLAT" checkout -q -- . ; git -C "$PLAT" clean -qfd ; FAILED=1; continue; }
+           git -C "$PLAT" reset -q ; git -C "$PLAT" checkout -q -- . ; git -C "$PLAT" clean -qfd
+           FAILED=1; continue; }
   else
     echo "   (check-foreign-cluster-ids.sh not executable -- foreign ids NOT checked)"
   fi
-
-  git -C "$PLAT" add -A infrastructure/rbac infrastructure/aws-iam-authenticator
   git -C "$PLAT" commit -q -m "INFRA-1638: AWS SSO cluster access for $CID
 
 Adds infrastructure/rbac (the group-keyed ClusterRoleBindings) and
@@ -258,6 +262,16 @@ iaac-talos, promoted through Octopus, and it must land after this is running."
     echo "!! $CDIR already wires aws-iam-authenticator -- refusing to append twice."
     FAILED=1; continue
   fi
+
+  # infra.yaml does NOT end with a newline. Appending "---" directly glues it onto
+  # the last line, where it lands INSIDE a comment: the separator disappears and
+  # the following apiVersion/kind/metadata become DUPLICATE TOP-LEVEL KEYS on the
+  # previous Kustomization. PyYAML takes the last one, so the file still parses
+  # and app-namespaces is silently replaced by rbac. That is what the first run of
+  # this script produced, with the yaml check reporting success.
+  [ -n "$(tail -c1 "$INFRA")" ] && printf '\n' >> "$INFRA"
+
+  BEFORE=$(python3 -c 'import yaml,sys; print(len([d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Kustomization"]))' "$INFRA")
 
   cat >> "$INFRA" <<'EOF'
 ---
@@ -305,10 +319,15 @@ spec:
     - name: rbac
 EOF
 
-  python3 -c "import yaml,sys; list(yaml.safe_load_all(open(sys.argv[1])))" "$INFRA" 2>/dev/null \
-    || { echo "!! $INFRA no longer parses. SKIPPING."
-         git -C "$CLUS" checkout -q -- . ; FAILED=1; continue; }
-  echo "   cluster repo: yaml parses"
+  # Parsing is NOT the check -- a duplicate-key clobber parses perfectly. Count the
+  # Kustomization documents and name them: exactly two more than before, both new
+  # ones present, no duplicates, and the previously-last one still there.
+  AFTER=$(python3 "$(dirname "${BASH_SOURCE[0]}")/lib-check-append.py" "$INFRA" "$BEFORE")
+  if [ $? -ne 0 ]; then
+    echo "!! $INFRA is wrong after the append: $AFTER"
+    git -C "$CLUS" checkout -q -- . ; FAILED=1; continue
+  fi
+  echo "   cluster repo: $BEFORE -> $AFTER Kustomizations, rbac + aws-iam-authenticator present"
 
   git -C "$CLUS" add -A "clusters/$CDIR/flux-system/infra.yaml"
   git -C "$CLUS" commit -q -m "INFRA-1638: wire rbac and aws-iam-authenticator on $CID
