@@ -15,10 +15,25 @@ set -euo pipefail
 
 REPO="${REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
 PUSH="no"; ONLY=""
-# The group is the one the cluster SSO path already grants through
-# aws-iam-authenticator (INFRA-1638). One group, both layers -- not a second
-# access model to keep in sync.
-GROUP="${GROUP:-onprem-platform-admins}"
+# An AWS Identity Center DIRECTORY group. Verified present in identity store
+# d-90676260a8 on 2026-08-24.
+#
+# NOT onprem-platform-admins, which was the first value here and was wrong.
+# That name is a KUBERNETES RBAC group invented in aws-auth: cluster access is
+# granted by PERMISSION SET (the caller arrives as
+# AWSReservedSSO_AWSAdministratorAccess) which aws-auth maps to that k8s group
+# name. It has never existed in the directory -- `identitystore list-groups`
+# returns zero matches for 'onprem' or 'platform' across the whole store.
+#
+# A SAML assertion carries directory groups. Same identity, different axis, so
+# the two layers cannot share one name however tidy that would have been.
+GROUP="${GROUP:-usx-cloud-admin}"
+
+# Where to verify that group actually exists. Set PROFILE to check; unset skips
+# with a warning rather than silently trusting the name.
+IDENTITY_STORE_ID="${IDENTITY_STORE_ID:-d-90676260a8}"
+IDC_REGION="${IDC_REGION:-us-east-1}"
+PROFILE="${PROFILE:-${AWS_PROFILE:-}}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --push) PUSH="yes"; shift ;;
@@ -31,6 +46,27 @@ done
 [ -d "$REPO/.git" ] || { echo "!! not a git repo: $REPO" >&2; exit 2; }
 cd "$REPO"
 git fetch origin
+
+# Prove the group exists before writing a policy that maps it. The first version
+# of this script mapped a name that was never in the directory, and nothing would
+# have surfaced that until a real SSO login landed with no permissions.
+if [ -n "$PROFILE" ]; then
+  found=$(aws identitystore list-groups --profile "$PROFILE" --region "$IDC_REGION" \
+            --identity-store-id "$IDENTITY_STORE_ID" \
+            --query "Groups[?DisplayName=='$GROUP'].GroupId" --output text 2>&1) || true
+  case "$found" in
+    ""|*Denied*|*error*|*Error*)
+      echo "!! '$GROUP' not found in identity store $IDENTITY_STORE_ID ($IDC_REGION)." >&2
+      echo "   $(printf '%s' "$found" | head -1 | cut -c1-100)" >&2
+      echo "   A policy mapping a group that does not exist produces a successful" >&2
+      echo "   login with zero permissions. Refusing." >&2
+      exit 1 ;;
+    *) echo "   group verified: $GROUP -> $found" ;;
+  esac
+else
+  echo "   (PROFILE unset -- NOT verifying '$GROUP' exists in the directory.)"
+  echo "   Re-run as: PROFILE=usx-dev $0"
+fi
 
 clean_argocd() {
   git checkout -q HEAD -- infrastructure/argocd 2>/dev/null || true
@@ -71,9 +107,15 @@ block = """      rbac:
         # policy.default stays "" deliberately: no implicit access for anyone who
         # merely authenticates. Access is granted per group, explicitly, below.
         policy.default: ""
-        # %(group)s is the SAME group the cluster SSO path grants through
-        # aws-iam-authenticator (INFRA-1638) -- one group across both layers
-        # rather than a second access model to keep in sync.
+        # %(group)s is an AWS Identity Center DIRECTORY group, verified present
+        # in identity store d-90676260a8 on 2026-08-24.
+        #
+        # It is deliberately NOT onprem-platform-admins. That name is a Kubernetes
+        # RBAC group invented in aws-auth -- cluster access is granted by PERMISSION
+        # SET and mapped to it there, and it has never existed in the directory. A
+        # SAML assertion carries directory groups, so the two layers cannot share a
+        # name. Mapping the k8s name here would authenticate fine and authorise
+        # nothing.
         policy.csv: |
           g, %(group)s, role:admin
         # Argo only sees groups if the provider actually emits a groups claim.
@@ -123,8 +165,12 @@ configs.rbac was unset, so argocd-rbac-cm carried the chart defaults: policy.def
 permissions -- an empty UI with access errors, which reads as a broken login when it
 is authorisation.
 
-Grants $GROUP role:admin. That is the same group the cluster SSO path already grants
-through aws-iam-authenticator (INFRA-1638), so there is one group across both layers.
+Grants $GROUP role:admin -- an Identity Center DIRECTORY group, verified present in
+identity store d-90676260a8. Deliberately not onprem-platform-admins: that is a
+Kubernetes RBAC group invented in aws-auth, where access is granted by permission set,
+and it has never existed in the directory. A SAML assertion carries directory groups,
+so the two layers cannot share a name.
+
 policy.default stays \"\" -- no implicit access for merely authenticating.
 
 Inert today: no SSO provider is configured, no SSO users exist, admin.enabled remains
