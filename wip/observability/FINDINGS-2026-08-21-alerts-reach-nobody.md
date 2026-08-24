@@ -46,6 +46,10 @@ held that answer silently for two and a half days while we rediscovered it by ha
 
 **2. The Flux alerts cannot fire, because the metric is never ingested.**
 
+> ⚠️ **Corrected 2026-08-24.** True, but this was the *first of four* independent
+> reasons, not the reason. Fixing it revealed the second, which hid the third,
+> which hid the fourth. See *INFRA-1657 needed four PRs* below.
+
 ```
 gotk_reconcile_condition series:  0
 flux targets scraped:             0
@@ -98,6 +102,96 @@ application's own `no space left on device`, not by `rbd du`.
 
 ---
 
+## 2026-08-24 — INFRA-1657 needed four PRs, not one
+
+Scope: **op-usxpress-dev**, verified live; **op-usxpress-qa** merged and not yet observed;
+**op-prod** not yet shipped.
+
+The 2026-08-21 note treated "nothing scrapes `flux-system`" as the defect. It was one layer
+of four. **Each layer was completely invisible until the one above it was fixed**, and at
+every layer the obvious check reported success.
+
+| # | Defect | What it looked like once fixed | PRs |
+|---|---|---|---|
+| 1 | Nothing scraped `flux-system` | 4 targets, all `up`, no errors — and still **0 series** | #114 #115 #116 |
+| 2 | `gotk_reconcile_condition` **does not exist** in this Flux version | replaced by KSM CustomResourceState `gotk_resource_info`; 77 series appeared | #117 #118 #119 |
+| 3 | `ready="False"` misses **cycling** failures | `wiz-sensor` fired, `risingwave` sat `pending` >1h | #120 |
+| 4 | `ready` and `revision` are **in the alert's own label set** | matcher widened, series still discontinuous, window still never completed | #121 #122 |
+
+**Layer 2.** The controllers expose only `gotk_reconcile_duration_seconds`. A working
+scrape of a metric that is never emitted is indistinguishable from no scrape at all — four
+healthy targets and zero series for the thing the rules need.
+
+**Layer 3.** `flux-system/risingwave`'s health check times out at 5m and re-runs. Ready goes
+`Unknown` while it runs and back to `False` on timeout. Measured over 60 minutes at a 30s
+scrape — 120 samples for one series:
+
+```
+ready="True"      0 samples
+ready="False"    59 samples
+ready="Unknown"  61 samples      59 + 61 = 120 exactly: one object, alternating, never True
+```
+
+`wiz-sensor` fired correctly throughout, because it is **stalled** and its condition sits
+still. So the rule worked for stalled failures and silently failed for cycling ones — and
+one of the two firing is exactly what would have let us call the ticket finished.
+
+**Layer 4, the subtle one.** Prometheus identifies an alert instance by **the label set of
+the expression's output**. `ready` was in that set. So `ready!="True"` widened the match but
+a flapping object *still* produced two alternating instances — `False` and `Unknown` — each
+vanishing as the other appeared, each resetting `activeAt`. The 10-minute `for:` window
+still never completed. `revision` churns identically, changing on every successful apply.
+
+The measurement that exposed it, and the one that hid it:
+
+```
+count(count_over_time(gotk_resource_info{...ready!="True"}[10m]) >= 20)          = 1
+same, with max by (exported_namespace, name) applied first                       = 2
+```
+
+Two Kustomizations had been not-Ready for days. The unaggregated count sees only
+`wiz-sensor`. **My own verification query counted per-series exactly the way the broken
+alert did, returned `1`, and I read it as a result rather than as the bug reporting
+itself.** Fixed with `max by (customresource_kind, exported_namespace, name)`.
+
+**A fifth defect, found while fixing the fourth.** Every Flux summary said
+`{{ $labels.namespace }}`. That is kube-state-metrics' *own* namespace — its ServiceMonitor
+stamps `namespace="prometheus"` onto every series it emits, which is precisely why the CRS
+config had to name the real one `exported_namespace`:
+
+```
+exported_namespace=flux-system     <- the Kustomization
+namespace=prometheus               <- kube-state-metrics' pod
+```
+
+The page would have fired correctly and named the wrong namespace. After `max by()` drops
+`namespace`, it would have rendered empty instead. Repointed to `exported_namespace` in the
+same PR. Other rules in the file keep `$labels.namespace`, correctly — `kube_pod_*` carries
+a real one.
+
+**`for: 10m` is confirmed correctly sized.** A mass reconcile fans out through `dependsOn`
+and puts many Kustomizations `Ready=False` at once: peak breadth **27**, decaying to 4
+within three minutes. Exactly **2** objects survive a full 10-minute window, which is the
+two genuinely broken ones. The widened matcher does not storm.
+
+### Two guard bugs, same shape
+
+Both scripts written to make these changes safely refused a branch that was already correct:
+
+- `pr-flux-alert-ready-not-true.sh` searched the whole file for `gotk_reconcile_condition`
+  and matched **the comment block explaining that it is no longer used** — reading its own
+  documentation as evidence of the defect that documentation says was fixed.
+- `pr-flux-alert-aggregate.sh` asked "is this note already present?" by comparing the note
+  to itself **byte-for-byte**; the existing one carried a `⚠️` and a longer closing
+  sentence, so it appended a near-duplicate paragraph.
+
+Both fixed by keying on a stable distinguishing feature — expressions with comments
+stripped, and the phrase `"second correction"` — rather than on full text. Both
+fixture-tested against every branch state before shipping.
+
+
+---
+
 ## Traps
 
 - **A rule referencing an unscraped metric is silently inert.** Every status field in the
@@ -108,6 +202,18 @@ application's own `no space left on device`, not by `rbd du`.
   reviewed and merged.
 - **`rbd du` ≠ `df`.** Allocated blocks, not used bytes, and the difference on a
   TSDB volume is large.
+- **A fixed layer reveals the next one, and each looks like the last.** Four times on this
+  ticket the fix was verified by a check that shared the defect it was checking for: a
+  healthy scrape of a non-existent metric, a firing `wiz-sensor` masking a broken
+  `risingwave`, a per-series count that split exactly the way the alert did.
+- **The alert's identity is its output label set.** Any label that churns — `ready`,
+  `revision`, anything derived from status — resets `activeAt` on every change and prevents
+  a `for:` window from ever completing. Aggregate the volatile labels away.
+- **`$labels.namespace` on a kube-state-metrics CRS series is KSM's namespace, not the
+  object's.** The real one is `exported_namespace`. The alert is right and the text is wrong,
+  which is worse than an obviously broken alert.
+- **Reaching `firing` once is not the test.** Three of the four fixes produced a `pending`
+  or a brief `firing`. Only holding across several flips distinguishes a working rule.
 - **Noise and silence are indistinguishable to the recipient.** `KubeControllerManagerDown`
   has been firing for two months and is very likely a Talos false positive (the
   control-plane components are static pods that the stack's default scrape config does not
@@ -154,8 +260,11 @@ handover. The runnable form is `scripts/check-alert-delivery.sh`, which takes `-
 Three separate pieces, in dependency order, filed 2026-08-21 under epic INFRA-1632.
 None is a one-liner and none should be folded into another:
 
-1. **INFRA-1657 — scrape `flux-system`.** A PodMonitor for the Flux controllers on all three branches.
-   Without it every Flux rule stays dead, delivered or not. Smallest of the three.
+1. ~~**INFRA-1657 — scrape `flux-system`.** A PodMonitor for the Flux controllers on all three branches.
+   Without it every Flux rule stays dead, delivered or not. Smallest of the three.~~
+   **Re-scoped 2026-08-24: "make the Flux rules actually fire."** It was not the smallest of
+   the three and it was not a PodMonitor. Four defects in series, five counting the
+   annotation — see the section above. Dev shipped and verified; QA merged; prod pending.
 2. **INFRA-1658 — triage the 54.** Before delivery is switched on. Decide per alert: real and to be
    fixed, real and to be silenced with a reason, or a false positive whose rule needs
    correcting (`KubeControllerManagerDown` on Talos is the archetype). Delivering an
@@ -164,9 +273,16 @@ None is a one-liner and none should be folded into another:
    destination someone watches. This is a design decision — Teams vs PagerDuty vs email,
    who is on the other end, what severity routes where — not a config change.
 
-**Proven:** dev has no Alertmanager and no Flux scrape; 54 alerts firing, oldest
-2026-06-24; the RisingWave outage was correctly detected at 2026-08-18T22:08:52.
+**Proven:** dev has no Alertmanager; 54 alerts firing, oldest 2026-06-24; the RisingWave
+outage was correctly detected at 2026-08-18T22:08:52. The Flux rules were dead for four
+independent reasons in series (2026-08-24), all four now fixed on dev and QA; `for: 10m` is
+correctly sized against a peak `dependsOn` cascade of 27.
 **Tested and killed:** "the Flux rule fired and went nowhere" (it never fired); "the
-platform Prometheus volume is at 95%" (58%, `rbd du` was the wrong instrument).
-**Traps:** an unscraped rule is silently inert; `rbd du` is not `df`; turning on delivery
-before triage delivers two months of noise.
+platform Prometheus volume is at 95%" (58%, `rbd du` was the wrong instrument); "the missing
+`flux-system` scrape was the cause" (first of four); "`ready!=\"True\"` fixes the flapping
+case" (it does not — the label is in the alert's own identity); "1 object would page" (the
+counting query had the same per-series defect as the alert).
+**Traps:** an unscraped rule is silently inert; a scraped-but-never-emitted metric looks
+identical to it; a churning label in the output resets `activeAt` forever; `$labels.namespace`
+on a CRS series is KSM's namespace; `rbd du` is not `df`; reaching `firing` once proves
+nothing; turning on delivery before triage delivers two months of noise.
