@@ -278,4 +278,8 @@ is correct. Set to https://$HOST." || echo "   nothing to commit"
 done
 
 echo
-[ "$PUSH" = "yes" ] || echo "Nothing committed or pushed. Read the diffs, then re-run with --push."
+[ "$PUSH" = "yes" ] || cat <<'DONE'
+Committed to local topic branches; NOTHING PUSHED. Read the diffs above, then
+re-run with --push. Each run recreates the topic branches from origin, so a
+local commit here is not a decision you are stuck with.
+DONE
