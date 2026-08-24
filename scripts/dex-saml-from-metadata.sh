@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Turn an AWS Identity Center SAML metadata XML into the Argo CD dex connector block.
 #
-#   scripts/dex-saml-from-metadata.sh ~/Downloads/AWS_SSO_metadata.xml op-dev
+#   scripts/dex-saml-from-metadata.sh /tmp/idc-argocd-metadata.xml op-dev
+#
+# NO BROWSER DOWNLOAD NEEDED. The metadata URL is public and derivable from ids you
+# already have -- base64("<account>_<instance-id>"), verified 2026-08-24:
+#
+#   TOK=$(printf '660075424663_ins-72236face0cd1203' | base64 -w0)
+#   curl -sS -o /tmp/idc-argocd-metadata.xml \
+#     "https://portal.sso.us-east-1.amazonaws.com/saml/metadata/$TOK"
+#
+# (the instance id is the app ARN's ssoins- segment with the "sso" prefix dropped).
+# On WSL a console download lands in the WINDOWS profile, not ~/Downloads, which is
+# why fetching it directly is better than hunting for the file.
 #
 # Emits YAML to paste into infrastructure/argocd/helmrelease.yaml under spec.values.
 # Nothing here is secret: caData is the IdP's PUBLIC signing certificate, so the
