@@ -15,6 +15,7 @@
 # argocd-apps was among the twelve -- QA's app delivery path, frozen, reporting a healthy
 # dependency as the blocker. Nothing else would have surfaced that.
 #
+#   scripts/flux-revision-drift.sh                       # sweep all three
 #   scripts/flux-revision-drift.sh --cluster op-dev
 #   scripts/flux-revision-drift.sh --cluster op-prod --print-fix
 #
@@ -31,6 +32,18 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+# No --cluster sweeps all three, each labelled. A DEFAULT cluster would be the very
+# bug this repo keeps hitting -- a command that could hit more than one environment.
+# Sweeping every one explicitly is not a default, it is a sweep.
+if [ -z "$CLUSTER" ]; then
+  rc=0
+  for c in op-dev op-qa op-prod; do
+    "$0" --cluster "$c" ${PRINT_FIX:+$([ "$PRINT_FIX" = yes ] && echo --print-fix)} || rc=1
+    echo
+  done
+  exit $rc
+fi
+
 onprem_resolve_ctx "$CLUSTER"
 K() { kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" "$@"; }
 
