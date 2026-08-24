@@ -235,6 +235,33 @@ if [[ -z "$IDC_REGION" ]]; then
   say "application you create will be in the wrong place or not creatable at all."
   exit 1
 fi
+# list-instances ANSWERS FROM MEMBER ACCOUNTS. It proves the org has an instance,
+# not that you can administer it -- on 2026-08-24 the usx-dev profile (account
+# 700736442855) returned the instance owned by 660075424663, which would have
+# waved the user through to the create step to fail there. Test a call that
+# actually requires management-account permissions.
+say ""
+say "Instance found. Now testing whether you can ADMINISTER it, which is a"
+say "different question -- list-instances answers from member accounts too."
+WHOAMI=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "?")
+probe=$(aws sso-admin list-applications --instance-arn "$IDC_ARN" \
+        --region "$IDC_REGION" --max-results 1 --output text 2>&1) || true
+case "$probe" in
+  *AccessDenied*|*not\ authorized*|*UnauthorizedException*)
+    warn "You are in account $WHOAMI and cannot administer the instance."
+    say ""
+    say "  instance owner : $IDC_OWNER"
+    say "  you            : $WHOAMI"
+    say ""
+    say "Sign in to $IDC_OWNER with an admin permission set:"
+    say "  https://usxpress.awsapps.com/start"
+    say "then export that profile and re-run. Creating the application needs"
+    say "write access in the management account; browsing the console with"
+    say "member-account credentials will fail at the create step, not before."
+    exit 1 ;;
+esac
+say "  ${GREEN}sso-admin write path reachable from account $WHOAMI${RESET}"
+
 say ""
 say "  ${GREEN}region ${RESET}$IDC_REGION"
 say "  ${GREEN}owner  ${RESET}$IDC_OWNER"
