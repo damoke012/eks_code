@@ -32,6 +32,11 @@ sys.argv = _argv
 
 GO = "--go" in sys.argv
 INCLUDE_OLD_DONE = "--include-old-done" in sys.argv
+# Sprintless is NOT the same as missing. 75 of the 89 found on the first real run
+# were old backlog -- correctly unsprinted, and moving them would have tripled the
+# sprint. The tickets that are actually invisible are the OPEN ones left behind in
+# a closed sprint. --stranded-only restricts to those; it is the usual intent.
+STRANDED_ONLY = "--stranded-only" in sys.argv
 
 # Board 322 is the OLD board -- it has no active sprint, which is how the first
 # run of this failed. Do not hardcode a board: enumerate every INFRA board and
@@ -140,8 +145,14 @@ def main():
     print(f"Target sprint: {sid} '{sname}' [{target.get('state')}]  "
           f"started {sstart or '(no start date)'}\n")
 
+    sources = [("stranded in a closed sprint", JQL_STRANDED)]
+    if not STRANDED_ONLY:
+        sources.insert(0, ("no sprint", JQL_NO_SPRINT))
+    else:
+        print("--stranded-only: ignoring never-sprinted backlog, which belongs in the backlog\n")
+
     rows, seen = [], set()
-    for label, jql in (("no sprint", JQL_NO_SPRINT), ("stranded in a closed sprint", JQL_STRANDED)):
+    for label, jql in sources:
         found = [row(i) for i in search(jql)]
         for f in found:
             if f["key"] in seen:
