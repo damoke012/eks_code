@@ -1,6 +1,6 @@
 ---
 name: onprem-human-access-model
-description: "How humans get kubectl on the on-prem Talos clusters — AWS SSO via self-hosted aws-iam-authenticator. LIVE on op-usxpress-qa 2026-07-28; op-dev has the authenticator but not the apiserver flag (2026-08-24); prod not started."
+description: "How humans get kubectl on the on-prem Talos clusters — AWS SSO via self-hosted aws-iam-authenticator. LIVE on op-usxpress-qa 2026-07-28; dev AND prod have the authenticator but not the apiserver flag (2026-08-24, INFRA-1661)."
 metadata: 
   node_type: memory
   type: project
@@ -20,7 +20,12 @@ still to do.
 (`clusters/bm-dev/flux-system/infra.yaml`). 3/3 pods on the CPs, 0 restarts, correct ARN, mapper
 loaded. **Nobody can log in yet** — the apiserver `--authentication-token-webhook-config-file`
 flag is Talos machine config in `iaac-talos`, promoted through Octopus, and still to do. Prod
-manifests are one command: `scripts/pr-sso-dev-prod.sh --only op-prod`.
+**op-usxpress-prod has it too as of 2026-08-24 20:20** (PRs #125/#37) — both Kustomizations
+`Ready=True` on `op-prod@sha1:6f7e9daf`, 3/3 pods, 0 restarts, prod's own ARN
+(`937464026810` / `837df2a43495aaf1`). Verified through
+`scripts/breakglass-prod-kubeconfig.sh`, which was exercised for real and works — one of
+INFRA-1661's preconditions proven rather than assumed. **Neither dev nor prod can log in yet**;
+the apiserver flag is INFRA-1661.
 
 ⚠️ **THREE paths, only one right.** The apiserver flag takes the **HOST** path
 `/var/lib/aws-iam-authenticator/kubeconfig.yaml`. The init container's log says
@@ -51,7 +56,9 @@ RBAC bug. QA maps `op-qa-platform-admin` instead: leave it alone and add `usx-on
 there as an ADDITIONAL entry, never replace the only working path into a cluster.
 See `wip/onprem-sso/INFRA-1638-dev-authenticator-live.md` and [[adjacent-step-green-signals]].
 
-**Confirmed 2026-08-18: prod has NO SSO path.** `infrastructure/aws-iam-authenticator` exists only on the
+~~**Confirmed 2026-08-18: prod has NO SSO path.**~~ **Superseded 2026-08-24 — prod now has the
+authenticator and RBAC (see above); it still has no LOGIN until INFRA-1661.** The rest of this
+paragraph was accurate when written: `infrastructure/aws-iam-authenticator` exists only on the
 `op-qa` branch and is wired only in `clusters/op-usxpress-qa`. `op-prod` has neither the directory nor the
 Kustomization, so `op-usxpress-prod` (API `10.10.82.52`) has no routine human access — break-glass only, via
 `op-usxpress-prod/talosconfig` in Secrets Manager account 937464026810 (`usx-prod` profile) →
