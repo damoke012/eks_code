@@ -1,0 +1,107 @@
+# INFRA-1657, second half — restore Flux reconciliation metrics.
+#
+# Inserted into infrastructure/prometheus/helmrelease.yaml under `values:`,
+# immediately after the `kubeStateMetrics: enabled: true` block. This file is
+# the source of truth for that block; scripts/pr-ksm-flux-crs.sh splices it in.
+#
+# WHY, verified on op-usxpress-dev 2026-08-24:
+#
+#   The three Flux rules in platform-alerts.yaml key on gotk_reconcile_condition.
+#   THAT METRIC DOES NOT EXIST in the Flux version running here. Reading
+#   /metrics on kustomize-controller directly returns exactly one gotk reconcile
+#   metric:
+#
+#       # HELP gotk_reconcile_duration_seconds  The duration in seconds of a
+#       #      GitOps Toolkit resource reconciliation.
+#
+#   Upstream removed the condition gauge and documents kube-state-metrics
+#   CustomResourceState as its replacement.
+#
+#   Scraping flux-system was NECESSARY BUT NOT SUFFICIENT. The PodMonitor added
+#   in the first half of this ticket produces four healthy targets — all `up`,
+#   no errors — and still zero gotk_reconcile_condition series. A working scrape
+#   of a metric that is not emitted looks identical to no scrape at all.
+#
+# The same mechanism is what CiliumNodeCountDivergence needs: it references
+# kube_customresource_cilium_io_v2_ciliumnode_info and no CustomResourceState
+# config exists anywhere on any cluster, so that rule is dead for the same
+# reason. Configuring CRS once makes every CR-condition alert possible.
+#
+# ⚠️ RBAC IS LOAD-BEARING. kube-state-metrics' ClusterRole currently lists only
+# core resources — verified, no *.toolkit.fluxcd.io group at all. Without the
+# extraRules below, the CRS config loads, the container starts, the ConfigMap
+# mounts, and it exports NOTHING. No error. Fourth instance this week of a
+# component reporting success about the step next to the one that matters.
+kube-state-metrics:
+  rbac:
+    extraRules:
+      - apiGroups:
+          - kustomize.toolkit.fluxcd.io
+          - helm.toolkit.fluxcd.io
+          - source.toolkit.fluxcd.io
+        resources: ["*"]
+        verbs: ["list", "watch"]
+  customResourceState:
+    enabled: true
+    config:
+      spec:
+        resources:
+          # Each entry yields gotk_resource_info with kube-state-metrics'
+          # automatic customresource_group / customresource_kind /
+          # customresource_version labels, so one metric name covers all three
+          # kinds and the rules select on customresource_kind.
+          - groupVersionKind:
+              group: kustomize.toolkit.fluxcd.io
+              version: v1
+              kind: Kustomization
+            metricNamePrefix: gotk
+            metrics:
+              - name: resource_info
+                help: "The current state of a Flux Kustomization."
+                each:
+                  type: Info
+                  info:
+                    labelsFromPath:
+                      name: [metadata, name]
+                labelsFromPath:
+                  exported_namespace: [metadata, namespace]
+                  ready: [status, conditions, "[type=Ready]", status]
+                  suspended: [spec, suspend]
+                  revision: [status, lastAppliedRevision]
+
+          - groupVersionKind:
+              group: helm.toolkit.fluxcd.io
+              version: v2
+              kind: HelmRelease
+            metricNamePrefix: gotk
+            metrics:
+              - name: resource_info
+                help: "The current state of a Flux HelmRelease."
+                each:
+                  type: Info
+                  info:
+                    labelsFromPath:
+                      name: [metadata, name]
+                labelsFromPath:
+                  exported_namespace: [metadata, namespace]
+                  ready: [status, conditions, "[type=Ready]", status]
+                  suspended: [spec, suspend]
+
+          - groupVersionKind:
+              group: source.toolkit.fluxcd.io
+              version: v1
+              kind: GitRepository
+            metricNamePrefix: gotk
+            metrics:
+              - name: resource_info
+                help: "The current state of a Flux GitRepository."
+                each:
+                  type: Info
+                  info:
+                    labelsFromPath:
+                      name: [metadata, name]
+                labelsFromPath:
+                  exported_namespace: [metadata, namespace]
+                  ready: [status, conditions, "[type=Ready]", status]
+                  suspended: [spec, suspend]
+                  revision: [status, artifact, revision]
