@@ -108,3 +108,67 @@ verification; Flux reporting the VirtualService Ready proves the object exists, 
 external-dns wrote a record; `kubectl get gateway` resolves to `gateway.networking.k8s.io`,
 not Istio's, and returns a misleading NotFound; an assertion built from the one cluster you
 can see encodes that cluster's history as a rule.
+
+---
+
+## 2026-08-24 22:00 — the fix merged and did nothing for 20 minutes
+
+PR #128 merged, Flux fetched the new revision, and the VirtualService still claimed the dev
+hostname. **Twelve Kustomizations on op-qa were stuck**, all pinned at `254b6c44` while the
+healthy ones had moved to `81cbcfc3`, and every one blamed a dependency that was `Ready=True`:
+
+| stuck | blamed | that dependency's actual state |
+|---|---|---|
+| `istio-csr` | `cert-manager-issuers` | **Ready=True** |
+| `argocd-apps` | `app-namespaces` | **Ready=True** |
+| `velero` | `external-secrets-config` | **Ready=True** |
+| `rook-ceph-cluster` | `rook-ceph-operator` | **Ready=True** |
+
+`grafana` blamed `prometheus` on one poll and `istio-ingress` on the next, minutes apart, while
+`prometheus` reported `Ready=True, Healthy=True, health check passed in 72.363528ms`.
+
+**The messages are stale** — the reason recorded at the last failed attempt, still displayed
+while the Kustomization waits out its retry interval. Read at face value they send you to
+debug a component that is fine.
+
+The root was `istio-csr`, and QA's mesh chain is six deep:
+
+```
+istio-csr -> istio-base -> istio-istiod -> {istio-ztunnel, istio-ingress, istiod-health}
+                                                              |            -> istio-cni
+                                        grafana, risingwave-routes <-------+
+```
+
+One transient failure at the root freezes the mesh, Grafana and the RisingWave routes, and each
+level only retries on its own timer, so it unwinds slowly or not at all.
+
+**The tell is the REVISION column, not the message.** A stuck Kustomization sits one revision
+behind while the dependency it names has already advanced. Compare revisions, not reasons.
+
+**Fix:** reconcile from the root in dependency order. All twelve applied `81cbcfc3` immediately
+and `flux get kustomizations | grep -v True` came back empty.
+
+```
+flux -n flux-system reconcile kustomization istio-csr    # then base, istiod, ztunnel,
+                                                         # ingress, cni, istiod-health,
+                                                         # grafana, risingwave-routes,
+                                                         # argocd-apps, velero,
+                                                         # rook-ceph-cluster
+```
+
+`argocd-apps` being among them matters beyond this fix: that is QA's ApplicationSet, the app
+delivery path recorded as proven end to end on 2026-08-20. It was frozen at the old revision
+while reporting a healthy dependency as the blocker. Its one Application (`risingwave-etl`) is
+`Synced/Healthy` after the unwind.
+
+**Verified after:** VirtualService `["grafana.op-qa.usxpress.io"]`; external-dns
+`CREATE grafana.op-qa.usxpress.io A` at 22:00:06Z; `dig` returns `.139 .106 .23`;
+`grafana.op-dev.usxpress.io` still returns dev's seven; `curl --resolve ...:10.10.82.106`
+returns **302** — Grafana redirecting to `/login`, which proves the route serves. The earlier
+404 was Istio having no route for that host at all.
+
+**Traps added:** a Flux dependency message is the reason from the last failed attempt, not
+current state, and it can name a component that is healthy right now; a six-deep `dependsOn`
+chain converts one transient failure into a cluster-wide freeze that reports twelve different
+specific causes; a merged PR plus a successful source reconcile still proves nothing about
+what is applied — check the Kustomization's revision against the source's.
