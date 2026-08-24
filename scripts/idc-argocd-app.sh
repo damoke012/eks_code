@@ -143,7 +143,10 @@ fi
 
 # ---- verify -----------------------------------------------------------------
 [ -n "$APP_ARN" ] && [ "$APP_ARN" != "None" ] || {
-  echo "!! no application named '$APP_NAME' -- run --go first" >&2; exit 1; }
+  echo "!! no application named '$APP_NAME'." >&2
+  echo "   Create it in the CONSOLE first -- the CLI cannot. Run with no arguments" >&2
+  echo "   to print the exact steps and values." >&2
+  exit 1; }
 echo "   application: $APP_ARN"
 AWS sso-admin describe-application --application-arn "$APP_ARN" \
   --query '{Name:Name,Status:Status,Url:PortalOptions.SignInOptions.ApplicationUrl}' --output table
