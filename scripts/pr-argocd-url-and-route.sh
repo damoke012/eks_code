@@ -100,10 +100,22 @@ d = yaml.safe_load(open(path))
 got = d["spec"]["values"]["configs"]["cm"]["url"]
 want = "https://" + host
 assert got == want, "configs.cm.url is %r, expected %r" % (got, want)
-assert d["spec"]["values"]["configs"]["secret"]["createSecret"] is False, \
-    "configs.secret.createSecret must stay false -- Helm owning argocd-secret " \
-    "regenerates server.secretkey and kills every session"
+# Who owns argocd-secret differs per cluster and is NOT a universal invariant.
+# op-dev sets createSecret:false because its Argo adopted a 49-day-old raw
+# install whose argocd-secret already held server.secretkey and TLS -- Helm
+# creating it would regenerate the key and end every session. op-qa was
+# greenfield and has no configs.secret block, so Helm owns it there. This
+# decides how an OIDC clientSecret gets in: merged by ExternalSecret on dev,
+# contended with Helm on qa.
+sec = d["spec"]["values"]["configs"].get("secret")
+if sec is None:
+    owner = "Helm (no configs.secret block)"
+elif sec.get("createSecret") is False:
+    owner = "pre-existing, preserved (createSecret: false)"
+else:
+    owner = "Helm (createSecret: %r)" % sec.get("createSecret")
 print("   parsed back:     configs.cm.url = %s" % got)
+print("   argocd-secret:   %s" % owner)
 PY2
 
   # ---- 2. the VirtualService (op-dev only) --------------------------------
