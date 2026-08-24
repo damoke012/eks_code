@@ -83,5 +83,15 @@ fence "   reverted ssh:// to https:// and broke delivery for 18h, all statuses g
 fence "scripts/audit-ecr-policies.sh --profile infra-common --region us-east-2 --summary"
 fence "   who can push to the shared registry (INFRA-1655: 515 of 517)"
 
+section "7. Board honesty"
+# Every ticket filed by a script here sets a parent epic and never a sprint, so
+# work gets done on tickets that are invisible on the board. On 2026-08-24 that
+# was 17 of them, 8 already closed. Needs a token, so it is listed not run.
+fence "scripts/find-sprintless-tickets.py --sprint <id> --stranded-only"
+fence "   tickets worked in the last 14d that are not on the board (17 on 2026-08-24)"
+fence "scripts/check-sprint-membership.py <sprint-id> INFRA-nnn ..."
+fence "   asks the sprint for its members -- no JQL predicate on the multi-valued"
+fence "   sprint field can answer 'is this issue in sprint N' reliably"
+
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
 exit 0
