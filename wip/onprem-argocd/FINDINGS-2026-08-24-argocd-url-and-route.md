@@ -172,3 +172,75 @@ current state, and it can name a component that is healthy right now; a six-deep
 chain converts one transient failure into a cluster-wide freeze that reports twelve different
 specific causes; a merged PR plus a successful source reconcile still proves nothing about
 what is applied — check the Kustomization's revision against the source's.
+
+---
+
+## 2026-08-24 23:xx — steps 3 and 4, and a name that meant nothing
+
+**Step 4 done** (PRs #129 / #130). `configs.rbac` was unset on both branches, so
+`argocd-rbac-cm` carried `policy.default ""` and `policy.csv ""` — a successful SSO
+authentication would land with zero permissions. Now `g, usx-cloud-admin, role:admin`,
+`policy.default` deliberately left `""`.
+
+### The group was wrong, and nothing would have caught it
+
+The first version mapped **`onprem-platform-admins`**. That name is real — but only inside
+`aws-auth`. Cluster access is granted by **permission set**
+(`AWSReservedSSO_AWSAdministratorAccess`), which `aws-auth` maps to that Kubernetes RBAC
+group name. It has **never existed in AWS Identity Center**:
+
+```
+aws identitystore list-groups --identity-store-id d-90676260a8 --region us-east-1 \
+  --query 'Groups[].DisplayName' | grep -ciE 'onprem|platform'   ->  0
+```
+
+A SAML assertion carries **directory** groups. Same identity, different axis.
+
+**This is not the adjacent-green-signal pattern.** There is no adjacent green step: the YAML
+is valid, Flux is green, the HelmRelease is healthy, and the SSO login itself *succeeds*. The
+defect only becomes visible when a human logs in and lands on an empty page — which reads as
+a broken login when it is authorisation. Every signal in the chain is genuinely correct.
+
+Corrected to `usx-cloud-admin` (`90676260a8-dbbc2134-49b2-44ee-be04-656d3240a71c`), and
+`pr-argocd-rbac.sh` now resolves the group against the identity store and refuses to write a
+policy naming something that does not resolve.
+
+### Step 3 is blocked on access, not design
+
+```
+sso-admin list-applications --instance-arn arn:aws:sso:::instance/ssoins-7223eb10c0b8ac39
+-> AccessDeniedException, AWSReservedSSO_AWSAdministratorAccess in 700736442855
+```
+
+Instance owner is **660075424663**. Doke is admin of the dev member account, not the
+management account. The "resource does not exist in this Region" wording is Identity
+Center's standard misleading text for a cross-account denial — the region is right.
+
+`sso-admin list-instances` **answers from member accounts** and returned the instance
+happily. A preflight built on it passed cleanly and would have sent the user to the console
+to fail at the create step — the exact failure it was written to prevent. `list-applications`
+is the discriminating call.
+
+### Three walls, one shape
+
+Prod's missing kubeconfig, Entra's Azure tenant, and Identity Center's management account are
+the same constraint wearing three coats: **admin of what you own, not of what you federate
+through.** That belongs on the tickets as a named dependency rather than leaving them looking
+merely unfinished.
+
+---
+
+**Proven:** `configs.rbac` was unset on op-dev and op-qa; `onprem-platform-admins` returns
+zero matches across identity store `d-90676260a8`; `usx-cloud-admin` resolves to
+`90676260a8-dbbc2134-49b2-44ee-be04-656d3240a71c` and Doke is a member; `sso-admin
+list-applications` is AccessDenied from 700736442855 against the instance owned by
+660075424663; the Identity Center instance is `ssoins-7223eb10c0b8ac39` in us-east-1.
+**Tested and killed:** "one group across both layers" — a k8s RBAC name and a directory group
+are different axes and cannot share a name; "`list-instances` proves you can administer it" —
+it answers from member accounts; "`oidc.config` avoids installing Dex" — true for an
+OIDC-native IdP, false for Identity Center, which is SAML and needs `dex.enabled: true`;
+"SAML needs a client secret in argocd-secret" — it does not, `caData` is a public certificate.
+**Traps:** a policy naming a group that does not exist authenticates fine and authorises
+nothing; Identity Center reports cross-account denials as "resource does not exist in this
+Region"; an `aws` call with no `--profile` silently uses a credential-less default and
+reports absence rather than failure.
