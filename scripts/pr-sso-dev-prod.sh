@@ -141,7 +141,7 @@ for B in $TARGETS; do
 # to dev, QA and prod alike, but AWS generates a DIFFERENT suffix in each account.
 # Never copy this line from another cluster's file — read the real one back:
 #   aws iam list-roles --profile <profile-for-this-account> \\
-#     --query \"Roles[?starts_with(RoleName,'AWSReservedSSO_usx-on-prem-admins')].Arn\"
+#     --query "Roles[?starts_with(RoleName,'AWSReservedSSO_usx-on-prem-admins')].Arn"
 # The other clusters' account ids are deliberately NOT listed here:
 # scripts/check-foreign-cluster-ids.sh treats any foreign account id on a branch as
 # a defect, and a table of them is how the wrong one gets copied.
