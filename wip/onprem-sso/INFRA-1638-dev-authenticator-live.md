@@ -1,4 +1,4 @@
-# INFRA-1638 — aws-iam-authenticator live on op-usxpress-dev (manifests half)
+# INFRA-1638 — aws-iam-authenticator live on op-usxpress-dev AND op-usxpress-prod (manifests half)
 
 **2026-08-24 20:04 UTC.** Both halves merged and reconciled on **op-usxpress-dev only**.
 QA has had this since 2026-07-28; **prod is not done**.
@@ -7,6 +7,17 @@ QA has had this since 2026-07-28; **prod is not done**.
   (`infrastructure/rbac/` + `infrastructure/aws-iam-authenticator/`)
 - `variant-inc/iaac-talos-flux-cluster` PR #36 → `clusters/bm-dev/flux-system/infra.yaml`,
   two Kustomizations (`rbac`, then `aws-iam-authenticator` with `dependsOn: rbac`)
+
+**op-usxpress-prod followed at 20:20 UTC** — platform PR #125, cluster PR #37, both merged.
+Verified through the break-glass kubeconfig: `rbac` and `aws-iam-authenticator` both
+`Ready=True` on `op-prod@sha1:6f7e9daf`, 3/3 pods `Running`, `RESTARTS 0`. The `aws-auth` ARN is
+prod's own — account `937464026810`, suffix `837df2a43495aaf1` — read back from that account,
+never copied.
+
+`scripts/breakglass-prod-kubeconfig.sh` was exercised for real and works: resolves the
+`ops-controller` profile by account id, refuses a talosconfig that does not start with
+`context:`, and asserts the server is `10.10.82.52`. That is one of INFRA-1661's preconditions
+proven rather than assumed. The kubeconfig was destroyed afterwards.
 
 ---
 
