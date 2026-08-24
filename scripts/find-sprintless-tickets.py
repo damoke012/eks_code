@@ -32,7 +32,14 @@ sys.argv = _argv
 
 GO = "--go" in sys.argv
 INCLUDE_OLD_DONE = "--include-old-done" in sys.argv
-BOARD = 322
+
+# Board 322 is the OLD board -- it has no active sprint, which is how the first
+# run of this failed. Do not hardcode a board: enumerate every INFRA board and
+# find the sprint. --sprint <id> pins it explicitly.
+SPRINT_ARG = None
+for _i, _a in enumerate(sys.argv):
+    if _a == "--sprint" and _i + 1 < len(sys.argv):
+        SPRINT_ARG = int(sys.argv[_i + 1])
 
 MINE = "(assignee = currentUser() OR reporter = currentUser())"
 JQL_NO_SPRINT = f"project = INFRA AND sprint IS EMPTY AND {MINE} ORDER BY created ASC"
@@ -72,18 +79,66 @@ def row(i):
             "resolved": (f.get("resolutiondate") or "")[:10], "who": who}
 
 
+def all_sprints():
+    """Every sprint on every INFRA board, newest first. Boards that do not
+    support sprints (kanban) return 400 -- skipped, not fatal."""
+    s, r = m.api("GET", "/rest/agile/1.0/board?projectKeyOrId=INFRA&maxResults=50")
+    boards = r.get("values", []) if s == 200 else []
+    out = []
+    for b in boards:
+        bs, br = m.api("GET", f"/rest/agile/1.0/board/{b['id']}/sprint?maxResults=50")
+        if bs != 200:
+            continue
+        for sp in br.get("values", []):
+            sp["_board"] = f"{b['id']} {b.get('name','?')}"
+            out.append(sp)
+    out.sort(key=lambda x: x.get("startDate") or "", reverse=True)
+    return out
+
+
+def resolve_sprint():
+    """Pick the sprint to add to. Explicit --sprint wins; otherwise the single
+    active one; otherwise print what exists and refuse to guess."""
+    sprints = all_sprints()
+    if not sprints:
+        print("!! no sprints found on any INFRA board", file=sys.stderr)
+        return None
+    if SPRINT_ARG:
+        for sp in sprints:
+            if sp["id"] == SPRINT_ARG:
+                return sp
+        print(f"!! sprint {SPRINT_ARG} not found on any INFRA board", file=sys.stderr)
+        sprints_table(sprints)
+        return None
+    active = [sp for sp in sprints if sp.get("state") == "active"]
+    if len(active) == 1:
+        return active[0]
+    print("!! cannot pick a sprint automatically "
+          f"({len(active)} active). Re-run with --sprint <id>:", file=sys.stderr)
+    sprints_table(sprints)
+    return None
+
+
+def sprints_table(sprints):
+    print("\n  id     state      started     board / name", file=sys.stderr)
+    for sp in sprints[:20]:
+        print(f"  {sp['id']:<6} {sp.get('state','?'):<10} "
+              f"{(sp.get('startDate') or '')[:10]:<11} "
+              f"{sp['_board']} / {sp.get('name','?')}", file=sys.stderr)
+
+
 def main():
     print(f"== find-sprintless-tickets  [{'GO' if GO else 'DRY RUN'}]\n")
     m.preflight()
 
-    s, r = m.api("GET", f"/rest/agile/1.0/board/{BOARD}/sprint?state=active")
-    sprints = r.get("values", []) if s == 200 else []
-    if not sprints:
-        sys.exit(f"!! no active sprint on board {BOARD} (HTTP {s})")
-    sid = sprints[0]["id"]
-    sname = sprints[0].get("name", "?")
-    sstart = (sprints[0].get("startDate") or "")[:10]
-    print(f"Active sprint: {sid} '{sname}'  started {sstart or '(no start date)'}\n")
+    target = resolve_sprint()
+    if target is None:
+        return 2
+    sid = target["id"]
+    sname = target.get("name", "?")
+    sstart = (target.get("startDate") or "")[:10]
+    print(f"Target sprint: {sid} '{sname}' [{target.get('state')}]  "
+          f"started {sstart or '(no start date)'}\n")
 
     rows, seen = [], set()
     for label, jql in (("no sprint", JQL_NO_SPRINT), ("stranded in a closed sprint", JQL_STRANDED)):
