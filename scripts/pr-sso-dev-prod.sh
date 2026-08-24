@@ -137,13 +137,14 @@ for B in $TARGETS; do
 # Getting this wrong does not error — the caller authenticates as system:anonymous and
 # every request comes back \`forbidden\`, which reads exactly like an RBAC bug.
 #
-# ⚠️ THE SUFFIX IS PER-ACCOUNT. AWS generates it when the permission set is
-# provisioned, so it differs per cluster even though the permission set is the same:
-#   dev  700736442855  ..._b7447c115978d407
-#   qa   527101283767  ..._8c7f139e431625e0
-#   prod 937464026810  ..._837df2a43495aaf1
-# Read back from \`aws iam list-roles\` on 2026-08-24. Never copy one from another
-# cluster's file.
+# ⚠️ THE SUFFIX IS PER-ACCOUNT. The permission set usx-on-prem-admins is provisioned
+# to dev, QA and prod alike, but AWS generates a DIFFERENT suffix in each account.
+# Never copy this line from another cluster's file — read the real one back:
+#   aws iam list-roles --profile <profile-for-this-account> \\
+#     --query \"Roles[?starts_with(RoleName,'AWSReservedSSO_usx-on-prem-admins')].Arn\"
+# The other clusters' account ids are deliberately NOT listed here:
+# scripts/check-foreign-cluster-ids.sh treats any foreign account id on a branch as
+# a defect, and a table of them is how the wrong one gets copied.
 #
 # ⚠️ NEVER hand-edit this on a cluster where it is the only path in. It is the
 # highest-blast-radius object in the cluster; a malformed edit locks everyone out.
