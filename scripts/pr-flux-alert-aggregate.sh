@@ -118,12 +118,15 @@ for kind in KINDS:
         die(f"{kind}: summary annotation appears {n} times, expected exactly 1")
     al = al.replace(old, new, 1); changed_ann += 1
 
-note3 = ('# 2026-08-24, second correction: the Flux rules match ready!="True", NOT\n'
+note3 = ('# \u26a0\ufe0f 2026-08-24, second correction: the Flux rules match ready!="True", NOT\n'
          '# ready="False". A Kustomization whose health check times out cycles Ready\n'
          '# between False and Unknown on roughly every scrape. Measured on op-dev over\n'
          '# 60 minutes for flux-system/risingwave: True 0 samples, False 59, Unknown 61\n'
-         '# -- one object alternating, never True. wiz-sensor fired correctly only\n'
-         '# because it is STALLED and its condition sits still. INFRA-1657.\n')
+         '# \u2014 one object alternating, never True. Under ready="False" the series breaks\n'
+         '# on every flip, activeAt resets, and the 10m window never completes: it sat\n'
+         '# `pending` for over an hour on something broken for six days. wiz-sensor\n'
+         '# fired correctly only because it is STALLED and its condition sits still.\n'
+         '# ready!="True" covers False and Unknown and stays continuous. INFRA-1657.\n')
 
 note4 = ('# 2026-08-24, third correction: the expressions aggregate with max by(). An\n'
          '# alert instance is identified by the LABEL SET of the output, and `ready`\n'
@@ -143,8 +146,12 @@ note4 = ('# 2026-08-24, third correction: the expressions aggregate with max by(
          '# correctly, because kube_pod_* carries a real one. INFRA-1657.\n')
 
 anchor = "apiVersion: monitoring.coreos.com/v1"
-for nt in (note3, note4):
-    if nt not in al:
+# Match on the DISTINGUISHING PHRASE, not the whole block. op-dev already
+# carries the second-correction note from part three, but with a leading emoji
+# and a different closing sentence -- a byte-for-byte comparison missed it and
+# appended a near-duplicate paragraph saying the same thing in other words.
+for phrase, nt in (("second correction", note3), ("third correction", note4)):
+    if phrase not in al:
         al = al.replace(anchor, nt + anchor, 1)
 
 open(p, "w", encoding="utf-8").write(al)
