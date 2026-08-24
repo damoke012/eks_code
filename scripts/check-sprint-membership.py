@@ -29,22 +29,39 @@ SID = int(nums[0])
 
 def main():
     m.preflight()
-    keys, start = [], 0
+    keys, rows, start = [], [], 0
     while True:
-        q = urllib.parse.urlencode({"fields": "summary,status", "maxResults": 100, "startAt": start})
+        q = urllib.parse.urlencode({"fields": "summary,status,assignee,updated,issuetype",
+                                    "maxResults": 100, "startAt": start})
         s, body = m.api("GET", f"/rest/agile/1.0/sprint/{SID}/issue?{q}")
         if s != 200:
             sys.exit(f"!! sprint {SID}: HTTP {s} {body}")
         issues = body.get("issues", [])
         keys.extend(i["key"] for i in issues)
+        rows.extend(issues)
         start += len(issues)
         if start >= body.get("total", 0) or not issues:
             break
 
     print(f"sprint {SID} contains {len(keys)} issues\n")
     if not want:
-        for k in sorted(keys, key=lambda x: int(x.split("-")[1])):
-            print(f"  {k}")
+        def cat(i):
+            return ((i["fields"].get("status") or {}).get("statusCategory") or {}).get("key", "?")
+        groups = {}
+        for i in rows:
+            groups.setdefault(cat(i), []).append(i)
+        for g, label in (("indeterminate", "IN PROGRESS"), ("new", "TO DO"), ("done", "DONE")):
+            items = groups.get(g, [])
+            if not items:
+                continue
+            print(f"-- {label} ({len(items)}) " + "-" * 52)
+            for i in sorted(items, key=lambda x: int(x["key"].split("-")[1])):
+                f = i["fields"]
+                who = (f.get("assignee") or {}).get("displayName", "unassigned")
+                print(f"  {i['key']:<12} {f.get('status',{}).get('name','?'):<12} "
+                      f"{who.split()[0][:10]:<10} {(f.get('updated') or '')[:10]}  "
+                      f"{f.get('summary','')[:62]}")
+            print()
         return 0
 
     missing = [k for k in want if k not in keys]
