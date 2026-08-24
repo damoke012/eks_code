@@ -71,8 +71,13 @@ al = open(p, encoding="utf-8").read()
 def die(m):
     print(f"!! {m}", file=sys.stderr); sys.exit(1)
 
-if 'gotk_reconcile_condition' in al:
-    die("this branch still has gotk_reconcile_condition — run pr-ksm-flux-crs.sh first")
+# Check EXPRESSIONS, not the whole file. The previous PR added a comment block
+# explaining that gotk_reconcile_condition is no longer used — a naive substring
+# search matches that comment and refuses a branch that is already correct.
+# Which is exactly what it did on op-dev the first time this ran.
+code = "\n".join(l for l in al.splitlines() if not l.lstrip().startswith("#"))
+if 'gotk_reconcile_condition' in code:
+    die("this branch still has gotk_reconcile_condition in a rule — run pr-ksm-flux-crs.sh first")
 
 pairs = []
 for kind in ("Kustomization", "HelmRelease", "GitRepository"):
