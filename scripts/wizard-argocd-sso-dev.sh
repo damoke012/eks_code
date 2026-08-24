@@ -192,7 +192,24 @@ ARGOCD_URL="https://argocd.op-dev.usxpress.io"
 CALLBACK="$ARGOCD_URL/api/dex/callback"
 GROUP="onprem-platform-admins"
 
+# Every aws call is pinned to an explicit profile (CLAUDE.md rule 2). Without it
+# the calls used the DEFAULT profile, which has no credentials -- so preflight
+# reported "no Identity Center instance reachable" while the same command with
+# --profile usx-dev returned it instantly. An unpinned aws call is a bug even
+# when it works.
+PROFILE="${PROFILE:-${AWS_PROFILE:-}}"
+if [[ -z "$PROFILE" ]]; then
+  printf '  Set the AWS profile first, explicitly:\n\n'
+  printf '    PROFILE=usx-dev %s\n\n' "$0"
+  printf '  Identity Center lives in the management account, so the profile that\n'
+  printf '  can CREATE the application is probably not usx-dev. Use the profile\n'
+  printf '  for account 660075424663 with an admin permission set.\n'
+  exit 2
+fi
+AWS() { aws --profile "$PROFILE" "$@"; }
+
 banner "Argo CD SSO on op-usxpress-dev — AWS Identity Center (SAML via Dex)"
+say "  AWS profile: $PROFILE"
 
 # ── 1 ─────────────────────────────────────────────────────────────────────
 stage "Preflight — can you actually do this?"
@@ -213,7 +230,7 @@ say "Locating the Identity Center instance. sso-admin only answers in the"
 say "MANAGEMENT account, so AccessDenied here means you are not on it yet."
 IDC_REGION=""; IDC_ARN=""; IDC_STORE=""; IDC_OWNER=""
 for r in us-east-1 us-east-2; do
-  out=$(aws sso-admin list-instances --region "$r" \
+  out=$(AWS sso-admin list-instances --region "$r" \
         --query 'Instances[0].[InstanceArn,IdentityStoreId,OwnerAccountId]' \
         --output text 2>&1) || true
   case "$out" in
@@ -243,8 +260,8 @@ fi
 say ""
 say "Instance found. Now testing whether you can ADMINISTER it, which is a"
 say "different question -- list-instances answers from member accounts too."
-WHOAMI=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "?")
-probe=$(aws sso-admin list-applications --instance-arn "$IDC_ARN" \
+WHOAMI=$(AWS sts get-caller-identity --query Account --output text 2>/dev/null || echo "?")
+probe=$(AWS sso-admin list-applications --instance-arn "$IDC_ARN" \
         --region "$IDC_REGION" --max-results 1 --output text 2>&1) || true
 case "$probe" in
   *AccessDenied*|*not\ authorized*|*UnauthorizedException*)
@@ -271,7 +288,7 @@ write_env IDC_IDENTITY_STORE_ID "$IDC_STORE"
 
 say ""
 say "Checking the group exists before you assign it at stage 4:"
-gid=$(aws identitystore list-groups --identity-store-id "$IDC_STORE" \
+gid=$(AWS identitystore list-groups --identity-store-id "$IDC_STORE" \
         --region "$IDC_REGION" \
         --query "Groups[?DisplayName=='$GROUP'].GroupId" --output text 2>&1) || true
 case "$gid" in
