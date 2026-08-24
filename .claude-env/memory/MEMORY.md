@@ -24,7 +24,7 @@
 - [Route every prompt through skills](route-every-prompt-through-skills.md) — check the router every turn; the misses are always mid-flow
 - [No AI attribution in git](no-ai-attribution-in-git.md) — never add "Generated with Claude Code" to PR bodies or Co-Authored-By trailers to commits
 - [Shared ECR registry posture](ecr-shared-registry-posture.md) — 515/517 repos grant org-wide push, no registry policy; on-prem safe only via digest pinning; EKS unverified (INFRA-1655)
-- [Adjacent-step green signals](adjacent-step-green-signals.md) — the recurring family: a true success report about the step NEXT to the one that matters; 10 instances, only executable checks catch it
+- [Adjacent-step green signals](adjacent-step-green-signals.md) — the recurring family: a true success report about the step NEXT to the one that matters; 17 instances, including checks that share the defect they test for
 - [ESO SecretSynced ≠ valid content](eso-secretsynced-not-content-check.md) — green ExternalSecret proves the sync ran, not that the value works; bit us on Wiz + QA etcd-backup
 - [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
 - [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod
@@ -33,3 +33,4 @@
 - [Pod env secret resolution](pod-env-secret-resolution.md) — secretKeyRef env resolves at POD creation; container restarts replay the old value for months
 - [QA postgres password drift](qa-postgres-password-drift.md) — initdb 08-11, secret rotated 08-12, DB never learned it; fixed 08-20, meta pod still to recreate
 - [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring
+- [Alerts reach nobody on-prem](onprem-alerts-not-delivered.md) — dev: 40 rules, 54 firing, no Alertmanager; Flux rules were dead for FOUR reasons in series, fixed dev+QA 2026-08-24, prod pending
