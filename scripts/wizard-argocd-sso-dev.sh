@@ -208,11 +208,56 @@ if curl -sS -o /dev/null -w '  HTTP %{http_code}\n' --max-time 10 \
 else
   say "  ${YELLOW}Could not reach it. Corp VPN? Then re-run.${RESET}"
 fi
-confirm "Do you have Identity Center admin in the management account?"
+say ""
+say "Locating the Identity Center instance. sso-admin only answers in the"
+say "MANAGEMENT account, so AccessDenied here means you are not on it yet."
+IDC_REGION=""; IDC_ARN=""; IDC_STORE=""; IDC_OWNER=""
+for r in us-east-1 us-east-2; do
+  out=$(aws sso-admin list-instances --region "$r" \
+        --query 'Instances[0].[InstanceArn,IdentityStoreId,OwnerAccountId]' \
+        --output text 2>&1) || true
+  case "$out" in
+    arn:aws:sso*) IDC_REGION="$r"
+                  IDC_ARN=$(printf '%s' "$out" | awk '{print $1}')
+                  IDC_STORE=$(printf '%s' "$out" | awk '{print $2}')
+                  IDC_OWNER=$(printf '%s' "$out" | awk '{print $3}')
+                  break ;;
+    *) say "  $r: $(printf '%s' "$out" | head -1 | cut -c1-90)" ;;
+  esac
+done
+if [[ -z "$IDC_REGION" ]]; then
+  warn "No Identity Center instance reachable with your current credentials."
+  say ""
+  say "Sign in to the MANAGEMENT account with an admin permission set first:"
+  say "  https://usxpress.awsapps.com/start"
+  say "Then export the right profile and re-run this wizard. Do not proceed by"
+  say "clicking around the console -- if sso-admin cannot see the instance, the"
+  say "application you create will be in the wrong place or not creatable at all."
+  exit 1
+fi
+say ""
+say "  ${GREEN}region ${RESET}$IDC_REGION"
+say "  ${GREEN}owner  ${RESET}$IDC_OWNER"
+say "  ${GREEN}store  ${RESET}$IDC_STORE"
+write_env IDC_REGION "$IDC_REGION"
+write_env IDC_IDENTITY_STORE_ID "$IDC_STORE"
+
+say ""
+say "Checking the group exists before you assign it at stage 4:"
+gid=$(aws identitystore list-groups --identity-store-id "$IDC_STORE" \
+        --region "$IDC_REGION" \
+        --query "Groups[?DisplayName=='$GROUP'].GroupId" --output text 2>&1) || true
+case "$gid" in
+  ""|*error*|*Denied*) warn "Could not confirm '$GROUP' exists: $(printf '%s' "$gid" | head -1 | cut -c1-70)"
+                       say "  If that group does not exist, stage 4 has nothing to assign and"
+                       say "  configs.rbac maps a group nobody is in." ;;
+  *) say "  ${GREEN}$GROUP${RESET} -> $gid"; write_env IDC_GROUP_ID "$gid" ;;
+esac
+confirm "Continue?"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
 stage "Create the SAML application"
-open_url "https://console.aws.amazon.com/singlesignon/home#/applications"
+open_url "https://${IDC_REGION}.console.aws.amazon.com/singlesignon/home?region=${IDC_REGION}#!/applications"
 step "Applications → Add application → 'I have an application I want to set up'"
 step "→ SAML 2.0 → Next."
 step "Display name: Argo CD (op-usxpress-dev)"
