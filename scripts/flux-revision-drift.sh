@@ -16,6 +16,12 @@
 # dependency as the blocker. Nothing else would have surfaced that.
 #
 #   scripts/flux-revision-drift.sh                       # sweep all three
+#   scripts/flux-revision-drift.sh --cluster op-dev --settle 90
+#
+# NOTE: "revision is not up to date" is Flux WAITING for a dependency to reach the
+# new revision -- normal propagation. "is not ready" naming an already-current
+# dependency is the stale-message freeze. Use --settle right after a source change
+# so propagation is not reported as a problem.
 #   scripts/flux-revision-drift.sh --cluster op-dev
 #   scripts/flux-revision-drift.sh --cluster op-prod --print-fix
 #
@@ -23,12 +29,13 @@
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-onprem-ctx.sh"
 
-CLUSTER=""; NS="flux-system"; PRINT_FIX="no"
+CLUSTER=""; NS="flux-system"; PRINT_FIX="no"; SETTLE="${SETTLE:-0}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --cluster) CLUSTER="$2"; shift 2 ;;
     --namespace) NS="$2"; shift 2 ;;
     --print-fix) PRINT_FIX="yes"; shift ;;
+    --settle) SETTLE="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -84,6 +91,42 @@ DRIFTED=$(printf '%s' "$REPORT" | jq '[.[] | select(.drift and (.suspended|not))
 printf '%s' "$REPORT" | jq -r '
   .[] | select(.drift and (.suspended|not))
   | "  \(.name)\n      applied : \(.applied)\n      serving : \(.serving)\n      ready   : \(.ready)   \(.msg)"'
+
+# Propagation IS drift. Immediately after the source moves, every Kustomization
+# below the roots is legitimately behind and says "revision is not up to date" --
+# Flux waiting, working correctly. --settle re-reads after a pause and reports
+# only what is STILL behind, which is the difference between "moving" and "stuck".
+if [ "$DRIFTED" -gt 0 ] && [ "$SETTLE" -gt 0 ]; then
+  echo
+  echo "   $DRIFTED behind; settling for ${SETTLE}s before deciding..."
+  sleep "$SETTLE"
+  K -n "$NS" get kustomizations -o json > "$TMP/ks.json"
+  K get gitrepositories,ocirepositories,buckets -A -o json > "$TMP/src.json" 2>/dev/null \
+    || echo '{"items":[]}' > "$TMP/src.json"
+  REPORT=$(jq -n --slurpfile ksf "$TMP/ks.json" --slurpfile srcf "$TMP/src.json" --arg ns "$NS" '
+    ($ksf[0]) as $ks | ($srcf[0]) as $src
+    | (($src.items // []) | map({ key: (.kind + "/" + .metadata.namespace + "/" + .metadata.name),
+                                  value: (.status.artifact.revision // "<no artifact>") })
+       | from_entries) as $rev
+    | $ks.items
+    | map({ name: .metadata.name,
+        srcKey: ((.spec.sourceRef.kind // "GitRepository") + "/"
+                 + (.spec.sourceRef.namespace // $ns) + "/" + .spec.sourceRef.name),
+        applied: (.status.lastAppliedRevision // "<never applied>"),
+        ready: ((.status.conditions // []) | map(select(.type=="Ready")) | (.[0].status // "?")),
+        msg:   ((.status.conditions // []) | map(select(.type=="Ready")) | (.[0].message // "")),
+        deps:  ((.spec.dependsOn // []) | map(.name)),
+        suspended: (.spec.suspend // false) })
+    | map(. + { serving: ($rev[.srcKey] // "<unknown source>") })
+    | map(. + { drift: (.applied != .serving) })')
+  WAS=$DRIFTED
+  DRIFTED=$(printf '%s' "$REPORT" | jq '[.[] | select(.drift and (.suspended|not))] | length')
+  echo "   after ${SETTLE}s: $WAS -> $DRIFTED still behind"
+  echo
+  printf '%s' "$REPORT" | jq -r '
+    .[] | select(.drift and (.suspended|not))
+    | "  \(.name)\n      applied : \(.applied)\n      serving : \(.serving)\n      ready   : \(.ready)   \(.msg)"'
+fi
 
 echo
 if [ "$DRIFTED" -eq 0 ]; then
