@@ -22,11 +22,25 @@ loaded. **Nobody can log in yet** — the apiserver `--authentication-token-webh
 flag is Talos machine config in `iaac-talos`, promoted through Octopus, and still to do. Prod
 manifests are one command: `scripts/pr-sso-dev-prod.sh --only op-prod`.
 
-⚠️ **The flag path is `/var/aws-iam-authenticator/kubeconfig.yaml`.** The init container's log
-says `/etc/kubernetes/aws-iam-authenticator/kubeconfig.yaml` — upstream's generic advice, WRONG
-on Talos, where /etc/kubernetes is OS-managed and the hostPath mount is
-/var/lib/aws-iam-authenticator. The server container prints the correct one. An apiserver
-pointed at a missing file will not start.
+⚠️ **THREE paths, only one right.** The apiserver flag takes the **HOST** path
+`/var/lib/aws-iam-authenticator/kubeconfig.yaml`. The init container's log says
+`/etc/kubernetes/...` (upstream generic, wrong on Talos — OS-managed). The server container's
+log says `/var/aws-iam-authenticator/...` (where it wrote the file INSIDE its container). Neither
+is the flag. Confirmed in `iaac-talos` `feat/aws-iam-authenticator`:
+`"authentication-token-webhook-config-file" = "/var/lib/aws-iam-authenticator/kubeconfig.yaml"`
+with `# HOST path. The authenticator's own log prints the in-container path; not this one.`
+An apiserver pointed at a missing file will not start.
+
+⚠️ **QA's apiserver flag is on an UNMERGED branch.** `variant-inc/iaac-talos`
+`feat/aws-iam-authenticator` (head `ca5479f`) holds the whole Talos half —
+`apiserver_extra_args` + `apiserver_extra_volumes` in
+`deploy/terraform/modules/talos/main.tf` gated on `var.enable_aws_iam_authenticator`, plus a
+line in `deploy/terraform/envs/qa.tfvars`. It is NOT merged to master.
+**Redeploying op-usxpress-qa from master would remove its SSO, silently.** Finishing INFRA-1638
+means merging that branch and adding the flag to dev's and prod's tfvars — not writing anything
+new. The module deliberately assembles ONE apiServer patch from a merged map: two patches both
+setting extraArgs would rely on Talos merging rather than replacing, and if it replaces, IRSA
+silently breaks.
 
 ⚠️ **One permission set, three different ARNs.** `usx-on-prem-admins` is provisioned to all
 three accounts and AWS generates a DIFFERENT suffix in each: dev `b7447c115978d407`, qa
