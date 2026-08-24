@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # INFRA-1639 step 3 -- the Identity Center side of Argo CD SSO, as far as the API allows.
 #
-# WHAT THE CLI CAN DO (this script): create the custom-saml application, require
-# assignment, assign the usx-cloud-admin GROUP, and read back what exists.
+# WHAT THE CLI CAN DO (this script): require assignment, assign the usx-cloud-admin
+# GROUP to an application the CONSOLE created, and read back what exists.
 #
 # WHAT THE CLI CANNOT DO -- verified 2026-08-24 against aws-cli 2.33.19:
+#   * CREATE the application. create-application refuses the SAML provider outright:
+#       ValidationException: The application provider with arn
+#       'arn:aws:sso::aws:applicationProvider/app-50e590700beb5208' is not supported
+#       for this action.
+#     (note it resolves custom-saml to an internal id before refusing). That API is
+#     for OAuth / trusted-identity-propagation providers only -- `custom` is OAUTH,
+#     `custom-saml` is not creatable.
 #   * ACS URL / SAML audience  -- update-application carries only Name, Description,
 #     Status, PortalOptions. put-application-authentication-method's union has ONLY
 #     `Iam` (no `Saml`); the skeleton is not truncating -- put-application-grant
@@ -19,7 +26,7 @@
 # with an error about the assertion, not about the URL.
 #
 #   PROFILE=usx-mgmt scripts/idc-argocd-app.sh              # dry run
-#   PROFILE=usx-mgmt scripts/idc-argocd-app.sh --go         # create + assign
+#   PROFILE=usx-mgmt scripts/idc-argocd-app.sh --assign     # assign the group (app must exist)
 #   PROFILE=usx-mgmt scripts/idc-argocd-app.sh --verify     # read back the console work
 set -euo pipefail
 
@@ -35,7 +42,7 @@ MODE="dry"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --go) MODE="go"; shift ;;
+    --go|--assign) MODE="assign"; shift ;;
     --verify) MODE="verify"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -67,59 +74,56 @@ if [ "$MODE" = "dry" ]; then
   echo
   if [ -n "$APP_ARN" ] && [ "$APP_ARN" != "None" ]; then
     echo "   application EXISTS: $APP_ARN"
-    echo "   --go would be a no-op for creation."
+    echo "   --assign would set assignment-required and assign $GROUP."
   else
-    echo "   application does NOT exist. --go would run:"
+    echo "   application does NOT exist, and the CLI CANNOT create it."
+    echo "   create-application refuses the SAML provider:"
+    echo "     ValidationException: The application provider with arn"
+    echo "     'arn:aws:sso::aws:applicationProvider/app-50e590700beb5208' is not"
+    echo "     supported for this action."
+    echo "   That API covers OAuth / trusted-identity-propagation providers only."
   fi
   cat <<PLAN
 
-  aws sso-admin create-application --profile $PROFILE --region $REGION \\
-    --instance-arn $INSTANCE_ARN \\
-    --application-provider-arn arn:aws:sso::aws:applicationProvider/custom-saml \\
-    --name "$APP_NAME" \\
-    --description "Argo CD on op-usxpress-dev. INFRA-1639." \\
-    --portal-options '{"SignInOptions":{"Origin":"APPLICATION","ApplicationUrl":"$ARGOCD_URL"},"Visibility":"ENABLED"}' \\
-    --status ENABLED
+  IN THE CONSOLE (Identity Center -> Applications -> Customer managed):
 
-  aws sso-admin put-application-assignment-configuration --profile $PROFILE --region $REGION \\
-    --application-arn <created arn> --assignment-required
+    1. Add application -> "I have an application I want to set up"
+       -> SAML 2.0 -> Next
+       Display name: $APP_NAME
 
-  aws sso-admin create-application-assignment --profile $PROFILE --region $REGION \\
-    --application-arn <created arn> --principal-id $GROUP_ID --principal-type GROUP
+    2. Application metadata -> "Manually type your metadata values":
+         Application ACS URL        $CALLBACK
+         Application SAML audience  $CALLBACK
+       Identical, no trailing slash. Dex uses the callback as entityIssuer, so a
+       mismatch fails at login with an error about the assertion, not the URL.
+
+    3. Actions -> Edit attribute mappings:
+         Subject  \${user:email}   emailAddress
+         email    \${user:email}   basic
+         groups   \${user:groups}  basic
+       If groups cannot be mapped to NAMES, stop and say so -- configs.rbac maps
+       "$GROUP" and GUIDs will authenticate fine and authorise nothing.
+
+    4. Download the IAM Identity Center SAML metadata file (XML).
+
+  THEN, back on the CLI:
+
+    PROFILE=$PROFILE $0 --assign     # assignment-required + assign $GROUP
+    PROFILE=$PROFILE $0 --verify
 
 PLAN
-  echo "  Then, IN THE CONSOLE (no API exists for these):"
-  echo "    1. Application metadata -> 'Manually type your metadata values':"
-  echo "         Application ACS URL        $CALLBACK"
-  echo "         Application SAML audience  $CALLBACK"
-  echo "       Identical, no trailing slash. Dex uses the callback as entityIssuer."
-  echo "    2. Actions -> Edit attribute mappings:"
-  echo '         Subject  ${user:email}   emailAddress'
-  echo '         email    ${user:email}   basic'
-  echo '         groups   ${user:groups}  basic'
-  echo "    3. Download the IAM Identity Center SAML metadata file (XML)."
-  echo
-  echo "  Then: PROFILE=$PROFILE $0 --verify"
   exit 0
 fi
 
-if [ "$MODE" = "go" ]; then
-  if [ -n "$APP_ARN" ] && [ "$APP_ARN" != "None" ]; then
-    echo "   application already exists, not creating: $APP_ARN"
-  else
-    echo "   creating application..."
-    APP_ARN=$(AWS sso-admin create-application \
-      --instance-arn "$INSTANCE_ARN" \
-      --application-provider-arn arn:aws:sso::aws:applicationProvider/custom-saml \
-      --name "$APP_NAME" \
-      --description "Argo CD on op-usxpress-dev. INFRA-1639." \
-      --portal-options "{\"SignInOptions\":{\"Origin\":\"APPLICATION\",\"ApplicationUrl\":\"$ARGOCD_URL\"},\"Visibility\":\"ENABLED\"}" \
-      --status ENABLED --query ApplicationArn --output text)
-    echo "   created: $APP_ARN"
-  fi
+if [ "$MODE" = "assign" ]; then
+  [ -n "$APP_ARN" ] && [ "$APP_ARN" != "None" ] || {
+    echo "!! no application named '$APP_NAME'." >&2
+    echo "   The CLI cannot create it -- create it in the console first (run with" >&2
+    echo "   no arguments to print the exact steps)." >&2
+    exit 1; }
+  echo "   application: $APP_ARN"
 
-  # Assignment required, so only the assigned group can reach it. Without this the
-  # application is visible to everyone in the directory.
+  # Assignment required, so the app is not visible to the whole directory.
   AWS sso-admin put-application-assignment-configuration \
     --application-arn "$APP_ARN" --assignment-required
   echo "   assignment required: yes"
@@ -133,7 +137,7 @@ if [ "$MODE" = "go" ]; then
     echo "   assigned $GROUP"
   fi
   echo
-  echo "   NOW THE CONSOLE. Re-run with --dry to reprint the exact values, or see above."
+  echo "   Next: PROFILE=$PROFILE $0 --verify"
   exit 0
 fi
 
