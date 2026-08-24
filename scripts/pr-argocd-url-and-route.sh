@@ -57,6 +57,12 @@ for BR in $BRANCHES; do
   echo
   echo "################ $BR -> $HOST ################"
   git checkout -q -B "$TOPIC" "origin/$BR"
+  # CLEAN SLATE. `checkout -B` carries local modifications across rather than
+  # discarding them, so an aborted run leaves its own edits in the worktree and
+  # the next run finds them, takes every "already present" path, and asserts
+  # against its own output. Scoped to the one directory this script writes.
+  git checkout -q "origin/$BR" -- infrastructure/argocd
+  git clean -qfd infrastructure/argocd
 
   # ---- 1. configs.cm.url (both branches) ----------------------------------
   HR="infrastructure/argocd/helmrelease.yaml"
@@ -174,8 +180,10 @@ VSEOF
     KUS="infrastructure/argocd/kustomization.yaml"
     [ -f "$KUS" ] || { echo "!! $KUS missing" >&2; exit 1; }
     BEFORE=$(python3 -c 'import sys,yaml;print(len(yaml.safe_load(open(sys.argv[1]))["resources"]))' "$KUS")
+    EXPECT=$((BEFORE + 1))
     if grep -q 'virtualservice-argocd.yaml' "$KUS"; then
       echo "   kustomization already lists it"
+      EXPECT=$BEFORE
     else
       # Insert after the LAST existing resource entry, not at EOF. Appending
       # put it below a trailing comment block about AppProjects -- still a valid
@@ -193,8 +201,10 @@ open(path, "w").writelines(lines)
 PY0
     fi
     AFTER=$(python3 -c 'import sys,yaml;print(len(yaml.safe_load(open(sys.argv[1]))["resources"]))' "$KUS")
-    [ "$AFTER" -eq "$((BEFORE + 1))" ] \
-      || { echo "!! kustomization resources went $BEFORE -> $AFTER, expected +1" >&2; exit 1; }
+    [ "$AFTER" -eq "$EXPECT" ] \
+      || { echo "!! kustomization resources went $BEFORE -> $AFTER, expected $EXPECT" >&2; exit 1; }
+    grep -q 'virtualservice-argocd.yaml' "$KUS" \
+      || { echo "!! virtualservice-argocd.yaml is not in $KUS" >&2; exit 1; }
     echo "   kustomization:   $BEFORE -> $AFTER resources"
 
     python3 - "$VS" "$HOST" "$TARGETS" <<'PY3'
