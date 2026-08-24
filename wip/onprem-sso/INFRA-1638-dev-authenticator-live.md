@@ -101,8 +101,25 @@ this. It is inert and correct-looking, which is the exact combination worth dist
    `sso:<email>` in group `onprem-platform-admins`. A wrong ARN does **not** error — the caller
    becomes `system:anonymous` and everything returns `forbidden`, which reads like an RBAC bug.
 3. **Keep the x509 admin kubeconfig open** as break-glass throughout.
-4. **prod**: `scripts/pr-sso-dev-prod.sh --only op-prod`. Confirm
-   `scripts/breakglass-prod-kubeconfig.sh` produces a working kubeconfig *before* the flag lands.
+4. **prod manifests**: ✅ raised — platform PR **#125**, cluster PR **#37**, both OPEN and
+   verified (8 files + 1; account `937464026810`, suffix `837df2a43495aaf1`, cluster-id
+   `op-usxpress-prod` in both the init arg and `--cluster-id`). Merge #125 first.
+
+   ⚠️ **prod's apiserver flag has no known home.** `op-usxpress-prod` appears NOWHERE in
+   `variant-inc/iaac-talos` — not in `deploy/terraform/envs/` (only `dev.tfvars` and
+   `qa.tfvars` exist), not in any `.tf`, and `git log --all -S 'op-usxpress-prod' -- deploy/`
+   returns nothing on any branch. Prod was stood up in INFRA-1589/1621 and its platform stack
+   fully reconciled 2026-07-29, so something generated its machine config.
+
+   **Most likely** — and this is a HYPOTHESIS, not a finding — prod's variables are supplied by
+   Octopus rather than by a repo tfvars file, which would match [[onprem-deploy-via-octopus]]
+   and [[octopus-green-but-no-apply]] (`TfApply=false` everywhere but production). **Verify in
+   Octopus before acting on it.** Do not add a `prod.tfvars` on the assumption that the pattern
+   matches dev and QA.
+
+   Confirm `scripts/breakglass-prod-kubeconfig.sh` produces a working kubeconfig *before* the
+   flag lands on prod. The `usx-prod` profile has a live SSO session as of 2026-08-24, so this
+   is checkable now.
 5. **QA reconciliation, later**: QA maps `op-qa-platform-admin`, dev and prod map
    `usx-on-prem-admins`. Add the latter to QA's `aws-auth` as an **additional** entry — never
    replace the only working path into a cluster.
@@ -114,6 +131,8 @@ binding, and writes its webhook kubeconfig to `/var/aws-iam-authenticator/kubeco
 **Tested and killed:** "QA's SSO was hand-applied so this is not GitOps" — wrong, QA is wired in
 `iaac-talos-flux-cluster` at `clusters/op-usxpress-qa/flux-system/infra.yaml:751`; the grep that
 suggested otherwise was run against the wrong repository.
+**Not answered:** where prod's Talos machine config lives — it is not in `iaac-talos` on any
+branch. Until that is known, prod's apiserver flag cannot be written, only guessed at.
 **Traps:** THREE different paths appear and only the host one is right for the flag —
 `/etc/kubernetes/...` (init, generic), `/var/aws-iam-authenticator/...` (server, in-container),
 `/var/lib/aws-iam-authenticator/...` (host, correct); QA's apiserver flag lives on an UNMERGED
