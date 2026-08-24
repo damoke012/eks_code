@@ -47,13 +47,16 @@ REF="infrastructure/argocd-config/virtualservice-argocd.yaml"
 [ -f "$REF" ] || { echo "!! $REF missing on $BR -- no verified route to copy targets from" >&2; exit 1; }
 
 # The reference must belong to THIS cluster, or we are copying the same mistake.
-RHOST=$(grep -oE '[a-z0-9.-]+\.usxpress\.io' "$REF" | head -1)
+# Read spec.hosts, do NOT grep. Grepping the first hostname-shaped string matched
+# "*.op-qa.usxpress.io" inside a COMMENT on 2026-08-24. A file whose comment says
+# op-qa while its spec claims a dev host would have passed -- the exact case this
+# check exists to catch.
+RHOST=$(python3 -c 'import sys,yaml;print(yaml.safe_load(open(sys.argv[1]))["spec"]["hosts"][0])' "$REF")
 case "$RHOST" in
   *.op-qa.usxpress.io) echo "   reference route: $RHOST (belongs to $BR)" ;;
   *) echo "!! reference $REF claims '$RHOST', not .op-qa. Refusing." >&2; exit 1 ;;
 esac
-TARGETS=$(grep -oE 'external-dns\.alpha\.kubernetes\.io/target: *"[^"]+"' "$REF" \
-          | sed 's/.*"\(.*\)"/\1/')
+TARGETS=$(python3 -c 'import sys,yaml;print(yaml.safe_load(open(sys.argv[1]))["metadata"]["annotations"]["external-dns.alpha.kubernetes.io/target"])' "$REF")
 [ -n "$TARGETS" ] || { echo "!! no external-dns target on $REF" >&2; exit 1; }
 echo "   qa targets:      $TARGETS"
 
