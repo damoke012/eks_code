@@ -134,10 +134,18 @@ if [ "$MODE" = "assign" ]; then
     echo "   status: $ST -> ENABLED"
   fi
 
-  # Assignment required, so the app is not visible to the whole directory.
-  AWS sso-admin put-application-assignment-configuration \
-    --application-arn "$APP_ARN" --assignment-required
-  echo "   assignment required: yes"
+  # Assignment required keeps the app off everyone's portal but the assigned group.
+  # SAML applications REFUSE put-application-assignment-configuration:
+  #   ValidationException: The application ... is not supported for this action.
+  # The console already defaults it to true, so read it and only complain if false.
+  REQ=$(AWS sso-admin get-application-assignment-configuration \
+          --application-arn "$APP_ARN" --query AssignmentRequired --output text 2>/dev/null || echo "?")
+  if [ "$REQ" = "True" ]; then
+    echo "   assignment required: True"
+  else
+    echo "   !! assignment required is '$REQ'. The API cannot set this on a SAML app;"
+    echo "      fix it in the console or the app is visible to the whole directory."
+  fi
 
   if AWS sso-admin list-application-assignments --application-arn "$APP_ARN" \
        --query "ApplicationAssignments[?PrincipalId=='$GROUP_ID']" --output text | grep -q .; then
@@ -174,9 +182,6 @@ AWS sso-admin list-application-assignments --application-arn "$APP_ARN" \
         --query DisplayName --output text 2>/dev/null || echo "?")
       printf '   %-6s %s  %s\n' "$ptype" "$pid" "$name"
     done
-echo
-echo "-- authentication methods (SAML config is NOT exposed here; empty is expected) --"
-AWS sso-admin list-application-authentication-methods --application-arn "$APP_ARN" --output json | jq -c .
 echo
 echo "!! The ACS URL, SAML audience and attribute mappings CANNOT be read back through"
 echo "   this API. Verify them by LOGGING IN -- that is the only check that exists:"
