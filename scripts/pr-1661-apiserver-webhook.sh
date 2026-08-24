@@ -119,17 +119,21 @@ N=$(grep -c "^${VAR} *= *true" deploy/terraform/envs/dev.tfvars)
                     git checkout -q -- . ; git checkout -q - 2>/dev/null; exit 1; }
 
 if command -v terraform >/dev/null; then
+  # WRITE, not just check. The branch's own qa.tfvars line is unaligned, and so is
+  # ours until fmt runs. Leaving it is a CI failure on a PR whose diff is supposed
+  # to be readable.
+  terraform fmt -recursive deploy/terraform >/dev/null 2>&1
   if terraform fmt -check -recursive deploy/terraform >/dev/null 2>&1; then
-    echo "   terraform fmt: ok"
+    echo "   terraform fmt: clean (fmt was applied if needed)"
   else
-    echo "   !! terraform fmt would reformat something — check before merging:"
+    echo "   !! terraform fmt still unhappy after writing:"
     terraform fmt -check -recursive deploy/terraform 2>&1 | sed 's/^/     /' | head
   fi
 else
-  echo "   (terraform not on PATH — fmt NOT checked)"
+  echo "   (terraform not on PATH — fmt NOT checked, and the branch is known unaligned)"
 fi
 
-git add -A deploy/terraform/envs/dev.tfvars
+git add -A deploy/terraform
 git commit -q -m "INFRA-1661: enable the apiserver webhook on op-usxpress-dev
 
 The DaemonSet, kube-system/aws-auth and the platform RBAC went live on
@@ -184,6 +188,19 @@ kube-apiserver **will not start** if the webhook config file is missing. The Dae
 ### Prod is not in this PR
 
 There is no \`envs/prod.tfvars\`, and \`op-usxpress-prod\` appears nowhere in this repository on any branch — \`git log --all -S 'op-usxpress-prod' -- deploy/\` returns nothing. Prod's authenticator is running (INFRA-1638) but there is no file here to set its flag in. **INFRA-1663** must answer where prod's machine config comes from first; the likely answer is Octopus variables, and that should be confirmed rather than assumed.
+
+### ⚠️ This PR is bigger than its title — read the whole diff
+
+Rebasing the branch brings **everything else on it** too. All of it has been running on op-usxpress-qa since 2026-07-28, so this brings master in line with reality rather than introducing anything new — but it should be reviewed, not waved through:
+
+| Change | Why it matters |
+|---|---|
+| `deploy.ps1` +91 lines | SM secret-wrapper seeding before the first `enable_irsa` apply, and a **two-pass Flux bootstrap** (CRDs must be Established before the CRs apply) plus seeding the `flux-system` git secret. Greenfield deploys behave differently after this. |
+| `octopus/bento-import.py` | **Removes a hardcoded password** from the repo and requires `BENTO_PASSWORD` from the environment. Good change; note it fails closed if the secret is missing. |
+| `.github/workflows/onboard-app.yaml` | Passes `BENTO_PASSWORD` through, paired with the above. |
+| `octopus/apply-bootstrap-perms.sh` | **Widens an IAM policy** from `role/iaac-octopus-worker-${CLUSTER_NAME}` to `role/*-${CLUSTER_NAME}` and `role/*-${CLUSTER_NAME}-*`. This is a permissions broadening on the bootstrap role and is the one item here that deserves a deliberate yes or no. |
+
+If any of that should land separately, say so and it can be split — but note that leaving it unmerged is what created INFRA-1662 in the first place.
 
 ### Acceptance
 
