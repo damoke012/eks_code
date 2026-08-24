@@ -123,6 +123,17 @@ if [ "$MODE" = "assign" ]; then
     exit 1; }
   echo "   application: $APP_ARN"
 
+  # A newly created application is INACTIVE. Status is one of the few things
+  # update-application does carry, so this need not be a console click.
+  ST=$(AWS sso-admin describe-application --application-arn "$APP_ARN" \
+         --query Status --output text)
+  if [ "$ST" = "ENABLED" ]; then
+    echo "   status: already ENABLED"
+  else
+    AWS sso-admin update-application --application-arn "$APP_ARN" --status ENABLED
+    echo "   status: $ST -> ENABLED"
+  fi
+
   # Assignment required, so the app is not visible to the whole directory.
   AWS sso-admin put-application-assignment-configuration \
     --application-arn "$APP_ARN" --assignment-required
