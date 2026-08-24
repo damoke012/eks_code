@@ -177,11 +177,20 @@ VSEOF
     if grep -q 'virtualservice-argocd.yaml' "$KUS"; then
       echo "   kustomization already lists it"
     else
-      # trailing newline first -- an append onto a file that lacks one lands
-      # inside the last line (a comment), which silently swallowed a whole
-      # resource on 2026-08-24.
-      tail -c1 "$KUS" | od -c | grep -q '\\n' || printf '\n' >> "$KUS"
-      printf '  - virtualservice-argocd.yaml\n' >> "$KUS"
+      # Insert after the LAST existing resource entry, not at EOF. Appending
+      # put it below a trailing comment block about AppProjects -- still a valid
+      # sixth sequence item (comments do not break a YAML block sequence, and the
+      # parse check confirmed 6), but it read as though that comment described it.
+      python3 - "$KUS" <<'PY0'
+import sys
+path = sys.argv[1]
+lines = open(path).readlines()
+last = max(i for i, l in enumerate(lines) if l.startswith("  - ") and ".yaml" in l)
+if not lines[last].endswith("\n"):
+    lines[last] += "\n"
+lines.insert(last + 1, "  - virtualservice-argocd.yaml\n")
+open(path, "w").writelines(lines)
+PY0
     fi
     AFTER=$(python3 -c 'import sys,yaml;print(len(yaml.safe_load(open(sys.argv[1]))["resources"]))' "$KUS")
     [ "$AFTER" -eq "$((BEFORE + 1))" ] \
@@ -214,15 +223,23 @@ PY3
   git --no-pager diff --cached "origin/$BR"
   echo "-------- end --------"
 
-  if [ "$PUSH" = "yes" ]; then
+  # Commit unconditionally. A dry run that leaves the worktree dirty makes the
+  # NEXT branch's checkout fail -- which is why op-qa never ran on 2026-08-24.
+  # The commit sits on a local topic branch that -B recreates each run; only
+  # --push publishes anything.
+  if true; then
     git commit -q -m "INFRA-1639: give Argo CD a real URL on $BR
 
 configs.cm.url was never set, so it was the chart default
 https://argocd.example.com. Argo builds every link it emits, and its OIDC
 redirect_uri, from that value -- so no SSO provider can be configured until it
 is correct. Set to https://$HOST." || echo "   nothing to commit"
-    git push -q -u origin "$TOPIC" --force-with-lease
-    echo "   pushed $TOPIC"
+    if [ "$PUSH" = "yes" ]; then
+      git push -q -u origin "$TOPIC" --force-with-lease
+      echo "   pushed $TOPIC"
+    else
+      echo "   committed to local $TOPIC (not pushed)"
+    fi
   fi
   git checkout -q "$BR" 2>/dev/null || git checkout -q -
 done
