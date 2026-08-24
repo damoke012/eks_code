@@ -37,14 +37,19 @@ K() { kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" "$@"; }
 echo "== flux revision drift: $CLUSTER  ($ONPREM_ENDPOINT, node $ONPREM_NODE)"
 echo
 
-KS=$(K -n "$NS" get kustomizations -o json)
-SRC=$(K get gitrepositories,ocirepositories,buckets -A -o json 2>/dev/null || echo '{"items":[]}')
+# Via FILES, not --argjson. A cluster's worth of Kustomization JSON on the command
+# line exceeds ARG_MAX: "jq: Argument list too long", which reads like a jq bug.
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+K -n "$NS" get kustomizations -o json > "$TMP/ks.json"
+K get gitrepositories,ocirepositories,buckets -A -o json > "$TMP/src.json" 2>/dev/null \
+  || echo '{"items":[]}' > "$TMP/src.json"
 
 # Serve revision per source, keyed kind/namespace/name.
-REPORT=$(jq -n --argjson ks "$KS" --argjson src "$SRC" --arg ns "$NS" '
-  ($src.items // []) | map({ key: (.kind + "/" + .metadata.namespace + "/" + .metadata.name),
-                             value: (.status.artifact.revision // "<no artifact>") })
-  | from_entries as $rev
+REPORT=$(jq -n --slurpfile ksf "$TMP/ks.json" --slurpfile srcf "$TMP/src.json" --arg ns "$NS" '
+  ($ksf[0]) as $ks | ($srcf[0]) as $src
+  | (($src.items // []) | map({ key: (.kind + "/" + .metadata.namespace + "/" + .metadata.name),
+                                value: (.status.artifact.revision // "<no artifact>") })
+     | from_entries) as $rev
   | $ks.items
   | map({
       name: .metadata.name,
