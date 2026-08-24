@@ -48,8 +48,20 @@ for _i, _a in enumerate(sys.argv):
 
 MINE = "(assignee = currentUser() OR reporter = currentUser())"
 JQL_NO_SPRINT = f"project = INFRA AND sprint IS EMPTY AND {MINE} ORDER BY created ASC"
-JQL_STRANDED = (f"project = INFRA AND sprint IS NOT EMPTY AND sprint NOT IN openSprints() "
-                f"AND statusCategory != Done AND {MINE} ORDER BY created ASC")
+
+# ⚠️ 2026-08-24. The previous version asked JQL
+#     sprint IS NOT EMPTY AND sprint NOT IN openSprints()
+# and reported 14 tickets "stranded in a closed sprint". They were not. `sprint`
+# is a MULTI-VALUED field: an issue carried from Sprint 2 into Sprint 3 holds
+# [6088, 959] and matches `NOT IN openSprints()` forever, because it still has a
+# sprint that is not open. All 14 were already in Sprint 3 -- visible in the
+# board UI at the time -- and adding them was a no-op the sprint count proved
+# (34 before, 34 after).
+#
+# Membership is now computed as a DIFFERENCE against the sprint's own member
+# list, read from the agile API, which is the only unambiguous source. No JQL
+# predicate on `sprint` can answer "is this issue in sprint N" reliably.
+JQL_OPEN_MINE = f"project = INFRA AND statusCategory != Done AND {MINE} ORDER BY created ASC"
 
 
 def search(jql):
@@ -132,6 +144,23 @@ def sprints_table(sprints):
               f"{sp['_board']} / {sp.get('name','?')}", file=sys.stderr)
 
 
+def sprint_members(sid):
+    """Keys currently in the sprint, from the agile API. The ONLY reliable
+    answer to 'is this issue in sprint N' -- see the note on JQL_OPEN_MINE."""
+    keys, start = set(), 0
+    while True:
+        q = urllib.parse.urlencode({"fields": "summary", "maxResults": 100, "startAt": start})
+        s, body = m.api("GET", f"/rest/agile/1.0/sprint/{sid}/issue?{q}")
+        if s != 200:
+            print(f"!! could not read sprint {sid} membership (HTTP {s})", file=sys.stderr)
+            sys.exit(2)
+        issues = body.get("issues", [])
+        keys.update(i["key"] for i in issues)
+        start += len(issues)
+        if start >= body.get("total", 0) or not issues:
+            return keys
+
+
 def main():
     print(f"== find-sprintless-tickets  [{'GO' if GO else 'DRY RUN'}]\n")
     m.preflight()
@@ -145,18 +174,20 @@ def main():
     print(f"Target sprint: {sid} '{sname}' [{target.get('state')}]  "
           f"started {sstart or '(no start date)'}\n")
 
-    sources = [("stranded in a closed sprint", JQL_STRANDED)]
+    members = sprint_members(sid)
+    print(f"sprint {sid} currently holds {len(members)} issues\n")
+
+    sources = [("open, not in this sprint", JQL_OPEN_MINE)]
     if not STRANDED_ONLY:
-        sources.insert(0, ("no sprint", JQL_NO_SPRINT))
+        sources.insert(0, ("no sprint at all", JQL_NO_SPRINT))
     else:
         print("--stranded-only: ignoring never-sprinted backlog, which belongs in the backlog\n")
 
     rows, seen = [], set()
     for label, jql in sources:
-        found = [row(i) for i in search(jql)]
-        for f in found:
-            if f["key"] in seen:
-                continue
+        for f in (row(i) for i in search(jql)):
+            if f["key"] in seen or f["key"] in members:
+                continue                      # already in the target sprint
             seen.add(f["key"]); f["why"] = label; rows.append(f)
 
     if not rows:
