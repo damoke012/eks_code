@@ -86,8 +86,33 @@ printf '%s' "$J" | jq -r --arg ours "$OURS" '
 
 echo
 echo "-- instances, oldest first --"
+# Print the SUBJECT labels explicitly. `unique` collapsed namespace whenever it
+# matched kube-state-metrics' own, and the job/deployment/daemonset name -- the
+# only label that says WHICH thing failed -- was not printed at all, so
+# "KubeJobFailed x11" named nothing.
 printf '%s' "$J" | jq -r '
   [.data.alerts[] | select(.state=="firing")] | sort_by(.activeAt) | .[]
-  | "\(.activeAt[0:19])  \(.labels.severity // "-")  \(.labels.alertname)  "
-    + ([.labels.exported_namespace, .labels.namespace, .labels.pod, .labels.name,
-        .labels.node, .labels.instance] | map(select(. != null)) | unique | join("/"))'
+  | . as $a
+  | ([ "ns=" + (.labels.exported_namespace // .labels.namespace // "-"),
+       (if .labels.job_name then "job=" + .labels.job_name else empty end),
+       (if .labels.deployment then "deploy=" + .labels.deployment else empty end),
+       (if .labels.daemonset then "ds=" + .labels.daemonset else empty end),
+       (if .labels.statefulset then "sts=" + .labels.statefulset else empty end),
+       (if .labels.pod then "pod=" + .labels.pod else empty end),
+       (if .labels.name then "name=" + .labels.name else empty end),
+       (if .labels.container then "ctr=" + .labels.container else empty end),
+       (if .labels.node then "node=" + .labels.node else empty end),
+       (if .labels.poddisruptionbudget then "pdb=" + .labels.poddisruptionbudget else empty end)
+     ] | join(" ")) as $subj
+  | "\($a.activeAt[0:19])  \($a.labels.severity // "-")  \($a.labels.alertname)  \($subj)"'
+
+echo
+echo "-- alert instances whose labels carry the EXPORTER, not just the subject --"
+echo "   (an exporter restart resets activeAt on every one of these, so their"
+echo "    ages are unknown rather than recent -- 26 reset at the KSM restart)"
+printf '%s' "$J" | jq -r '
+  [.data.alerts[] | select(.state=="firing") | select(.labels.instance != null)]
+  | group_by(.labels.instance)
+  | map({instance: .[0].labels.instance, n: length,
+         names: ([.[].labels.alertname] | unique | join(", "))})
+  | .[] | "  \(.instance)  \(.n) alerts: \(.names)"'
