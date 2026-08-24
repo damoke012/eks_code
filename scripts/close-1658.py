@@ -18,7 +18,10 @@ m = importlib.util.module_from_spec(spec)
 _argv = sys.argv[:]; sys.argv = ["x"]
 spec.loader.exec_module(m)
 sys.argv = _argv
-GO = "--go" in sys.argv
+# m.GO is what do_comment/do_close actually read. Setting only a local GO
+# meant --go was accepted, printed nothing unusual, and did nothing.
+m.GO = "--go" in sys.argv
+GO = m.GO
 
 DOC = "wip/observability/INFRA-1658-TRIAGE-2026-08-24.md"
 
