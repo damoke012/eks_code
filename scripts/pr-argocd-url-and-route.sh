@@ -40,6 +40,17 @@ done
 cd "$REPO"
 git fetch origin
 
+# Restore the one directory this script writes. Runs before every checkout and
+# on any exit: `checkout -B` REFUSES on a dirty worktree, so a crash mid-branch
+# (op-qa's KeyError on 2026-08-24) otherwise blocks every subsequent run,
+# including the branch that had already succeeded.
+clean_argocd() {
+  git checkout -q HEAD -- infrastructure/argocd 2>/dev/null || true
+  git clean -qfd infrastructure/argocd 2>/dev/null || true
+}
+trap clean_argocd EXIT
+clean_argocd
+
 BRANCHES="op-dev op-qa"
 [ -z "$ONLY" ] || BRANCHES="$ONLY"
 
@@ -56,11 +67,11 @@ for BR in $BRANCHES; do
 
   echo
   echo "################ $BR -> $HOST ################"
+  clean_argocd
   git checkout -q -B "$TOPIC" "origin/$BR"
-  # CLEAN SLATE. `checkout -B` carries local modifications across rather than
-  # discarding them, so an aborted run leaves its own edits in the worktree and
-  # the next run finds them, takes every "already present" path, and asserts
-  # against its own output. Scoped to the one directory this script writes.
+  # `checkout -B` CARRIES local modifications across rather than discarding them,
+  # so an aborted run leaves its own edits behind and the next run finds them,
+  # takes every "already present" path, and asserts against its own output.
   git checkout -q "origin/$BR" -- infrastructure/argocd
   git clean -qfd infrastructure/argocd
 
