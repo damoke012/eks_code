@@ -37,6 +37,13 @@ INCLUDE_OLD_DONE = "--include-old-done" in sys.argv
 # sprint. The tickets that are actually invisible are the OPEN ones left behind in
 # a closed sprint. --stranded-only restricts to those; it is the usual intent.
 STRANDED_ONLY = "--stranded-only" in sys.argv
+# "created and worked on, but not in the sprint" is a question about RECENT
+# activity, not about the sprint field. A ticket nobody has touched in months is
+# backlog whatever its sprint says. Default 14 days; --worked-since N to widen.
+WORKED_SINCE = 14
+for _i, _a in enumerate(sys.argv):
+    if _a == "--worked-since" and _i + 1 < len(sys.argv):
+        WORKED_SINCE = int(sys.argv[_i + 1])
 
 # Board 322 is the OLD board -- it has no active sprint, which is how the first
 # run of this failed. Do not hardcode a board: enumerate every INFRA board and
@@ -68,17 +75,38 @@ def search(jql):
     """m.api returns a (status, json) TUPLE. Unpack it -- testing membership on
     the tuple is always False and silently reports 'no results'."""
     fields = "summary,status,assignee,created,resolutiondate"
-    q = urllib.parse.urlencode({"jql": jql, "fields": fields, "maxResults": 100})
     tried = []
-    for path in (f"/rest/api/3/search/jql?{q}", f"/rest/api/3/search?{q}"):
-        try:
-            status, body = m.api("GET", path)
-        except Exception as e:                       # noqa: BLE001
-            tried.append((path.split("?")[0], "exception", str(e)[:160])); continue
-        if status == 200 and isinstance(body, dict) and "issues" in body:
-            return body["issues"]
-        detail = body.get("errorMessages") or body.get("raw") or body if isinstance(body, dict) else body
-        tried.append((path.split("?")[0], status, str(detail)[:160]))
+    for base in ("/rest/api/3/search/jql", "/rest/api/3/search"):
+        out, start, token = [], 0, None
+        while True:
+            params = {"jql": jql, "fields": fields, "maxResults": 100}
+            # The two endpoints paginate differently: the classic one by
+            # startAt, the newer one by nextPageToken. Support both -- the
+            # previous version passed maxResults=100 and read page one only,
+            # with ORDER BY created ASC, so everything filed this week fell off
+            # the end and the result LOOKED complete. That is how INFRA-1657
+            # through 1660 were reported as "already sprinted".
+            if token:
+                params["nextPageToken"] = token
+            else:
+                params["startAt"] = start
+            q = urllib.parse.urlencode(params)
+            try:
+                status, body = m.api("GET", f"{base}?{q}")
+            except Exception as e:                   # noqa: BLE001
+                tried.append((base, "exception", str(e)[:160])); out = None; break
+            if status != 200 or not isinstance(body, dict) or "issues" not in body:
+                detail = body.get("errorMessages") or body.get("raw") or body if isinstance(body, dict) else body
+                tried.append((base, status, str(detail)[:160])); out = None; break
+            page = body.get("issues", [])
+            out.extend(page)
+            token = body.get("nextPageToken")
+            start += len(page)
+            total = body.get("total")
+            if body.get("isLast") or not page or (token is None and (total is None or start >= total)):
+                break
+        if out is not None:
+            return out
     print("!! search failed. Endpoints tried:", file=sys.stderr)
     for p, s, d in tried:
         print(f"     {p} -> {s} {d}", file=sys.stderr)
@@ -177,11 +205,19 @@ def main():
     members = sprint_members(sid)
     print(f"sprint {sid} currently holds {len(members)} issues\n")
 
-    sources = [("open, not in this sprint", JQL_OPEN_MINE)]
-    if not STRANDED_ONLY:
-        sources.insert(0, ("no sprint at all", JQL_NO_SPRINT))
+    if STRANDED_ONLY:
+        # No statusCategory filter: a ticket worked AND closed this sprint is
+        # exactly what the sprint should show it delivered. The done/old-done
+        # split below decides which of those actually get added.
+        # issuetype != Epic: epics sit ABOVE sprints. INFRA-1632 is the parent of
+        # seven of these and would have been dragged in with its own children.
+        jql = (f"project = INFRA AND issuetype != Epic AND {MINE} "
+               f"AND updated >= -{WORKED_SINCE}d ORDER BY updated DESC")
+        sources = [(f"worked in the last {WORKED_SINCE}d, not in this sprint", jql)]
+        print(f"--stranded-only: only tickets updated in the last {WORKED_SINCE} days\n")
     else:
-        print("--stranded-only: ignoring never-sprinted backlog, which belongs in the backlog\n")
+        sources = [("no sprint at all", JQL_NO_SPRINT),
+                   ("open, not in this sprint", JQL_OPEN_MINE)]
 
     rows, seen = [], set()
     for label, jql in sources:
