@@ -25,10 +25,26 @@ The **server** container prints where the file actually is:
 writing webhook kubeconfig file  kubeconfigPath=/var/aws-iam-authenticator/kubeconfig.yaml
 ```
 
-**Use `/var/aws-iam-authenticator/kubeconfig.yaml`.** On Talos `/etc/kubernetes` is managed by
-the OS and is not writable by us; the DaemonSet mounts `hostPath: /var/lib/aws-iam-authenticator`
-at `/var/aws-iam-authenticator`. Taking the init container's path gives the apiserver a file
-that does not exist, and an apiserver that will not start on Talos is not a quick fix.
+~~**Use `/var/aws-iam-authenticator/kubeconfig.yaml`.**~~ **WRONG — corrected 2026-08-24 20:40.**
+
+**The flag path is `/var/lib/aws-iam-authenticator/kubeconfig.yaml`.** Both log lines are
+in-container paths and NEITHER is what the apiserver flag takes. The DaemonSet mounts
+`hostPath: /var/lib/aws-iam-authenticator` at `/var/aws-iam-authenticator`, so the server's log
+reports where it wrote the file *inside its own container*. The apiserver reads it from the
+**host**, via an `extraVolumes` entry mounting `/var/lib/aws-iam-authenticator` at the same path.
+
+`variant-inc/iaac-talos`, branch `feat/aws-iam-authenticator`, says so in the module itself:
+
+```hcl
+"authentication-token-webhook-config-file" = "/var/lib/aws-iam-authenticator/kubeconfig.yaml"
+# HOST path. The authenticator's own log prints the in-container path; not this one.
+```
+
+I wrote the warning above from the server log and got the path wrong in the act of warning about
+the path. Three candidate paths appear in this system and only the third is correct:
+`/etc/kubernetes/...` (init container, upstream generic, wrong on Talos),
+`/var/aws-iam-authenticator/...` (server container, in-container, wrong for the flag),
+`/var/lib/aws-iam-authenticator/...` (host, **correct**).
 
 The DaemonSet comment already says *"Deploy this BEFORE the apiserver flag… if the flag lands
 first, apiserver will not start."* Both halves of that warning matter: order **and** path.
@@ -63,8 +79,24 @@ this. It is inert and correct-looking, which is the exact combination worth dist
 
 ## Remaining, in order
 
-1. **Talos machine config** — the apiserver flag, in `iaac-talos`, promoted through **Octopus
-   only** (CLAUDE.md rule 1). Path above. Dev first.
+1. **Talos machine config** — ⚠️ **the work already exists and is NOT MERGED.**
+   `variant-inc/iaac-talos` branch `feat/aws-iam-authenticator` (head `ca5479f`) carries it:
+   `apiserver_extra_args` + `apiserver_extra_volumes` in
+   `deploy/terraform/modules/talos/main.tf`, gated on `var.enable_aws_iam_authenticator`, plus
+   one line in `deploy/terraform/envs/qa.tfvars`. `git branch -r --merged origin/master` does
+   not list it.
+
+   **So op-usxpress-QA's working SSO is running on a machine config that is not in master.** A
+   redeploy of QA from `master` takes SSO away, silently, because the flag simply would not be
+   in the generated config. That is a bigger problem than dev not having it yet.
+
+   The remaining work is to **finish and merge that branch**, adding `enable_aws_iam_authenticator`
+   to dev's and prod's tfvars — not to write anything new. Then promote through **Octopus only**
+   (CLAUDE.md rule 1), dev first.
+
+   Note the module comment on why the apiServer patch is assembled from one merged map: two
+   patches both setting `extraArgs` would depend on Talos merging rather than replacing them,
+   and if it replaces, **IRSA silently breaks**.
 2. **Prove the login**: `aws sso login --profile usx-dev` then `kubectl auth whoami`, expecting
    `sso:<email>` in group `onprem-platform-admins`. A wrong ARN does **not** error — the caller
    becomes `system:anonymous` and everything returns `forbidden`, which reads like an RBAC bug.
@@ -82,7 +114,9 @@ binding, and writes its webhook kubeconfig to `/var/aws-iam-authenticator/kubeco
 **Tested and killed:** "QA's SSO was hand-applied so this is not GitOps" — wrong, QA is wired in
 `iaac-talos-flux-cluster` at `clusters/op-usxpress-qa/flux-system/infra.yaml:751`; the grep that
 suggested otherwise was run against the wrong repository.
-**Traps:** the init and server containers print different paths and the init's is wrong for
-Talos; the IMDS region warning is benign; merging the wiring before the manifests leaves a
+**Traps:** THREE different paths appear and only the host one is right for the flag —
+`/etc/kubernetes/...` (init, generic), `/var/aws-iam-authenticator/...` (server, in-container),
+`/var/lib/aws-iam-authenticator/...` (host, correct); QA's apiserver flag lives on an UNMERGED
+`iaac-talos` branch, so redeploying QA from master would remove its SSO; the IMDS region warning is benign; merging the wiring before the manifests leaves a
 Kustomization `Ready=False` with `path not found` until the `infra` source fetches (5m interval);
 a wrong ARN produces `forbidden`, never an error.
