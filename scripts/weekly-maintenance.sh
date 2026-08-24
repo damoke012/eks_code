@@ -101,3 +101,11 @@ echo "== 8. Prose handed to a shell as a double-quoted string =="
 # A PR body full of backticks becomes commands. See
 # wip/tooling/FINDINGS-2026-08-24-pr-body-executed.md
 bash scripts/lint-shell-prose.sh || true
+
+echo
+echo "== 9. Flux revision drift (on-prem) =="
+# A merged PR + a green source reconcile proves nothing about what is APPLIED.
+# See wip/onprem-argocd/FINDINGS-2026-08-24-argocd-url-and-route.md
+for c in op-dev op-qa op-prod; do
+  bash scripts/flux-revision-drift.sh --cluster "$c" || true
+done
