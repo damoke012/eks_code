@@ -95,3 +95,9 @@ fence "   sprint field can answer 'is this issue in sprint N' reliably"
 
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
 exit 0
+
+echo
+echo "== 8. Prose handed to a shell as a double-quoted string =="
+# A PR body full of backticks becomes commands. See
+# wip/tooling/FINDINGS-2026-08-24-pr-body-executed.md
+bash scripts/lint-shell-prose.sh || true
