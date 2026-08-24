@@ -1,11 +1,11 @@
 ---
 name: onprem-human-access-model
-description: "How humans get kubectl on the on-prem Talos clusters — AWS SSO via self-hosted aws-iam-authenticator, LIVE on op-usxpress-qa 2026-07-28; certs demoted to break-glass"
+description: "How humans get kubectl on the on-prem Talos clusters — AWS SSO via self-hosted aws-iam-authenticator. LIVE on op-usxpress-qa 2026-07-28; op-dev has the authenticator but not the apiserver flag (2026-08-24); prod not started."
 metadata: 
   node_type: memory
   type: project
   originSessionId: e3125f37-c991-4364-adf2-b40770a2d61c
-  modified: 2026-08-03T17:23:01.931Z
+  modified: 2026-08-24T20:15:00.000Z
 ---
 
 **✅ LIVE on `op-usxpress-qa` 2026-07-28.** `kubectl auth whoami` → `sso:doke@usxpress.com`, groups
@@ -13,6 +13,29 @@ metadata:
 [[eks-human-access-model]]. **Idris onboarded end-to-end 2026-08-03** — `sso:ifagbemi@usxpress.com`,
 `onprem-platform-admins`, 13 nodes. First non-author to use the path, so the model is proven. Dev + prod
 still to do.
+
+⚠️ **2026-08-24 — op-usxpress-dev now has the AUTHENTICATOR half** (INFRA-1638). Manifests:
+`iaac-talos-flux-platform` PR #124 on `op-dev` (`infrastructure/rbac` +
+`infrastructure/aws-iam-authenticator`). Wiring: `iaac-talos-flux-cluster` PR #36
+(`clusters/bm-dev/flux-system/infra.yaml`). 3/3 pods on the CPs, 0 restarts, correct ARN, mapper
+loaded. **Nobody can log in yet** — the apiserver `--authentication-token-webhook-config-file`
+flag is Talos machine config in `iaac-talos`, promoted through Octopus, and still to do. Prod
+manifests are one command: `scripts/pr-sso-dev-prod.sh --only op-prod`.
+
+⚠️ **The flag path is `/var/aws-iam-authenticator/kubeconfig.yaml`.** The init container's log
+says `/etc/kubernetes/aws-iam-authenticator/kubeconfig.yaml` — upstream's generic advice, WRONG
+on Talos, where /etc/kubernetes is OS-managed and the hostPath mount is
+/var/lib/aws-iam-authenticator. The server container prints the correct one. An apiserver
+pointed at a missing file will not start.
+
+⚠️ **One permission set, three different ARNs.** `usx-on-prem-admins` is provisioned to all
+three accounts and AWS generates a DIFFERENT suffix in each: dev `b7447c115978d407`, qa
+`8c7f139e431625e0`, prod `837df2a43495aaf1`. Read it back with `aws iam list-roles`; never copy
+between clusters; strip the `aws-reserved/sso.amazonaws.com/` path. A wrong ARN does not error —
+the caller becomes `system:anonymous` and everything returns `forbidden`, which reads like an
+RBAC bug. QA maps `op-qa-platform-admin` instead: leave it alone and add `usx-on-prem-admins`
+there as an ADDITIONAL entry, never replace the only working path into a cluster.
+See `wip/onprem-sso/INFRA-1638-dev-authenticator-live.md` and [[adjacent-step-green-signals]].
 
 **Confirmed 2026-08-18: prod has NO SSO path.** `infrastructure/aws-iam-authenticator` exists only on the
 `op-qa` branch and is wired only in `clusters/op-usxpress-qa`. `op-prod` has neither the directory nor the
