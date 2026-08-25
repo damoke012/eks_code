@@ -33,7 +33,7 @@ git checkout -q "origin/$BR" -- infrastructure/argocd
 git clean -qfd infrastructure/argocd
 
 python3 - "$BR" <<'PY'
-import sys, yaml, io
+import sys, yaml, os
 br = sys.argv[1]
 cluster = "op-usxpress-%s" % br[len("op-"):]
 host    = "argocd.%s.usxpress.io" % br
@@ -44,15 +44,43 @@ GROUP   = "b9a1ff74-efa1-4b20-be8a-8706a5ab2636"
 SECNAME = "argocd-entra-oidc"
 
 HR = "infrastructure/argocd/helmrelease.yaml"
-KU = "infrastructure/argocd/kustomization.yaml"
-ES = "infrastructure/argocd/entra-oidc-externalsecret.yaml"
+
+# Where this branch keeps its Argo ExternalSecrets, and which apiVersion it serves.
+# Both are read from the branch. op-dev keeps them in infrastructure/argocd/ and
+# op-qa in infrastructure/argocd-config/; op-qa serves external-secrets.io/v1 while
+# the value carried over from memory was v1beta1. Assuming either froze op-qa
+# delivery on 2026-08-25.
+import glob, collections
+es_files = []
+for f in glob.glob("infrastructure/**/*.yaml", recursive=True):
+    head = open(f, encoding="utf-8", errors="replace").read(4000)
+    if "kind: ExternalSecret" in head:
+        es_files.append(f)
+assert es_files, "no ExternalSecret anywhere under infrastructure/ on %s -- inspect by hand" % br
+
+vers = collections.Counter()
+for f in es_files:
+    for line in open(f, encoding="utf-8", errors="replace"):
+        if line.startswith("apiVersion:"):
+            vers[line.split(":", 1)[1].strip()] += 1
+            break
+ES_API = vers.most_common(1)[0][0]
+assert ES_API.startswith("external-secrets.io/"), ES_API
+
+argocd_es = [f for f in es_files if f.startswith("infrastructure/argocd")]
+ES_DIR = os.path.dirname(sorted(argocd_es)[0]) if argocd_es else "infrastructure/argocd"
+ES = os.path.join(ES_DIR, "entra-oidc-externalsecret.yaml")
+KU = os.path.join(ES_DIR, "kustomization.yaml")
+assert os.path.exists(KU), "no kustomization.yaml in %s" % ES_DIR
+print("   ExternalSecrets on %s live in %s and use %s (%d sampled)"
+      % (br, ES_DIR, ES_API, sum(vers.values())))
 
 did = []
 
 # ---------------------------------------------------------------- ExternalSecret
 # Its own secret, not a merge into the chart-owned argocd-secret. The part-of
 # label is what makes Argo resolve $argocd-entra-oidc:client_secret against it.
-open(ES, "w").write("""apiVersion: external-secrets.io/v1beta1
+open(ES, "w").write("""apiVersion: %s
 kind: ExternalSecret
 metadata:
   name: %s
@@ -79,16 +107,16 @@ spec:
       remoteRef:
         key: %s
         property: client_secret
-""" % (SECNAME, SECNAME, sm_key))
+""" % (ES_API, SECNAME, SECNAME, sm_key))
 did.append("added %s" % ES)
 
 ku = open(KU).read()
-if ES.split("/")[-1] not in ku:
+if os.path.basename(ES) not in ku:
     lines = ku.splitlines(True)
     i = max(n for n, l in enumerate(lines) if l.startswith("  - "))
-    lines.insert(i + 1, "  - %s\n" % ES.split("/")[-1])
+    lines.insert(i + 1, "  - %s\n" % os.path.basename(ES))
     open(KU, "w").writelines(lines)
-    did.append("listed it in kustomization.yaml")
+    did.append("listed it in %s" % KU)
 
 # ------------------------------------------------------------------ helmrelease
 lines = open(HR).readlines()
@@ -171,7 +199,8 @@ assert rb.get("policy.default") == "" and rb.get("scopes") == "[groups]"
 es = yaml.safe_load(open(ES))
 assert es["spec"]["data"][0]["remoteRef"]["key"] == sm_key, "wrong cluster's Secrets Manager path"
 assert es["spec"]["target"]["template"]["metadata"]["labels"]["app.kubernetes.io/part-of"] == "argocd"
-assert ES.split("/")[-1] in open(KU).read()
+assert os.path.basename(ES) in open(KU).read()
+assert es["apiVersion"] == ES_API, es["apiVersion"]
 for line in did: print("   " + line)
 PY
 
