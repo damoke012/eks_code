@@ -18,9 +18,8 @@ set -uo pipefail
 command -v az >/dev/null 2>&1 || { echo "!! az not on PATH -- run this on WSL" >&2; exit 2; }
 
 APP_ID="42dc0c33-4c56-47a5-b207-d119272997aa"
-SM_PATH="op-usxpress-dev/platform/argocd/azure-ad"
+# SM_PATH is derived per cluster below; never a literal.
 CRED_NAME="argocd-on-prem"   # stable: the script clears its own prior credential by this name
-DEV_ACCOUNT="700736442855"
 URIS='["https://argocd.op-dev.usxpress.io/auth/callback","https://argocd.op-qa.usxpress.io/auth/callback","https://argocd.op-prod.usxpress.io/auth/callback"]'
 
 case "${1:-}" in
@@ -42,12 +41,13 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
   echo "   under spa keeps the cross-origin restriction alive for that URI."
   ;;
 --check)
+  CHECK_BR="${2:-op-dev}"
   # Do not assume the region or the store. Read them off the cluster.
   LIB="$(dirname "${BASH_SOURCE[0]}")/lib-onprem-ctx.sh"
   # shellcheck source=/dev/null
-  source "$LIB"; onprem_resolve_ctx op-dev || exit 1
+  source "$LIB"; onprem_resolve_ctx "$CHECK_BR" || exit 1
   K=(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX")
-  echo "== ClusterSecretStores on op-dev"
+  echo "== ClusterSecretStores on $CHECK_BR"
   "${K[@]}" get clustersecretstores.external-secrets.io \
      -o custom-columns=NAME:.metadata.name,REGION:.spec.provider.aws.region,SERVICE:.spec.provider.aws.service 2>&1
   echo
@@ -93,8 +93,24 @@ print(json.dumps({"groupMembershipClaims": sys.argv[1],
   echo "   A token already issued will not gain the claim."
   ;;
 --secret)
-  PROFILE="${2:-}"
-  [ -n "$PROFILE" ] || { echo "!! usage: $0 --secret <aws-profile>" >&2; exit 2; }
+  BR="${2:-}"; PROFILE="${3:-}"
+  case "$BR" in op-dev|op-qa|op-prod) : ;; *)
+    echo "!! usage: $0 --secret <op-dev|op-qa|op-prod> <aws-profile>" >&2; exit 2 ;; esac
+  [ -n "$PROFILE" ] || { echo "!! usage: $0 --secret $BR <aws-profile>" >&2; exit 2; }
+  CLUSTER="op-usxpress-${BR#op-}"
+  SM_PATH="$CLUSTER/platform/argocd/azure-ad"
+  case "$BR" in
+    op-dev)  WANT_ACCOUNT=700736442855 ;;
+    op-qa)   WANT_ACCOUNT=527101283767 ;;
+    op-prod) WANT_ACCOUNT=937464026810
+             if [ "${ALLOW_PROD_WRITE:-}" != "yes" ]; then
+               echo "!! $BR is PRODUCTION. This writes a new secret into account $WANT_ACCOUNT." >&2
+               echo "   Nothing has been done. To proceed deliberately, re-run as:" >&2
+               echo "     ALLOW_PROD_WRITE=yes $0 --secret op-prod $PROFILE" >&2
+               exit 3
+             fi ;;
+  esac
+  CRED_NAME="argocd-on-prem-$BR"
   aws configure list-profiles 2>/dev/null | grep -qx "$PROFILE" || {
     echo "!! no such AWS profile: '$PROFILE'" >&2
     echo "   configured: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
@@ -104,20 +120,20 @@ print(json.dumps({"groupMembershipClaims": sys.argv[1],
       echo "!! profile '$PROFILE' has an expired SSO session. Run:" >&2
       echo "   aws sso login --profile $PROFILE" >&2; exit 2 ;;
   esac
-  [ "$ACCT" = "$DEV_ACCOUNT" ] || {
-    echo "!! profile '$PROFILE' is account ${ACCT:-<unreadable>}, not op-dev ($DEV_ACCOUNT)." >&2
+  [ "$ACCT" = "$WANT_ACCOUNT" ] || {
+    echo "!! profile '$PROFILE' is account ${ACCT:-<unreadable>}, not $BR ($WANT_ACCOUNT)." >&2
     echo "   Writing the secret to the wrong account would sync green and serve nothing." >&2
     exit 2; }
 
   LIB="$(dirname "${BASH_SOURCE[0]}")/lib-onprem-ctx.sh"
   # shellcheck source=/dev/null
-  source "$LIB"; onprem_resolve_ctx op-dev || exit 1
+  source "$LIB"; onprem_resolve_ctx "$BR" || exit 1
   REGION=$(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" \
              get clustersecretstores.external-secrets.io default \
              -o jsonpath='{.spec.provider.aws.region}' 2>/dev/null)
   [ -n "${REGION:-}" ] || { echo "!! could not read the region from op-dev's ClusterSecretStore." >&2
-                            echo "   Run: $0 --check" >&2; exit 1; }
-  echo "== region $REGION, read from op-dev's ClusterSecretStore (not defaulted)"
+                            echo "   Run: $0 --check $BR" >&2; exit 1; }
+  echo "== region $REGION, read from $BR's own ClusterSecretStore (not defaulted)"
 
   # Order matters. A credential's value is shown ONCE; if the store write then
   # fails, the credential survives on the app with nobody holding its value -- an
@@ -171,5 +187,5 @@ import json,sys; print(json.dumps({"client_id": sys.argv[1], "client_secret": sy
   echo "   stored at $SM_PATH (account $ACCT, region $REGION) with keys client_id, client_secret"
   ;;
 *)
-  echo "!! usage: $0 --web | $0 --check | $0 --groups <SecurityGroup|ApplicationGroup> | $0 --secret <aws-profile>" >&2; exit 2 ;;
+  echo "!! usage: $0 --web | $0 --check <cluster> | $0 --groups <SecurityGroup|ApplicationGroup> | $0 --secret <cluster> <aws-profile>" >&2; exit 2 ;;
 esac
