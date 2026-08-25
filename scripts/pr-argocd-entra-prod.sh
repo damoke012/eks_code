@@ -85,11 +85,19 @@ case "$GWHOSTS" in
      echo "     scripts/pr-istio-gateway-op-prod.sh --push" >&2
      exit 1 ;;
 esac
+# The route's destination is a Service on THIS cluster, so read it here rather than
+# writing argocd-server:80 from memory -- the port names differ between a chart install
+# and the adopted raw install op-dev started from.
+ARGOCD_SVC=$(K -n argocd get svc argocd-server -o json 2>/dev/null) || ARGOCD_SVC=""
+[ -n "$ARGOCD_SVC" ] || { echo "!! no argocd-server Service in the argocd namespace on $BR." >&2
+  echo "   Argo CD itself must be running there before it can be routed to." >&2; exit 1; }
+export ARGOCD_SVC
+
 export ARGOCD_DNS_TARGETS="$IPS"
 export ARGOCD_GATEWAYS="$GW"
 
 python3 - <<'PY'
-import os, glob, collections, yaml
+import os, glob, json, collections, yaml
 
 BR       = "op-prod"
 CLUSTER  = "op-usxpress-prod"
@@ -150,6 +158,60 @@ assert GATEWAYS, "ARGOCD_GATEWAYS not set"
 print("   route wiring, from the live cluster:")
 print("     gateways %s" % GATEWAYS)
 print("     targets  %s" % TARGETS)
+
+# The document's SHAPE comes from a VirtualService already on this branch -- its
+# apiVersion and its external-dns annotation key. Those are conventions of this repo,
+# not facts about op-prod, so the branch is the right source. Only the values that are
+# per-cluster (host, gateway, targets, destination) are overridden, from the cluster.
+template = None
+for f in sorted(glob.glob("infrastructure/**/virtualservice*.yaml", recursive=True)):
+    for d in load_all(f):
+        if d.get("kind") == "VirtualService":
+            template = (f, d); break
+    if template: break
+assert template, "no VirtualService on %s to take the file shape from" % BR
+TPL_FILE, TPL = template
+VS_API = TPL["apiVersion"]
+ann_keys = [k for k in (TPL.get("metadata") or {}).get("annotations", {})
+            if "external-dns" in k and k.endswith("/target")]
+assert len(ann_keys) == 1, (
+    "expected exactly one external-dns target annotation on %s, found %r"
+    % (TPL_FILE, ann_keys))
+DNS_ANN = ann_keys[0]
+print("   file shape from %s (%s, %s)" % (TPL_FILE, VS_API, DNS_ANN))
+
+svc = json.loads(os.environ["ARGOCD_SVC"])
+SVC_NAME = svc["metadata"]["name"]
+ports = {p.get("name"): p["port"] for p in svc["spec"]["ports"]}
+# Prefer the plaintext port: argocd-server runs with server.insecure and TLS is
+# terminated at the Gateway. Routing to 443 would double-terminate.
+SVC_PORT = ports.get("http") or ports.get("server") or (
+    80 if 80 in ports.values() else None)
+assert SVC_PORT, ("no plaintext port on Service %s -- ports are %r. Refusing to guess "
+                  "which one terminates TLS." % (SVC_NAME, ports))
+print("   destination:     %s.argocd.svc.cluster.local:%s" % (SVC_NAME, SVC_PORT))
+
+vs = {
+    "apiVersion": VS_API,
+    "kind": "VirtualService",
+    "metadata": {
+        "name": "argocd",
+        "namespace": "argocd",
+        "annotations": {DNS_ANN: TARGETS},
+    },
+    "spec": {
+        "hosts": [HOST],
+        "gateways": GATEWAYS,
+        "http": [{
+            "route": [{
+                "destination": {
+                    "host": "%s.argocd.svc.cluster.local" % SVC_NAME,
+                    "port": {"number": SVC_PORT},
+                },
+            }],
+        }],
+    },
+}
 
 VS_PATH = os.path.join(ES_DIR, "virtualservice-argocd.yaml")
 with open(VS_PATH, "w") as fh:

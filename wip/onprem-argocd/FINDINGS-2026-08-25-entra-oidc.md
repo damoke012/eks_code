@@ -459,3 +459,64 @@ op-dev.
 
 **Proven:** op-qa serves the app-role policy; PR #140 is open and its diff is minimal.
 **Traps:** a comment can be a copied artefact too; a context name is not a cluster.
+
+## op-prod ingress: FIXED. 2026-08-25
+
+```
+istio-ingress/shared-http serves: *.op-prod.usxpress.io
+certificaterequest/wildcard-op-prod-1   APPROVED=True   READY=True   ISSUER=letsencrypt-prod
+```
+
+**Production can terminate HTTPS for its own hostnames for the first time since the
+cluster came up 27 days ago.** Both halves were needed and neither alone was enough: the
+cert-manager pod had no IRSA credentials (fixed by `rollout restart`, since injection
+happens at pod creation and that pod predated the annotation), and the ACME solver
+selected only op-qa's DNS zone (PR **#140**).
+
+### A near-miss worth recording
+
+`wildcard-op-prod-1` is **3h22m** old — that is its *creation* time, from PR #137. cert-manager
+kept retrying the same CertificateRequest, and it completed the moment the second half
+landed. On the evidence available a minute earlier, the instruction given was to **delete
+the failed CertificateRequest to force a fresh attempt** — which would have destroyed a
+certificate that had just succeeded.
+
+It was not caught by judgement. The command carried a placeholder, `<the wildcard-op-prod
+one>`, deliberately left for the operator to fill from a `get` — and bash rejected it with
+a syntax error before anything ran. **Rule 6 stopped a bad production action.** The rule
+exists so a human reads the value rather than trusting a guess; here the guess was wrong
+and the placeholder was the only thing between it and a deletion.
+
+The real lesson is narrower and sharper: **an object's AGE is when it was created, not
+when it last failed.** A 27-day-old failure and a 3-hour-old success look identical in an
+`AGE` column. Read `READY` before deciding anything is stuck.
+
+## The prod Argo route builder wrote a file with no document in it
+
+`scripts/pr-argocd-entra-prod.sh` passed every guard — Gateway serving op-prod, targets
+read live (10 nodes: `.109 .190 .191 .112 .189 .111 .110 .108 .113 .185`), ExternalSecret
+directory and apiVersion derived from the branch — and then died:
+
+```
+NameError: name 'vs' is not defined
+```
+
+The VirtualService **document was never constructed**. The file-writing code existed; the
+content did not. Had `vs` happened to be defined, it would have written a file containing
+only a comment header. Fixed by building it from evidence, in the shape of everything else
+in that script:
+
+* **shape from the branch** — apiVersion and the external-dns annotation key are
+  conventions of this repo, so an existing VirtualService supplies them, with an assertion
+  that exactly one target annotation is found.
+* **destination from the live cluster** — the `argocd-server` Service and its ports are
+  read, not written from memory. It selects the **plaintext** port, because
+  `server.insecure` is set and TLS terminates at the Gateway; routing to 443 would
+  double-terminate. With no plaintext port it **refuses** rather than picking one.
+
+Self-tested: renders correctly against a branch template, and goes red on a Service that
+offers only 443.
+
+**Proven:** op-prod's Gateway serves its own hostnames and its wildcard certificate is
+issued. **Traps:** AGE is creation, not last failure; a builder can pass every guard and
+still emit nothing.
