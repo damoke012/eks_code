@@ -120,3 +120,52 @@ Blocked first on `secretsmanager:CreateSecret` — `op-qa-platform-admin` grante
 Verified: 200 from the route, `/api/v1/settings` serving the Entra `oidcConfig`, and 40 bytes
 in `argocd-entra-oidc`. `scripts/lint-manifest-apiversions.py` now gates the PR builder, and
 was self-tested red on the real defect and green on the fix.
+
+## op-prod — stopped, and why
+
+The client secret **is** in place: `op-usxpress-prod/platform/argocd/azure-ad`, account
+937464026810, **us-east-2**. No permission-set grant was needed — unlike QA, both
+`ops-controller` and `usx-prod` could already write. The region was **derived from evidence**
+rather than assumed (the cluster is unreachable): four existing `op-usxpress-prod/` secrets
+live in us-east-2, including `platform/grafana/azure-ad`.
+
+The branch PR is **blocked**, on two things that compound:
+
+**1. op-prod has no Argo route.** No VirtualService for argocd, so
+`argocd.op-prod.usxpress.io` does not resolve and the OIDC callback has nowhere to land.
+op-dev needed one added (PR #126) before its record appeared.
+
+**2. There is nothing safe to copy the route's wiring from.** DNS targets are not portable
+— op-dev uses all 7 workers, op-qa 3 of 13 — so the builder derives them from a route already
+serving the same cluster. On op-prod there is no such route:
+
+```
+infrastructure/grafana/virtualservice.yaml                  grafana.op-dev.usxpress.io
+infrastructure/risingwave-routes/virtualservice-dashboard.yaml  risingwave-dashboard.op-dev.usxpress.io
+infrastructure/risingwave-routes/virtualservice-overview.yaml   risingwave-overview.op-dev.usxpress.io
+infrastructure/risingwave-routes/virtualservice-postgres.yaml   rw-postgres.op-dev.usxpress.io
+infrastructure/risingwave-routes/virtualservice-sql.yaml        rw-sql.op-dev.usxpress.io
+```
+
+**5 of 5**, every one annotated
+`external-dns.alpha.kubernetes.io/target: 10.10.82.21,.22,.26,.27,.28,.178,.180` — **dev's
+seven workers**. The entire ingress layer on the prod branch is dev's.
+
+### The part that is not about SSO
+
+If prod's `grafana` or `risingwave-routes` Kustomizations reconcile, **prod's external-dns is
+publishing op-dev hostnames pointing at op-dev nodes**. Two external-dns instances would then
+compete for the same records, arbitrated only by `txtOwnerId` — itself a per-cluster literal
+in the AUTO class of `wip/prod-standup/fix-op-prod-literals.sh`. This is the QA↔dev grafana
+collision of 2026-08-24 (PR #128), on production, and **it cannot be confirmed without cluster
+access**. Worth checking the moment INFRA-1663 lands.
+
+### What unblocks it
+
+INFRA-1663 — op-prod has had no persisted kubeconfig since at least 2026-08-24. Without it the
+real node addresses, the ingressgateway placement and the ClusterSecretStore can only be
+inferred from Git, and Git is demonstrably wrong about this cluster.
+
+**Proven:** the secret is stored and the region is evidenced.
+**Tested and killed:** deriving prod's route from its own branch — every candidate is dev's.
+**Trap:** a prod branch that looks complete because it is a byte-copy of another cluster's.

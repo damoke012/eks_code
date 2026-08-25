@@ -80,3 +80,17 @@ Found by `scripts/onprem-ingress-audit.sh`, which groups every claimed hostname 
 foreign one shows as a count rather than something to spot by eye. It compares each cluster
 against **itself**, which is why it caught a cluster nobody was looking at.
 
+
+
+**Instance seven, 2026-08-25 — op-prod's ENTIRE ingress layer is dev's.** All **5 of 5**
+non-templated VirtualServices on the `op-prod` branch carry `*.op-dev.usxpress.io` hostnames
+and are annotated with dev's seven worker IPs
+(`10.10.82.21,.22,.26,.27,.28,.178,.180`): grafana, and all four risingwave-routes. Found
+because a builder refused to copy route wiring from a foreign-hostname route — the guard added
+after QA was caught live-serving `grafana.op-dev.usxpress.io`.
+
+Consequence if those Kustomizations reconcile: prod's external-dns publishes op-dev records
+pointing at op-dev nodes, and two external-dns instances contend for them, arbitrated only by
+`txtOwnerId`. Unconfirmable without cluster access (INFRA-1663). This also blocks the Argo
+route on prod: there is no correct route on the branch to derive DNS targets from, and targets
+are not portable between these clusters.

@@ -17,7 +17,7 @@ All three cluster callbacks registered, so **QA and prod need no Entra work** �
 `curl https://argocd.op-qa.usxpress.io/` → 200, `/api/v1/settings` serves the Entra
 `oidcConfig`, `argocd-entra-oidc` secret holds 40 bytes. DNS `.139 .23 .106`. Login itself
 untested; the groups claim is a tenant-level question so QA's outcome would not change it.
-op-prod is NOT wired: no `configs.cm.url`, no `rbac` block, no Secrets Manager grant, and its
+op-prod: client secret IS stored (`op-usxpress-prod/platform/argocd/azure-ad`, us-east-2, 937464026810 — no permission-set grant needed, `ops-controller` could already write; region derived from evidence, not assumed). Branch NOT wired: no `configs.cm.url`, no `rbac` block, no Secrets Manager grant, and its
 ClusterSecretStore is unverified (no persisted kubeconfig).
 Argo v3.4.5. Dex deleted. Secret at `op-usxpress-dev/platform/argocd/azure-ad`
 (**us-east-2**, account 700736442855, profile **`usx-dev`**), delivered by the existing
@@ -37,3 +37,8 @@ is tenant-level (token issuance policy, Conditional Access, or the ADFS federati
 `wip/onprem-argocd/FINDINGS-2026-08-25-entra-oidc.md`. See
 [[identity-names-do-not-cross-systems]], [[adjacent-step-green-signals]],
 [[argocd-sso-blocked-on-management-account]].
+
+
+**op-prod blocked 2026-08-25.** No VirtualService for argocd, so the callback has nowhere to
+land — and no route on that branch can be copied from, because all 5 belong to op-dev
+([[manifests-copied-across-branches]]). Unblocks with INFRA-1663 (no prod kubeconfig).
