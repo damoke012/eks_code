@@ -18,7 +18,7 @@ set -uo pipefail
 command -v az >/dev/null 2>&1 || { echo "!! az not on PATH -- run this on WSL" >&2; exit 2; }
 
 APP_ID="42dc0c33-4c56-47a5-b207-d119272997aa"
-SM_PATH="op-usxpress-dev/argocd/entra_oidc_client_secret"
+SM_PATH="op-usxpress-dev/platform/argocd/azure-ad"
 SM_KEY="ENTRA_OIDC_CLIENT_SECRET"
 DEV_ACCOUNT="700736442855"
 URIS='["https://argocd.op-dev.usxpress.io/auth/callback","https://argocd.op-qa.usxpress.io/auth/callback","https://argocd.op-prod.usxpress.io/auth/callback"]'
@@ -55,6 +55,11 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
   "${K[@]}" get externalsecrets.external-secrets.io -A \
      -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,STORE:.spec.secretStoreRef.name,KEY:.spec.data[0].remoteRef.key 2>&1 | head -15
   echo
+  echo "== grafana's azure-ad ExternalSecret -- the closest working analogue on this"
+  echo "   cluster; the new one should mirror its shape, not invent a third."
+  "${K[@]}" -n grafana get externalsecrets.external-secrets.io grafana-azure-ad-creds \
+     -o jsonpath='{.spec}' 2>&1 | python3 -m json.tool 2>/dev/null || true
+  echo
   echo "   The REGION column is what --secret writes to. A secret written to any"
   echo "   other region reports SecretSynced against nothing."
   ;;
@@ -64,7 +69,12 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
   aws configure list-profiles 2>/dev/null | grep -qx "$PROFILE" || {
     echo "!! no such AWS profile: '$PROFILE'" >&2
     echo "   configured: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')" >&2; exit 2; }
-  ACCT=$(aws sts get-caller-identity --profile "$PROFILE" --query Account -o tsv 2>/dev/null)
+  ACCT=$(aws sts get-caller-identity --profile "$PROFILE" --query Account --output text 2>&1)
+  case "$ACCT" in
+    *"SSO session"*|*"Token has expired"*)
+      echo "!! profile '$PROFILE' has an expired SSO session. Run:" >&2
+      echo "   aws sso login --profile $PROFILE" >&2; exit 2 ;;
+  esac
   [ "$ACCT" = "$DEV_ACCOUNT" ] || {
     echo "!! profile '$PROFILE' is account ${ACCT:-<unreadable>}, not op-dev ($DEV_ACCOUNT)." >&2
     echo "   Writing the secret to the wrong account would sync green and serve nothing." >&2
