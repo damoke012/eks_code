@@ -608,3 +608,38 @@ an hour earlier, and the plausible cause is self-inflicted: `rm -rf ~/.aws/cli/c
 through **AWS SSO via the self-hosted aws-iam-authenticator** ([[onprem-human-access-model]]),
 so the credentials it needs were cleared. `aws sso login --profile ops-controller` refreshed
 a different profile.
+
+## All three clusters pass. 2026-08-25 — machine-checkable evidence complete
+
+```
+op-dev   7 A records · HTTPS 200 · Entra issuer · argocd-secret/oidc.entra.clientSecret 40B · policy OK
+op-qa    3 A records · HTTPS 200 · Entra issuer · argocd-entra-oidc/client_secret     40B · policy OK
+op-prod 10 A records · HTTPS 200 · Entra issuer · argocd-entra-oidc/client_secret     40B · policy OK
+```
+
+Two details in that table are load-bearing rather than decorative.
+
+**The record counts differ, correctly.** 7 / 3 / 10 is the ingressgateway placement on each
+cluster, and the check verifies every A record against the nodes actually running the
+gateway rather than merely that the name resolves. op-prod's branch carried op-dev's seven
+node IPs for a month; a check that only asked "does it resolve" would have passed on that.
+
+**The secret lives in a different place on dev than on QA and prod**, and that is by
+design, not drift: op-dev merges into the chart-owned `argocd-secret` because an adopted
+raw install's `server.secretkey` had to survive, while QA and prod use their own labelled
+secret so a chart upgrade cannot drop the key. The check now reports which, instead of
+demanding one.
+
+**op-qa's unreachability was self-inflicted and predicted correctly.** `aws sso login
+--profile op-qa` restored it. op-qa's cluster access runs through AWS SSO via the
+self-hosted aws-iam-authenticator, and `rm -rf ~/.aws/sso/cache` — run three times during
+the prod work — cleared exactly those credentials. Refreshing `ops-controller` refreshed a
+different profile. See [[onprem-human-access-model]].
+
+**Proven:** every machine-checkable acceptance criterion for Argo CD SSO passes on op-dev,
+op-qa and op-prod, read from the running systems.
+
+**Not proven, and not provable by any script:** that a human signs in and lands with
+permissions. Doke has done this on op-dev only. **No application-team member has signed in
+on any cluster** — that is what INFRA-1639 asks for, and it is the last thing standing
+between here and closing it. Idris holds `app-viewer`.

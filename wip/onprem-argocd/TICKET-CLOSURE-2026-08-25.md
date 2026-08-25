@@ -41,8 +41,12 @@ One new ticket is still warranted, but it is a question, not a blocker.
 > **Merged:** #132, #133, #134 (op-dev) · #135, #136, #139 (op-qa) · #141, #142 (op-prod)
 > · #138 (op-dev app-viewer).
 >
-> **Evidence:** `scripts/close-argocd-sso.sh <cluster>` for each of the three, plus a
-> browser sign-in by a platform admin and by an application-team member.
+> **Evidence, 2026-08-25.** `scripts/close-argocd-sso.sh` passes every machine-checkable
+> criterion on all three clusters — DNS resolving to the nodes actually running each
+> cluster's ingressgateway (7 / 3 / 10), HTTPS 200 against that cluster's own certificate,
+> the Entra issuer in `/api/v1/settings`, a 40-byte client secret, and a policy whose
+> subjects can match. Plus a browser sign-in by a platform admin and by an
+> application-team member.
 >
 > Write-up: `wip/onprem-argocd/FINDINGS-2026-08-25-entra-oidc.md`.
 > Procedure: `.claude/skills/entra-authz-claims/SKILL.md`.
