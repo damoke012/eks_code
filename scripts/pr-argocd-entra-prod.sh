@@ -274,17 +274,32 @@ assert v["dex"]["enabled"] is False, "dex enabled on %s" % BR
 assert "oidc.config" not in (v["configs"].get("cm") or {}), "oidc.config already present"
 assert v["configs"].get("rbac") is None, "rbac block already exists -- inspect by hand"
 
+# The subject is an Entra APP ROLE value, not a group object ID.
+#
+# This tenant does not emit a `groups` claim for this application under any setting
+# tried -- SecurityGroup, ApplicationGroup, `groups` in optionalClaims.idToken, no
+# claims-mapping policy, 42 groups so no overage. A group-keyed subject here would
+# authenticate fine and authorise nothing, which is what op-dev and op-qa shipped
+# this morning and had to be rekeyed out of (PRs #138, #139).
+#
+# `roles` is issued from appRoleAssignments on the service principal instead, and
+# PROVEN to arrive: op-dev token 2026-08-25 19:18:27Z carried roles -> platform-admin,
+# with a negative control in the same log window (a user holding only default access
+# got no claim). See wip/onprem-argocd/FINDINGS-2026-08-25-entra-oidc.md.
+ADMIN_ROLE = "platform-admin"
 block = [
     "      rbac:\n",
     '        # INFRA-1639. Unset, the chart defaults leave an SSO user with NO access.\n',
     '        policy.default: ""\n',
     "        policy.csv: |\n",
-    "          # usx-cloud-admin. Entra emits the group OBJECT ID, not the name: the\n",
-    "          # group is cloud-only (onPremisesSyncEnabled null) and Entra can emit a\n",
-    "          # display name only for AD-synced groups. Verified 2026-08-25.\n",
-    "          g, %s, role:admin\n" % GROUP,
-    "        # Argo sees groups only if the provider emits a groups claim.\n",
-    '        scopes: "[groups]"\n',
+    "          # Subject is an Entra APP ROLE value. This tenant emits no groups claim\n",
+    "          # for this application, so a group object ID here would match nothing --\n",
+    "          # dev and QA shipped that and had to be rekeyed. `roles` comes from an\n",
+    "          # appRoleAssignment on the SP and is proven to arrive.\n",
+    "          # usx-cloud-admin (%s) holds it.\n" % GROUP,
+    "          g, %s, role:admin\n" % ADMIN_ROLE,
+    "        # Argo only searches the claims named here.\n",
+    '        scopes: "[roles, groups]"\n',
 ]
 oidc = [
     "        oidc.config: |\n",
@@ -318,8 +333,16 @@ assert o["clientID"] == CLIENT and o["clientSecret"] == "$%s:client_secret" % SE
 assert "enablePKCEAuthentication" not in o and "requestedIDTokenClaims" not in o
 assert set(o["requestedScopes"]) == {"openid", "profile", "email"}
 assert v["dex"]["enabled"] is False
-assert ("g, %s, role:admin" % GROUP) in rb["policy.csv"] and rb["policy.default"] == ""
-assert rb["scopes"] == "[groups]"
+assert ("g, %s, role:admin" % ADMIN_ROLE) in rb["policy.csv"], rb["policy.csv"]
+assert rb["policy.default"] == "", rb["policy.default"]
+assert rb["scopes"] == "[roles, groups]", rb["scopes"]
+# No group object ID may survive as a subject: mixed kinds mean one of them can never
+# match and the file does not show which.
+import re as _re
+_subj = [l.strip().split(",")[1].strip() for l in rb["policy.csv"].splitlines()
+         if l.strip().startswith("g,") and len(l.strip().split(",")) >= 3]
+assert not [x for x in _subj if _re.match(r"^[0-9a-fA-F-]{36}$", x)], \
+    "a group object ID is still a subject: %r" % _subj
 e = yaml.safe_load(open(ES_PATH))
 assert e["apiVersion"] == ES_API and e["spec"]["secretStoreRef"]["name"] == ST_NAME
 assert e["spec"]["data"][0]["remoteRef"]["key"] == SM_KEY
@@ -336,9 +359,16 @@ LINT="$SCRIPT_DIR/lint-manifest-apiversions.py"
   echo "!! apiVersion disagreement -- not pushing." >&2; exit 1; }; }
 
 echo
-git --no-pager diff -- infrastructure
-git --no-pager status --short -- infrastructure
-[ "$PUSH" = "--push" ] || { echo; echo "   DRY RUN -- re-run with --push"; exit 0; }
+# Stage first, and diff the INDEX. Two of the files this builds are new, and
+# `git diff` without staging shows a modified kustomization.yaml listing resources
+# whose contents are nowhere on screen. CLAUDE.md rule 7 says read the diff in full
+# before pushing; a builder that hides its own new files makes that impossible.
+git add -A -- infrastructure
+git --no-pager diff --cached -- infrastructure
+if [ "$PUSH" != "--push" ]; then
+  git reset -q -- infrastructure
+  echo; echo "   DRY RUN -- re-run with --push"; exit 0
+fi
 
 BODY=$(mktemp); trap 'rm -f "$BODY"' EXIT
 cat > "$BODY" <<'MD'
@@ -355,16 +385,22 @@ and external-dns targets. Targets in particular are not portable — op-dev uses
 7 workers, op-qa 3 of 13 — so they are copied from a route already serving this
 cluster, after checking that route's hostname belongs to it.
 
-**Authentication only.** Entra currently issues tokens for this application with no
-`groups` claim, so an SSO user will authenticate and match nothing in `policy.csv`.
-`policy.default` is `""`, so they get no access rather than wrong access, and local
-admin login is unaffected. Tracked separately.
+**Authorisation is keyed on `roles`, not `groups`.** This tenant does not emit a
+`groups` claim for this application under any setting tried, so a group object ID as
+a subject authenticates fine and authorises nothing — which is what dev and QA
+shipped this morning and had to be rekeyed out of (#138, #139). `roles` is issued
+from an appRoleAssignment on the service principal instead, and is proven to arrive:
+an op-dev token at 19:18:27Z carried `roles -> platform-admin`, with a negative
+control in the same window. `usx-cloud-admin` holds that role, so the same people
+keep the same access.
 
-**Not verified against the running cluster.** There is no op-prod kubeconfig on the
-workstation this was built from, so the ClusterSecretStore named here comes from the
-branch's own working ExternalSecret rather than from the cluster. Worth a look at
-the ExternalSecret's status after this syncs — `SecretSynced` alone proves only that
-the sync ran.
+`policy.default` stays `""` — no implicit access for merely authenticating — and the
+local admin account is untouched.
+
+**Read against the running cluster.** The route's gateway, DNS targets and the
+destination Service were read from op-prod itself, not from this branch: every
+VirtualService on this branch belongs to op-dev. `SecretSynced` on the ExternalSecret
+proves only that the sync ran, so check the value once it lands.
 
 Requires the secret to exist first:
 `ALLOW_PROD_WRITE=yes scripts/entra-argocd-to-web-client.sh --secret op-prod ops-controller`
