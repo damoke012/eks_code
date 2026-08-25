@@ -119,6 +119,17 @@ They cannot deploy outside `app-*`, cannot create namespaces, and on prod cannot
 **Decision needed:** which Entra group represents the RW team, and whether QA sync is theirs or
 ours. Prod stays manual regardless.
 
+**Update, later 2026-08-25.** The role now exists as a PR builder rather than a proposal:
+`scripts/pr-argocd-rbac-app-viewer.sh` writes it to all three branches, scoped to the
+AppProject read off each branch, with `sync` on dev and QA and withheld on prod. It needs
+one value from Idris — the group's object ID.
+
+And the authorisation blocker has a route around it that does not depend on the directory
+team: `roles` is a separate claim issued from appRoleAssignments on our own service
+principal, and Argo's `configs.rbac.scopes` can be told to match it
+(`scripts/entra-argocd-app-roles.sh`). Unproven until a fresh token is read, but it is ours
+to try. Sequence and commands: `wip/onprem-argocd/RUNBOOK-FINISH-INFRA-1639-AND-1663.md`.
+
 ## 6. Where Idris is most useful
 
 He has the dev background and built the RW platform, so the highest-leverage split is:

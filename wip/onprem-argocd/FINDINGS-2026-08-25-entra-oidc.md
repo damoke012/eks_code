@@ -200,3 +200,79 @@ Gateway and the Certificate, which are live and broken.
 **Ingressgateway placement is per-cluster, again:** op-prod runs it on **all 10 workers**
 (5 application, 3 platform, 2 system), where op-dev uses 7 and op-qa 3 of 13. Route targets
 must be read from the cluster, never carried over.
+
+## The route around the groups claim, opened 2026-08-25
+
+`groups` is not the only claim Argo CD can key RBAC on. `configs.rbac.scopes` names the
+claims Argo searches for a subject — it defaults to `[groups]`, and `[roles, groups]`
+makes it match either. And `roles` is issued from **appRoleAssignments on the service
+principal**, a different path from directory group membership, so whatever suppresses
+group claims in this tenant has no reason to touch it.
+
+That path is entirely inside the registration we created and own. It needs nothing from
+whoever owns the directory, which matters because the group claim is now a dependency on
+another team with no committed date.
+
+`scripts/entra-argocd-app-roles.sh` — `--inspect`, `--define`, `--assign` — defines
+`platform-admin` and `app-viewer` app roles with **deterministic IDs** (`uuid5` over the
+app ID and the role value), so re-running `--define` is a no-op rather than a duplicate.
+It refuses if a role of the same value already exists under a different ID, which would
+silently split assignments across two roles, one of which nobody holds.
+
+`scripts/pr-argocd-rbac-app-viewer.sh --role-value app-viewer` takes the other side:
+the subject becomes the role value and `scopes` is rewritten to `[roles, groups]` in the
+same edit. Leaving `scopes` at `[groups]` while the subject is a role value writes a
+policy that can never match — precisely the failure being routed around.
+
+**Not yet proven.** No token has been observed carrying `roles`. Nothing in the script
+asserts otherwise: the only evidence that counts is a fresh sign-in read through
+`scripts/argocd-token-claims.sh`, and a token minted before the change tests the old
+config. Assigning a **group** (rather than a user) to an app role requires Entra ID P1;
+if the tenant is not licensed, per-user assignment works on any tier and is enough to
+prove the claim arrives before deciding whether to buy anything.
+
+### One thing we should have read before any of this
+
+`--inspect` now prints `optionalClaims` in full, first, before appRoles. The `groups`
+optional claim takes `additionalProperties`, and one of those values — `emit_as_roles` —
+**moves group values out of the `groups` claim and into `roles` by design**. If that is
+set, there was never a missing claim; we were reading the wrong field, and every
+`groupMembershipClaims` permutation tried today was aimed at the wrong thing. We
+confirmed `groups` was *in* `optionalClaims.idToken`. We never printed what was next to it.
+
+### The check that would have caught it
+
+`scripts/argocd-token-claims.sh` prints the claim names present. It reported `GROUPS:
+ABSENT` truthfully, and that was taken as "the claim is missing" rather than "look at
+what else is there". A claim-name list read as a whole would have shown `roles`, or its
+absence, in the same output. This is the [[adjacent-step-green-signals]] family from the
+other side: a true report about the thing next to the one that matters.
+
+## The application-team view
+
+`scripts/pr-argocd-rbac-app-viewer.sh` adds `role:app-viewer` to `policy.csv` on all
+three branches, scoped to the AppProject **derived from the branch** rather than to
+`*/*`, and with `sync` granted on dev and QA but **withheld on prod** — promotion there
+is human-initiated by the platform, by design.
+
+Self-tested, both directions:
+
+| Case | Result |
+|---|---|
+| prod granted `sync` | assertion fires |
+| subject is a display name, not a GUID | refused before touching the repo |
+| `scopes` missing or wrong for the chosen subject | assertion fires |
+| branch has no `configs.rbac` yet (op-prod) | refuses, names the PR that must land first |
+| run twice | second run reports "already present", exits 3 |
+
+The prod-sync assertion is worth calling out. The first version tested for a substring in
+the branch that never produces it — a check that could only ever pass. It was rewritten to
+count the actual grant lines, and only then did it go red against a real violation. That is
+the third check in this repo written so it could not fail; see [[merged-defect-authorizes-itself]].
+
+**Proven:** the app-role path is configurable end to end from our own registration, and
+the RBAC PR builder is self-tested red on five failure modes.
+**Tested and killed:** nothing new — the groups permutations were exhausted earlier today.
+**Traps:** `--app-roles` replaces the appRoles list wholesale, the same shape as
+`--web-redirect-uris`; `optionalClaims` must be read in full, not queried for the one key
+you expect; and a token predating the change tests the old configuration.
