@@ -107,6 +107,10 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
            --display-name "$CRED_NAME" --years 2 -o json) || exit 1
   SECRET=$(printf '%s' "$CRED" | python3 -c 'import sys,json; print(json.load(sys.stdin)["password"])')
   KEYID=$(printf '%s' "$CRED" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("keyId",""))')
+  # az does not always return keyId on reset. Without it the cleanup below cannot
+  # fire, so look it up by the display name this script controls.
+  [ -n "${KEYID:-}" ] || KEYID=$(az ad app credential list --id "$APP_ID" \
+        --query "[?displayName=='$CRED_NAME'].keyId | [0]" --output tsv 2>/dev/null)
   unset CRED
   [ ${#SECRET} -ge 30 ] || { echo "!! secret looks wrong (${#SECRET} chars)" >&2; unset SECRET; exit 1; }
   echo "   captured ${#SECRET} chars, keyId ${KEYID:-<unknown>}"
