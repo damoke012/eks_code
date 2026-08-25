@@ -62,7 +62,22 @@ GW=$(K get gateways.networking.istio.io -A        -o jsonpath='{range .items[*]}
 [ -n "$GW" ] || { echo "!! no shared-http Gateway on $BR" >&2; exit 1; }
 
 # The Gateway must already serve this cluster's hostnames, or the route cannot match.
-GWHOSTS=$(K -n "${GW%%/*}" get gateways.networking.istio.io "${GW##*/}"             -o jsonpath='{range .spec.servers[*]}{range .hosts[*]}{.}{" "}{end}{end}' 2>/dev/null)
+# Parse JSON rather than nested jsonpath ranges: `{range .spec.servers[*]}{range
+# .hosts[*]}{.}{end}{end}` returns only the separators, so the guard read an empty
+# string and reported the Gateway as serving the wrong hosts.
+GWHOSTS=$(K -n "${GW%%/*}" get gateways.networking.istio.io "${GW##*/}" -o json 2>/dev/null \
+          | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+hosts = []
+for srv in (d.get("spec") or {}).get("servers") or []:
+    hosts += srv.get("hosts") or []
+print(" ".join(hosts))')
+[ -n "${GWHOSTS// /}" ] || { echo "!! read no hosts at all from $GW -- refusing to guess." >&2; exit 1; }
+echo "   $GW serves: $GWHOSTS"
 case "$GWHOSTS" in
   *op-prod.usxpress.io*) : ;;
   *) echo "!! $GW serves '$GWHOSTS' -- not op-prod hostnames." >&2
