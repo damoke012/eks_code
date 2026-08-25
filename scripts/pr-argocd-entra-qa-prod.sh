@@ -17,6 +17,8 @@
 #   scripts/pr-argocd-entra-qa-prod.sh op-qa
 #   scripts/pr-argocd-entra-qa-prod.sh op-qa --push
 set -euo pipefail
+# Resolve before any cd -- this script cds into the platform repo.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BR="${1:-}"; PUSH="${2:-}"
 REPO="${REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
 case "$BR" in op-qa|op-prod) : ;; *)
@@ -209,7 +211,7 @@ git --no-pager diff -- infrastructure/argocd
 git --no-pager status --short -- infrastructure/argocd
 # A new manifest written from another cluster's layout froze op-qa delivery on
 # 2026-08-25 (external-secrets.io/v1beta1 against a cluster serving v1). Gate on it.
-LINT="$(dirname "$0")/lint-manifest-apiversions.py"
+LINT="$SCRIPT_DIR/lint-manifest-apiversions.py"
 if [ -f "$LINT" ]; then
   echo
   python3 "$LINT" "$REPO" "$BR" || {

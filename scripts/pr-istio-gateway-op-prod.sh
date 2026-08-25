@@ -19,13 +19,15 @@
 #   scripts/pr-istio-gateway-op-prod.sh
 #   scripts/pr-istio-gateway-op-prod.sh --push
 set -euo pipefail
+# Resolve before any cd -- this script cds into the platform repo.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PUSH="${1:-}"
 BR=op-prod
 REPO="${REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
 [ -d "$REPO/.git" ] || { echo "!! not a git repo: $REPO" >&2; exit 2; }
 
 # ---- verify against the live cluster before proposing anything
-LIB="$(cd "$(dirname "$0")" && pwd)/lib-onprem-ctx.sh"
+LIB="$SCRIPT_DIR/lib-onprem-ctx.sh"
 # shellcheck source=/dev/null
 source "$LIB"; onprem_resolve_ctx "$BR" || {
   echo "!! need the op-prod cluster to verify the issuer. Rebuild access first:" >&2
