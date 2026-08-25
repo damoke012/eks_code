@@ -681,3 +681,42 @@ nothing else in today's tooling would catch a Sync button appearing on productio
 
 **Proven:** nothing new — this is a correction to what counts as proof.
 **Trap:** an empty Applications list is not a permissions result. Ask the server.
+
+## `argocd login --sso` needs its own redirect URI, and it is a PUBLIC client
+
+The CLI does not redirect to the cluster hostname. It starts a listener on the workstation
+and asks Entra for:
+
+```
+redirect_uri=http://localhost:8085/auth/callback   code_challenge=... (PKCE)
+```
+
+Neither half matches what we registered. The three `/auth/callback` URIs are the cluster
+hostnames, registered as **web**, and the CLI needs `localhost:8085` registered as a
+**public client** — it holds no client secret and redeems the code with PKCE.
+
+**This is the SPA lesson from the opposite direction.** This morning an SPA registration
+was rejected at the callback with `AADSTS9002327` because `argocd-server` redeems
+server-side and therefore needs a confidential client. The CLI is the other case: it
+genuinely is a public client, and a web-type URI would refuse it. Both client types coexist
+on one registration — `web.redirectUris` for the server, `publicClient.redirectUris` for
+the CLI — and the fix is to stop thinking of "the app" as having one client type.
+
+`scripts/entra-argocd-cli-redirect.sh --add` registers 8085 and 8080 (the port people reach
+for when 8085 is busy), merging rather than replacing: `--public-client-redirect-uris`
+replaces the list wholesale, the same trap as `--web-redirect-uris`, and the merge asserts
+no existing URI is dropped.
+
+**WSL cannot launch a browser** — `argocd login --sso` died on
+`exec: "xdg-open": executable file not found`. No install needed:
+`--sso-launch-browser=false` prints the URL to open in Windows, and the callback reaches
+the listener inside WSL.
+
+**Why this matters beyond today's closure.** CLI access is not a convenience for us; it is
+how an application team scripts against Argo. Leaving it unregistered would have surfaced
+as "SSO doesn't work" the first time an app team tried `argocd login`, months from now,
+with nobody remembering that the CLI uses a different redirect.
+
+**Proven:** nothing yet — the URIs are registered but no CLI login has completed.
+**Trap:** an app registration has more than one client type, and the redirect URI decides
+which one Entra applies.
