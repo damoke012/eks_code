@@ -97,3 +97,26 @@ owns the directory.
 `#132` oidc.config in, dex.config out, dex disabled, policy.csv rekeyed to the object ID.
 `#133` client secret via the existing ExternalSecret.
 `#134` requestedIDTokenClaims removed.
+
+
+## op-qa, later the same day
+
+PRs #135 and #136. QA differs from dev structurally and the first attempt broke it:
+
+* op-qa keeps ExternalSecrets in `infrastructure/argocd-config/`, dev keeps them in
+  `infrastructure/argocd/`. The file was written into dev's location.
+* op-qa serves `external-secrets.io/v1`; the file said `v1beta1`, from memory. Flux rejected
+  it at dry-run, holding the `argocd` Kustomization not-ready — and `argocd-config` and
+  `argocd-apps` depend on it, so **QA delivery froze on one string**. Fixed in #136 by taking
+  the apiVersion from the branch's own working file.
+* the chart owns `argocd-secret` on QA (no `admin-externalsecret.yaml` under
+  `infrastructure/argocd/`), so the client secret goes in its **own** secret labelled
+  `app.kubernetes.io/part-of: argocd`, referenced as `$argocd-entra-oidc:client_secret`.
+  Merging into a chart-owned secret risks the next upgrade dropping the key.
+
+Blocked first on `secretsmanager:CreateSecret` — `op-qa-platform-admin` granted only
+`sts:GetCallerIdentity`. Fixed with `scripts/idc-grant-secretsmanager.sh op-qa --apply`.
+
+Verified: 200 from the route, `/api/v1/settings` serving the Entra `oidcConfig`, and 40 bytes
+in `argocd-entra-oidc`. `scripts/lint-manifest-apiversions.py` now gates the PR builder, and
+was self-tested red on the real defect and green on the fix.
