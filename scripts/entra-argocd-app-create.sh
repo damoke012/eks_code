@@ -23,8 +23,10 @@
 #
 #   scripts/entra-argocd-app-create.sh            # dry run: print every call
 #   scripts/entra-argocd-app-create.sh --create
+#   scripts/entra-argocd-app-create.sh --verify   # read every field back
 set -uo pipefail
 DO_IT=false; [ "${1:-}" = "--create" ] && DO_IT=true
+VERIFY=false;  [ "${1:-}" = "--verify" ] && VERIFY=true
 command -v az >/dev/null 2>&1 || { echo "!! az not on PATH -- run this on WSL" >&2; exit 2; }
 
 APP_NAME="Argo CD On-Prem"
@@ -32,6 +34,30 @@ GROUP="usx-cloud-admin"
 GROUP_ID="b9a1ff74-efa1-4b20-be8a-8706a5ab2636"   # verified 2026-08-25, cloud-only group
 URIS='["https://argocd.op-dev.usxpress.io/auth/callback","https://argocd.op-qa.usxpress.io/auth/callback","https://argocd.op-prod.usxpress.io/auth/callback"]'
 DEFAULT_ACCESS_ROLE="00000000-0000-0000-0000-000000000000"
+
+APP_ID_KNOWN="42dc0c33-4c56-47a5-b207-d119272997aa"   # created 2026-08-25
+SP_ID_KNOWN="b20084ae-9f13-4ca7-961c-b05f023fa2c2"
+
+if $VERIFY; then
+  # az rest PATCH returns 204 with no body, so nothing above proves the redirect
+  # URIs or the group claim actually landed. Read them back.
+  echo "== app registration $APP_ID_KNOWN"
+  az ad app show --id "$APP_ID_KNOWN" --query \
+    '{signInAudience:signInAudience, spaRedirectUris:spa.redirectUris, webRedirectUris:web.redirectUris, groupMembershipClaims:groupMembershipClaims, idTokenClaims:optionalClaims.idToken}' \
+    -o json
+  echo "== service principal $SP_ID_KNOWN"
+  az ad sp show --id "$SP_ID_KNOWN" --query \
+    '{appRoleAssignmentRequired:appRoleAssignmentRequired, appId:appId}' -o json
+  echo "== who is assigned"
+  az rest --method GET \
+    --url "https://graph.microsoft.com/v1.0/servicePrincipals/$SP_ID_KNOWN/appRoleAssignedTo" \
+    --query 'value[].{principal:principalDisplayName,type:principalType}' -o json
+  echo
+  echo "   Expected: 3 SPA URIs and ZERO web URIs (web would make it a confidential"
+  echo "   client and PKCE would be refused); groupMembershipClaims ApplicationGroup;"
+  echo "   idToken carrying groups; assignment required; usx-cloud-admin assigned."
+  exit 0
+fi
 
 run() {
   if $DO_IT; then
