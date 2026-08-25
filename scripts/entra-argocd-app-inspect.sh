@@ -34,7 +34,12 @@ printf '%s\n' "$APPS" | while IFS='|' read -r APPID LABEL; do
 
   OWNERS=$(az ad app owner list --id "$APPID" \
              --query '[].{id:id,upn:userPrincipalName}' -o json 2>&1)
-  if printf '%s' "$OWNERS" | grep -q '"id"'; then
+  if [ "$(printf '%s' "$OWNERS" | tr -d '[:space:]')" = "[]" ]; then
+    # An empty JSON array is a real answer, not a failure: the read succeeded and the
+    # app has ZERO registered owners. Nobody can update it without a directory role.
+    printf '   \033[31mOWNER    NONE -- the app has no owners at all; only an\033[0m\n'
+    printf '   \033[31m                 Application Administrator can change it\033[0m\n'
+  elif printf '%s' "$OWNERS" | grep -q '"id"'; then
     if printf '%s' "$OWNERS" | grep -q "$ME"; then
       printf '   \033[32mOWNER    yes -- az ad app update would be accepted\033[0m\n'
     else
