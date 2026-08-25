@@ -38,7 +38,11 @@ run() {
     printf '\033[36m+ %s\033[0m\n' "$*" >&2
     "$@"
   else
-    printf '\033[90mwould run: %s\033[0m\n' "$*" >&2
+    # Quote each argument for display, so a dry run cannot read as a runnable
+    # command that would word-split differently from the one actually issued.
+    printf '\033[90mwould run:' >&2
+    printf ' %q' "$@" >&2
+    printf '\033[0m\n' >&2
   fi
 }
 

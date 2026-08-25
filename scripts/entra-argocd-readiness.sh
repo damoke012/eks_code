@@ -76,7 +76,7 @@ if [ -f "$LIB" ] && command -v kubectl >/dev/null 2>&1; then
     IMG=$(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" -n argocd \
             get deploy argocd-server -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
     val "argocd-server image : ${IMG:-<not found>}"
-    VER="${IMG##*:}"
+    VER="${IMG##*:}"; VER="${VER#v}"          # tags carry a leading v: v3.4.5
     MAJ="${VER%%.*}"; REST="${VER#*.}"; MIN="${REST%%.*}"
     if [ -n "${MAJ:-}" ] && [ -n "${MIN:-}" ] && printf '%s%s' "$MAJ" "$MIN" | grep -qE '^[0-9]+$'; then
       if [ "$MAJ" -gt 2 ] || { [ "$MAJ" -eq 2 ] && [ "$MIN" -ge 8 ]; }; then
