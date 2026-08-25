@@ -88,8 +88,10 @@ case "$ALLOWED" in
     esac ;;
   *) huh "tenant policy unreadable (needs Policy.Read.All); prove it by trying the create" ;;
 esac
-val "proven fallback: 'az ad app update --id $RW_APP' succeeded 2026-08-13,"
-val "so UPDATE on an existing app is not in doubt even if CREATE is."
+val "fallback: 'az ad app update --id $RW_APP' succeeded 2026-08-13 -- but app write is"
+val "granted PER-APP by ownership, so that proves ownership of THAT app only. If create is"
+val "denied, the route is to own (or be added to) an existing registration:"
+val "  scripts/entra-argocd-app-inspect.sh"
 
 # --------------------------------------------- gate 3: does an argocd app exist yet
 say "3. Is there already an Argo CD app registration"
@@ -152,6 +154,10 @@ if [ -z "$AWS_PROFILE_ARG" ]; then
   val "re-run with: $0 $BR --aws-profile <the profile for $BR>"
 elif ! command -v aws >/dev/null 2>&1; then
   huh "aws not on PATH"
+elif ! aws configure list-profiles 2>/dev/null | grep -qx "$AWS_PROFILE_ARG"; then
+  no "no such AWS profile: '$AWS_PROFILE_ARG'"
+  val "configured profiles: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')"
+  val "an unconfigured profile makes every later aws call fail silently -- fix the name first"
 else
   ENVPATH="op-usxpress-${BR#op-}/argocd/entra_oidc_client_secret"
   D=$(aws secretsmanager describe-secret --profile "$AWS_PROFILE_ARG" \
