@@ -415,3 +415,47 @@ human-initiated by the platform, by design.
 succeeds and grants nothing, on any app in this tenant, the answer should take minutes.
 Grafana on-prem uses the same tenant and the same secret convention
 (`op-usxpress-*/platform/grafana/azure-ad`), so it is the likely next consumer.
+
+## op-qa live, and one more command class retired — 2026-08-25
+
+`scripts/verify-argocd-rbac.sh op-qa` read the **running** ConfigMap, not a sync status:
+subjects `platform-admin, app-viewer`, all app-role values, `scopes: [roles, groups]`,
+`policy.default: ''`. Internally consistent. QA still needs a browser sign-in; it has
+never had one.
+
+PR **#140** opened for the op-prod ACME solver zone. The diff is two files, one line each,
+comments and the shared `iaac-route53-zone` role untouched.
+
+**A stale comment rode along, and the guard is why it is visible.** On the op-prod branch
+`letsencrypt-staging.yaml` says:
+
+```yaml
+# Restrict this issuer to the on-prem dev subzone. Future subzones
+# (op-qa, op-prod) get their own selector blocks or their own issuer.
+dnsZones:
+- op-prod.usxpress.io      # was op-qa.usxpress.io
+```
+
+It now reads "the on-prem **dev** subzone" above an **op-prod** zone. The comment was
+written for op-dev, copied to op-qa, then to op-prod — instance nine of
+[[manifests-copied-across-branches]], and the first where the copy is *prose* rather than
+configuration. The builder deliberately does not touch comments, after an earlier version
+corrupted one; so this is a follow-up edit, not a bug in the run. Not blocking: a comment
+does not select a zone.
+
+### `kubectl --context op-usxpress-prod` is not a runnable command here
+
+It failed with `context "op-usxpress-prod" does not exist` — the third command handed over
+today that could not run as written (after `argocd-token-claims.sh` missing its cluster
+argument, and an `-o text` that AWS rejects). Every script in this repo already resolves
+the context through `lib-onprem-ctx.sh` precisely because `~/.kube` churns; the raw form
+was written anyway.
+
+`scripts/onprem-kubectl.sh <cluster> -- <kubectl args...>` retires the class. The cluster
+is named once, as an endpoint-verified argument, and everything after `--` passes through.
+This matters beyond convenience: a hard-coded context name that *does* exist but points
+somewhere else is the 2026-08-24 failure, where four commands labelled "prod" ran against
+op-dev.
+
+**Proven:** op-qa serves the app-role policy; PR #140 is open and its diff is minimal.
+**Traps:** a comment can be a copied artefact too; a context name is not a cluster.

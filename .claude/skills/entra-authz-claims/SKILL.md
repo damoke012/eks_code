@@ -98,6 +98,12 @@ Rekeying `role:admin` changes your own access. Merge one cluster at a time, and 
 escape hatch first — the local `admin` account is unaffected by any of this:
 
 ```
-kubectl --kubeconfig ~/.kube/op-usxpress-dev-fresh.yaml --context admin@op-usxpress-dev \
-  -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+scripts/onprem-kubectl.sh op-dev -- -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d
 ```
+
+**Never hand over a bare `kubectl --context <name>` for these clusters.** `~/.kube` churns
+— contexts vanish, files rotate to `.bak`, op-prod was rebuilt from its talosconfig — so a
+hard-coded context name either fails outright or, worse, resolves to a different cluster
+than the label claims. `scripts/onprem-kubectl.sh <cluster> -- <args>` resolves by
+endpoint and verifies against a live node name.
