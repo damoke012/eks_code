@@ -22,8 +22,21 @@ case "$BR" in op-dev|op-qa|op-prod) : ;; *)
   echo "!! usage: $0 <op-dev|op-qa|op-prod> [--role platform-admin|app-viewer]" >&2; exit 2 ;; esac
 HOST="argocd.${BR}.usxpress.io"
 command -v argocd >/dev/null 2>&1 || {
-  echo "!! the argocd CLI is not on PATH." >&2
-  echo "   curl -sSL -o ~/.local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64 && chmod +x ~/.local/bin/argocd" >&2
+  cat >&2 <<INSTALL
+!! the argocd CLI is not on PATH. Install it pinned to THIS server's version --
+   a client newer than the server fails in ways that read like a permissions problem:
+
+     mkdir -p ~/.local/bin
+     VER=\$(curl -s https://$HOST/api/version | python3 -c 'import sys,json;print(json.load(sys.stdin)["Version"].split("+")[0])')
+     curl -sSL -o ~/.local/bin/argocd "https://github.com/argoproj/argo-cd/releases/download/\$VER/argocd-linux-amd64"
+     chmod +x ~/.local/bin/argocd
+     export PATH="\$HOME/.local/bin:\$PATH"     # add to ~/.bashrc to keep it
+     argocd version --client
+
+   Then:  argocd login $HOST --sso --grpc-web
+   --grpc-web is required: TLS terminates at the Istio gateway, so plain gRPC
+   does not reach argocd-server.
+INSTALL
   exit 2; }
 
 WHO=$(argocd account get-user-info --server "$HOST" --grpc-web 2>/dev/null)
