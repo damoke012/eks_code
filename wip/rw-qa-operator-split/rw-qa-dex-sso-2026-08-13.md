@@ -107,6 +107,25 @@ secretsmanager:ListSecretVersionIds
 Not being able to inspect or rotate a secret the cluster depends on will bite again — the next
 time something actually does expire.
 
+**RESOLVED 2026-08-25.** It bit again, on `secretsmanager:CreateSecret` for
+`op-usxpress-qa/platform/argocd/azure-ad`. Fixed by adding a `PlatformSecretsReadWrite`
+statement to the `op-qa-platform-admin` permission set, scoped to
+`arn:aws:secretsmanager:us-east-2:527101283767:secret:op-usxpress-qa/*`, then re-provisioning:
+`scripts/idc-grant-secretsmanager.sh op-qa --apply` (management account 660075424663, profile
+`usx-mgmt`, permission set `ps-72231bee9cdd54cd`). Verified by writing the Argo client secret.
+
+Three traps in that one operation:
+1. **`put-inline-policy-to-permission-set` REPLACES the entire inline policy.** The existing
+   `AllowGetCallerIdentity` statement would have been destroyed by a blind put. Read, merge, write.
+2. **Provisioning is asynchronous** — `provision-permission-set` returns `IN_PROGRESS`. Retrying
+   before `SUCCEEDED` fails with the identical `AccessDenied`, which reads exactly like the grant
+   not having worked. Poll `describe-permission-set-provisioning-status`.
+3. **`aws sso login` refreshes the SSO token, not the cached assumed-role credentials.** Those
+   still carry the previous policy. `rm -rf ~/.aws/cli/cache ~/.aws/sso/cache` first.
+
+Dev and prod have the same gap; `scripts/idc-grant-secretsmanager.sh` takes `op-dev` and
+`op-prod` too, and refuses prod without `ALLOW_PROD_WRITE=yes`.
+
 ---
 
 ## Still open
