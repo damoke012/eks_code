@@ -87,3 +87,17 @@ leaves KUBECONFIG at its PREVIOUS value — on 2026-08-24 four commands labelled
 against op-dev. Same trap as 2026-07-24. Resolve by endpoint with a script, never by pasting
 a path.
 
+
+
+**op-prod recovered 2026-08-25 (INFRA-1663).** It had no persisted kubeconfig since at least
+2026-08-24, which forced every prod fact to be inferred from Git. The credentials were in
+Secrets Manager the whole time: `op-usxpress-prod/talosconfig`, readable with the
+`ops-controller` profile (account 937464026810, us-east-2). `talosctl kubeconfig` mints a real
+one — correct CA, correct endpoint, nothing inferred.
+
+    scripts/onprem-prod-kubeconfig.sh ops-controller   ->  ~/.kube/op-usxpress-prod.yaml
+
+Verified against live node names: **13 nodes** — `talos-cp-op-prod-1..3`,
+`talos-wk-op-prod-application-1..5`, `talos-wk-op-prod-platform-1..3`,
+`talos-wk-op-prod-system-1..2`. Endpoint 10.10.82.52:6443, context `admin@op-usxpress-prod`.
+The same route should work for any cluster whose talosconfig is in Secrets Manager.

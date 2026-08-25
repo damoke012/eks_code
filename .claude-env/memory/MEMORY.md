@@ -18,7 +18,7 @@
 - [Cloud EKS platform doc](cloud-eks-platform-doc.md) — Confluence + artifact refs; ⚠️ idris-kt KT repo trees are STALE (real iaac-eks / terraform-variant-apps structure)
 - [RW/platform SSO via Entra](rw-platform-sso-entra.md) — NEW 2026-07-13: reusable dev service-account Entra SSO pattern, RisingWave first consumer
 - [Wiz sensor on-prem dev](wiz-sensor-onprem-dev.md) — INFRA-1586: eBPF sensor live on op-dev, CP exclusion verified (7 wk/0 CP), blocked on real Wiz token
-- [WSL kubeconfig churn](wsl-kubeconfig-churn.md) — reconnect steps + cluster endpoint fingerprints (verify before running; prod=BF7BD089, qa=D0E66C, op-dev=10.10.82.50)
+- [WSL kubeconfig churn](wsl-kubeconfig-churn.md) — reconnect steps + cluster endpoint fingerprints (verify before running; prod=BF7BD089, qa=D0E66C, op-dev=10.10.82.50); ✅ op-prod kubeconfig REBUILDABLE from its talosconfig 2026-08-25
 - [USX GHE ≠ personal GitHub](usx-github-enterprise-not-personal.md) — all USX/variant-inc repo work is corp GHE on WSL; codespace damoke012 token must never reach USX repos
 - [No test pods in prod](no-test-pods-in-prod.md) — never `kubectl run`/`debug` throwaways in a prod cluster; read telemetry or exec into an already-running pod
 - [Route every prompt through skills](route-every-prompt-through-skills.md) — check the router every turn; the misses are always mid-flow
