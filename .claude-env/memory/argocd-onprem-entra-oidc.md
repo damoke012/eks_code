@@ -1,6 +1,6 @@
 ---
 name: argocd-onprem-entra-oidc
-description: op-dev Argo CD authenticates via Entra OIDC (Dex removed); authorization blocked — Entra emits no groups claim
+description: dev+QA Argo CD authenticate via Entra OIDC (Dex removed); groups claim never arrives but APP ROLES DO — roles->platform-admin PROVEN on op-dev 2026-08-25
 metadata:
   type: project
 ---
@@ -42,3 +42,49 @@ is tenant-level (token issuance policy, Conditional Access, or the ADFS federati
 **op-prod blocked 2026-08-25.** No VirtualService for argocd, so the callback has nowhere to
 land — and no route on that branch can be copied from, because all 5 belong to op-dev
 ([[manifests-copied-across-branches]]). Unblocks with INFRA-1663 (no prod kubeconfig).
+
+
+**✅ PROVEN 2026-08-25 19:18Z — the route around the groups claim works.** Token on op-dev:
+`roles: ["platform-admin"]`, `groups` still absent. The control was free and decisive —
+Idris signed in six minutes earlier against the identical config holding only **default
+access** and got **no** roles claim. Same app, same tenant, same federation; the
+assignment is the variable. **Group-to-app-role assignment worked first try** —
+`usx-cloud-admin` holds `platform-admin`, so no Entra ID P1 licence is needed and teams
+are granted as groups. `emit_as_roles` was NOT set (`additionalProperties: []`) — ruled
+out by reading `optionalClaims` in full, which should have come before every
+`groupMembershipClaims` permutation.
+
+**Original write-up, now confirmed:** `roles` is a separate
+claim, issued from **appRoleAssignments on the service principal**, not from directory group
+membership, so whatever suppresses group claims here has no reason to touch it. Argo CD's
+`configs.rbac.scopes` names which claims it searches for a subject — `[roles, groups]` matches
+either. The whole path is inside the registration we own, so it needs **nothing** from the
+directory team. `scripts/entra-argocd-app-roles.sh` (`--inspect`/`--define`/`--assign`,
+deterministic uuid5 role IDs) and `scripts/pr-argocd-rbac-app-viewer.sh --role-value`.
+Assigning a **group** to an app role needs Entra ID P1; per-user assignment works on any tier
+and is enough to prove the claim arrives.
+
+**Read `optionalClaims` in full before anything else.** The `groups` optional claim takes an
+`additionalProperties` value, **`emit_as_roles`**, that moves group values *out* of `groups`
+and *into* `roles` by design. We verified `groups` was present in `optionalClaims.idToken` and
+never printed what sat beside it — so every `groupMembershipClaims` permutation tried on
+2026-08-25 may have been aimed at the wrong field. `--inspect` now dumps it first.
+
+**The app-team view exists as a builder:** `scripts/pr-argocd-rbac-app-viewer.sh` writes
+`role:app-viewer` to all three branches, scoped to the AppProject **read off each branch**,
+`sync` on dev/QA and **withheld on prod**. Needs one value — the RW team's Entra group object
+ID, from Idris. Ordered commands for everything remaining:
+`wip/onprem-argocd/RUNBOOK-FINISH-INFRA-1639-AND-1663.md`.
+
+**INFRA-1639 cannot close as written** ("SSO for application teams") — split it into
+authentication (done on dev+QA), the claim blocker (someone else's), and the app-team view.
+
+
+**How to apply.** Subjects in `policy.csv` are **app-role values**, not GUIDs, and
+`configs.rbac.scopes` must be `[roles, groups]`. Every `g,` subject must be the **same
+kind** — a file holding both a group object ID and a role value has one subject that can
+never match, and which one is invisible from the file;
+`scripts/pr-argocd-rbac-app-viewer.sh` rekeys the admin line in the same edit and asserts
+this. `scripts/argocd-token-claims.sh <cluster>` needs its cluster argument and now prints
+claim **values** — a claim NAME in a list proves emission, not content
+([[adjacent-step-green-signals]]).

@@ -39,7 +39,7 @@
 - [Identity names don't cross systems](identity-names-do-not-cross-systems.md) — onprem-platform-admins is a k8s/aws-auth name, never a directory group; Argo uses usx-cloud-admin
 - [A merged defect authorizes itself](merged-defect-authorizes-itself.md) — precedent-based checks invert into defect-propagation once the bug lands; use dominant-value + exclude-self + self-test both directions
 - [Platform admin can't write its own secrets](platform-admin-cannot-write-its-own-secrets.md) — op-*-platform-admin had ONLY sts:GetCallerIdentity; ✅ op-qa fixed 2026-08-25, dev+prod still open
-- [Argo CD on-prem Entra OIDC](argocd-onprem-entra-oidc.md) — ✅ auth PROVEN on op-dev 2026-08-25 (Dex deleted, secret by ESO); ❌ Entra emits NO groups claim so RBAC is dead; QA/prod need only a branch PR
+- [Argo CD on-prem Entra OIDC](argocd-onprem-entra-oidc.md) — ✅ auth + authz SOLVED op-dev 2026-08-25: groups never arrives, but app ROLES do (roles→platform-admin, negative control confirmed); group assignment needs no P1; policy.csv subjects are role VALUES
 - [Argo SSO / Identity Center limits](argocd-sso-blocked-on-management-account.md) — SAML+Dex decided; mgmt account 660075424663 needed, and the SAML app is CONSOLE-ONLY (create/ACS/audience/mappings have no API)
 - [Corp AD reachable from op-dev](onprem-ad-ldap-reachable.md) — CoreDNS forwards usxpress.com, 636 LDAPS open from the argocd namespace; makes a zero-console Dex LDAP connector viable
 

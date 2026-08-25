@@ -29,3 +29,11 @@ does all four; it is gated into `scripts/pr-argocd-entra-qa-prod.sh` before push
 
 Fourth instance in one day of a check failing in a way indistinguishable from a finding —
 see [[adjacent-step-green-signals]], and [[argocd-onprem-entra-oidc]] for the others.
+
+
+**Third check written so it could not fail, 2026-08-25.** `pr-argocd-rbac-app-viewer.sh`
+asserted "op-prod must not grant sync" by substring-testing text that the no-sync branch never
+writes — it passed on every input, including a deliberate violation. Rewritten to *count the
+matching grant lines*, it went red immediately. The tell: an assertion whose subject is a
+string **you** just chose whether to write. Assert over the parsed result, not over your own
+output.

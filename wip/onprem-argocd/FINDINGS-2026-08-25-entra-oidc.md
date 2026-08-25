@@ -520,3 +520,55 @@ offers only 443.
 **Proven:** op-prod's Gateway serves its own hostnames and its wildcard certificate is
 issued. **Traps:** AGE is creation, not last failure; a builder can pass every guard and
 still emit nothing.
+
+## op-prod complete, end to end. 2026-08-25 20:13Z
+
+```
+external-dns 20:13:14Z  INSERT dynamodb record "argocd.op-prod.usxpress.io#A#"
+                        CREATE argocd.op-prod.usxpress.io A
+                        1 record(s) were successfully updated  zone Z0658284PVIFD4Q8I9PO
+dig argocd.op-prod.usxpress.io -> 10 A records, both public and corp resolvers
+```
+
+**The first DNS record external-dns has ever created on op-prod.** The surrounding log is
+`All records are already up to date` at one-minute intervals for 27 days — 4001
+Kustomization reconciliations of a cluster that had nothing to publish.
+
+The full chain, each step blocked by the one before it: ACME solver zone (#140) →
+`wildcard-op-prod` issued → Gateway serving op-prod hostnames (#137) → Argo route,
+OIDC and RBAC (#141) → `role:app-viewer` (#142). Plus dev/QA's #138 and #139.
+
+### The copied-branch pattern is not universal, and that is worth recording
+
+Every prediction of a copied value was right today until this one. op-prod's external-dns
+carries `--txt-owner-id=iaac-talos/us-east-2/op-usxpress-prod` — genuinely per-cluster, not
+op-qa's — and `--domain-filter=usxpress.io`, broad enough for all three. There was no
+ownership contention and no zone mismatch. Instance ten did not happen.
+
+[[manifests-copied-across-branches]] is a strong prior, not a law. It applies to files
+written by hand and copied between branches; it does not apply to values a module already
+templates per cluster. Predicting it everywhere would have sent us to fix something that
+was correct.
+
+### Corrections to two calls made in the last hour
+
+1. **"The Kustomizations are green against a stale revision."** Wrong mechanism. I claimed
+   the `STATUS` column was a condition *message* lagging `lastAppliedRevision`. It is not —
+   both agreed at every instant. The `history` block settles it: revision `4538b5bc` last
+   reconciled at 20:07:59, `2657cd24` first at 20:13:13. The cluster simply reconciled
+   between two commands, on its own 10-minute tick, **before** either annotate landed.
+   The original read ("hasn't picked it up yet") was correct; the explanation invented to
+   replace it was not. Neither `flux reconcile` annotation was needed.
+2. **"external-dns may not be deployed on prod."** It was, under the same name as dev,
+   1/1 for 27 days.
+
+**An empty `dig` right after a record is created is a cached negative response**, not a
+missing record. The NXDOMAIN TTL held on the corp resolver for several minutes after
+external-dns had already written to Route 53. Query a public resolver to distinguish
+"not published" from "not yet visible here".
+
+**Proven:** Argo CD on all three on-prem clusters authenticates against Entra and
+authorises from the `roles` claim; op-prod resolves, terminates TLS with its own
+certificate, and serves Argo.
+**Still unexercised:** `role:app-viewer` — nobody has signed in as an application-team
+member. That, not our own admin access, is the acceptance test for INFRA-1639.
