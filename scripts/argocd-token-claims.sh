@@ -20,12 +20,31 @@ LIB="$(dirname "${BASH_SOURCE[0]}")/lib-onprem-ctx.sh"
 # shellcheck source=/dev/null
 source "$LIB"; onprem_resolve_ctx "$BR" || exit 1
 
+# The running pod's start time IS the config boundary: that pod was created by
+# the rollout that applied the current oidc.config. A token issued before it
+# was issued against the previous config, whatever the wall clock says.
+PODSTART=$(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" -n argocd \
+   get pods -l app.kubernetes.io/name=argocd-server \
+   --field-selector=status.phase=Running \
+   -o jsonpath='{.items[0].status.startTime}' 2>/dev/null)
+
 kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" -n argocd \
   logs deploy/argocd-server --since="$SINCE" 2>/dev/null \
-| python3 -c '
+| PODSTART="$PODSTART" python3 -c '
 import sys, re, json, datetime
 
+import os
 now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+ps = os.environ.get("PODSTART") or ""
+podstart = None
+if ps:
+    try:
+        podstart = datetime.datetime.fromisoformat(ps.replace("Z", "+00:00")).timestamp()
+        print("   argocd-server pod running since %s -- a token older than that was"
+              % datetime.datetime.fromtimestamp(podstart, datetime.timezone.utc).strftime("%H:%M:%SZ"))
+        print("   issued against the PREVIOUS config.")
+    except Exception:
+        pass
 print("   now: %s" % datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%SZ"))
 seen, rows = set(), []
 pat = re.compile(r'"'"'grpc\.request\.claims="(.*?)" grpc\.request\.content'"'"')
@@ -52,7 +71,12 @@ for c in rows:
     # Only report the age. Whether it predates a given change is not something
     # this script can know, and asserting it made a valid post-change token read
     # as untested on 2026-08-25.
-    stale = "" if age is None or age < 180 else "   <-- %dm%02ds old; check this against when you made the change" % (age // 60, age % 60)
+    if podstart and iat and iat < podstart:
+        stale = "   <-- PREDATES the running pod: this tests the OLD config"
+    elif podstart and iat:
+        stale = "   <-- issued against the CURRENT config"
+    else:
+        stale = "" if age is None or age < 180 else "   <-- %dm%02ds old" % (age // 60, age % 60)
     print("-- token issued %s (%ss ago)  sub %s%s" % (
         when, age if age is not None else "?", str(c.get("preferred_username") or c.get("sub"))[:40], stale))
     print("   claims present: %s" % ", ".join(sorted(c.keys())))
