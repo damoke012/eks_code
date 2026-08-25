@@ -178,6 +178,17 @@ PY
 echo
 git --no-pager diff -- infrastructure/argocd
 git --no-pager status --short -- infrastructure/argocd
+# A new manifest written from another cluster's layout froze op-qa delivery on
+# 2026-08-25 (external-secrets.io/v1beta1 against a cluster serving v1). Gate on it.
+LINT="$(dirname "$0")/lint-manifest-apiversions.py"
+if [ -f "$LINT" ]; then
+  echo
+  python3 "$LINT" "$REPO" "$BR" || {
+    echo "!! apiVersion disagreement above -- not pushing." >&2
+    echo "   Confirm what the cluster serves before overriding." >&2
+    exit 1; }
+fi
+
 [ "$PUSH" = "--push" ] || { echo; echo "   DRY RUN -- re-run with --push"; exit 0; }
 
 BODY=$(mktemp); trap 'rm -f "$BODY"' EXIT
