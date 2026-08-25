@@ -25,6 +25,8 @@ kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" -n argocd \
 | python3 -c '
 import sys, re, json, datetime
 
+now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+print("   now: %s" % datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%SZ"))
 seen, rows = set(), []
 pat = re.compile(r'"'"'grpc\.request\.claims="(.*?)" grpc\.request\.content'"'"')
 for line in sys.stdin:
@@ -44,9 +46,12 @@ if not rows:
 
 for c in rows:
     iat = c.get("iat")
-    when = datetime.datetime.utcfromtimestamp(iat).strftime("%H:%M:%SZ") if iat else "?"
+    when = datetime.datetime.fromtimestamp(iat, datetime.timezone.utc).strftime("%H:%M:%SZ") if iat else "?"
+    age  = int(now - iat) if iat else None
     g = c.get("groups")
-    print("-- token issued %s  sub %s" % (when, str(c.get("preferred_username") or c.get("sub"))[:40]))
+    stale = "" if age is None or age < 180 else "   <-- STALE: issued %dm%02ds ago, before any change you just made" % (age // 60, age % 60)
+    print("-- token issued %s (%ss ago)  sub %s%s" % (
+        when, age if age is not None else "?", str(c.get("preferred_username") or c.get("sub"))[:40], stale))
     print("   claims present: %s" % ", ".join(sorted(c.keys())))
     if g is None:
         if "_claim_names" in c:
