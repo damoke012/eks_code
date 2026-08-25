@@ -116,7 +116,7 @@ bash ~/eks_code/scripts/entra-argocd-app-roles.sh --assign platform-admin "$(az 
 three runs — and read the claims:
 
 ```bash
-bash ~/eks_code/scripts/argocd-token-claims.sh
+bash ~/eks_code/scripts/argocd-token-claims.sh op-dev
 ```
 
 `ROLES` present is the win. `GROUPS` may well still be absent; it stops mattering.

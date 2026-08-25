@@ -168,7 +168,7 @@ cat <<'NEXT'
 Next, and this is the only step that proves anything:
   1. sign out of Argo CD completely, then sign in again -- a token minted before this
      change tests the old configuration, which has already cost three runs
-  2. scripts/argocd-token-claims.sh
+  2. scripts/argocd-token-claims.sh op-dev      # or op-qa / op-prod
      look for ROLES in the claim list. GROUPS may well still be absent; it no longer
      matters if ROLES is there.
 NEXT

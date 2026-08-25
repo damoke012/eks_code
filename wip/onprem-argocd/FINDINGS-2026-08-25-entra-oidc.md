@@ -276,3 +276,30 @@ the RBAC PR builder is self-tested red on five failure modes.
 **Traps:** `--app-roles` replaces the appRoles list wholesale, the same shape as
 `--web-redirect-uris`; `optionalClaims` must be read in full, not queried for the one key
 you expect; and a token predating the change tests the old configuration.
+
+### `emit_as_roles` — ruled out by readback, 2026-08-25
+
+`optionalClaims` on `Argo CD On-Prem`, read in full:
+
+```json
+{"accessToken": [], "saml2Token": [],
+ "idToken": [{"name": "groups", "additionalProperties": [], "essential": false, "source": null}]}
+```
+
+`additionalProperties` is **empty**. Group values are not being redirected into `roles`;
+the claim is requested in the ordinary way and Entra simply does not emit it. The
+hypothesis is dead, and app roles stop being a shortcut and become the actual route.
+
+Also read at the same time, and worth recording:
+
+* `appRoles` on the registration is **empty** — nothing has ever been defined.
+* Three principals hold **default access** (`appRoleId 00000000-0000-0000-0000-000000000000`,
+  which satisfies `appRoleAssignmentRequired` and emits nothing): the group
+  `usx-cloud-admin`, Dare Oke, and **Idris Fagbemi**. Idris is already assigned to the
+  application, so the app-team view needs him mapped to `app-viewer`, not only the RW group.
+* App **object** ID `3aafdb0b-9046-410d-8571-2089b1fa3d7c` (distinct from the app ID
+  `42dc0c33-4c56-47a5-b207-d119272997aa`; Graph writes target the object ID).
+
+**Trap:** `scripts/argocd-token-claims.sh` takes a cluster argument. It was handed over
+without one and exited on usage. Corrected in the runbook and in the app-roles script's
+closing instructions.
