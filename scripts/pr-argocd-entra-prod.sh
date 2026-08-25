@@ -50,11 +50,24 @@ SECNAME  = "argocd-entra-oidc"
 did = []
 
 def load_all(p):
-    return [d for d in yaml.safe_load_all(open(p, encoding="utf-8", errors="replace")) if d]
+    """Skip what is not plain YAML instead of dying on it. This tree contains Helm
+    chart templates (infrastructure/octopus-worker/chart/templates/) whose {{ }} a
+    strict parser rejects -- and a scanner that crashes on the tree it is scanning
+    is useless. Anything unparseable simply is not a candidate."""
+    txt = open(p, encoding="utf-8", errors="replace").read()
+    if "{{" in txt:
+        return []
+    try:
+        return [d for d in yaml.safe_load_all(txt) if isinstance(d, dict)]
+    except yaml.YAMLError:
+        return []
 
 # ---------------------------------------------- 1. where ExternalSecrets live here
-es_files = [f for f in glob.glob("infrastructure/**/*.yaml", recursive=True)
-            if "kind: ExternalSecret" in open(f, encoding="utf-8", errors="replace").read(4000)]
+es_files = []
+for f in glob.glob("infrastructure/**/*.yaml", recursive=True):
+    txt = open(f, encoding="utf-8", errors="replace").read()
+    if "kind: ExternalSecret" in txt and "{{" not in txt:
+        es_files.append(f)
 assert es_files, "no ExternalSecret under infrastructure/ on %s" % BR
 vers, stores = collections.Counter(), collections.Counter()
 for f in es_files:

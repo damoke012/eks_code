@@ -126,13 +126,39 @@ print(json.dumps({"groupMembershipClaims": sys.argv[1],
     exit 2; }
 
   LIB="$(dirname "${BASH_SOURCE[0]}")/lib-onprem-ctx.sh"
+  # Non-fatal: an unreachable cluster must fall through to the evidence-based
+  # derivation below, not abort. op-prod has no kubeconfig here (INFRA-1663).
+  REGION=""
   # shellcheck source=/dev/null
-  source "$LIB"; onprem_resolve_ctx "$BR" || exit 1
-  REGION=$(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" \
-             get clustersecretstores.external-secrets.io default \
-             -o jsonpath='{.spec.provider.aws.region}' 2>/dev/null)
-  [ -n "${REGION:-}" ] || { echo "!! could not read the region from op-dev's ClusterSecretStore." >&2
-                            echo "   Run: $0 --check $BR" >&2; exit 1; }
+  source "$LIB"
+  if onprem_resolve_ctx "$BR" 2>/dev/null; then
+    REGION=$(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" \
+               get clustersecretstores.external-secrets.io default \
+               -o jsonpath='{.spec.provider.aws.region}' 2>/dev/null)
+  fi
+  if [ -z "${REGION:-}" ]; then
+    # op-prod has no kubeconfig on this workstation (INFRA-1663), so the store
+    # cannot be read. Do NOT assume it matches dev and QA -- prove it instead by
+    # finding secrets this cluster already keeps in a candidate region.
+    echo "   cluster unreachable; deriving the region from existing $CLUSTER secrets"
+    for R in us-east-2 us-east-1; do
+      FOUND=$(aws secretsmanager list-secrets --profile "$PROFILE" --region "$R" \
+                --query "SecretList[?starts_with(Name, '$CLUSTER/')].Name | [0:3]" \
+                --output text 2>/dev/null)
+      if [ -n "$FOUND" ] && [ "$FOUND" != "None" ]; then
+        REGION="$R"
+        echo "   region $R -- evidence: $FOUND"
+        break
+      fi
+      echo "   $R: no $CLUSTER/ secrets"
+    done
+    [ -n "${REGION:-}" ] || {
+      echo "!! no region holds any $CLUSTER/ secret, so there is nothing to infer from." >&2
+      echo "   Writing one blind would sync green against a store nobody has verified." >&2
+      exit 1; }
+  else
+    echo "== region $REGION, read from $BR's own ClusterSecretStore (not defaulted)"
+  fi
   echo "== region $REGION, read from $BR's own ClusterSecretStore (not defaulted)"
 
   # Order matters. A credential's value is shown ONCE; if the store write then
