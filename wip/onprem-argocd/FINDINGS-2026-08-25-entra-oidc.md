@@ -169,3 +169,34 @@ inferred from Git, and Git is demonstrably wrong about this cluster.
 **Proven:** the secret is stored and the region is evidenced.
 **Tested and killed:** deriving prod's route from its own branch — every candidate is dev's.
 **Trap:** a prod branch that looks complete because it is a byte-copy of another cluster's.
+
+## op-prod ingress — the finding under the finding
+
+Once prod cluster access was restored (`scripts/onprem-prod-kubeconfig.sh`), the audit showed:
+
+```
+istio-ingress/shared-http
+    port 80/HTTP   hosts=*.op-qa.usxpress.io
+    port 443/HTTPS hosts=*.op-qa.usxpress.io  cred=wildcard-op-qa-tls
+VirtualServices: none
+TLS secrets in istio-ingress: none
+certificate.cert-manager.io/wildcard-op-qa   Ready=False   27d
+```
+
+**Production's shared Gateway serves QA's hostnames, and its wildcard Certificate — also
+named for QA — has been failing to issue for 27 days,** since the cluster came up. Prod has
+never been able to terminate HTTPS for any of its own hostnames. It went unnoticed because
+prod serves no routes at all, so nothing ever asked it to.
+
+`shared-gateway.yaml` and `wildcard-cert.yaml` on the op-prod branch are byte copies of
+op-qa's. Instance eight of [[manifests-copied-across-branches]], and the most consequential:
+the previous seven were latent, this one has been actively failing for a month.
+
+**Correction to an earlier claim in this note.** I wrote that prod's external-dns might be
+publishing op-dev records and contending with dev's. It is not — prod has **zero** live
+VirtualServices, so it publishes nothing. The copied routes are inert. The real damage is the
+Gateway and the Certificate, which are live and broken.
+
+**Ingressgateway placement is per-cluster, again:** op-prod runs it on **all 10 workers**
+(5 application, 3 platform, 2 system), where op-dev uses 7 and op-qa 3 of 13. Route targets
+must be read from the cluster, never carried over.

@@ -21,6 +21,10 @@
 #   scripts/pr-argocd-entra-prod.sh
 #   scripts/pr-argocd-entra-prod.sh --push
 set -euo pipefail
+# Resolve before ANY cd. Three scripts today have looked up a sibling with a
+# relative path after cd-ing into the platform repo, and each time the failure read
+# as "the cluster is unreachable" rather than "the script cannot find itself".
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PUSH="${1:-}"
 BR=op-prod
 REPO="${REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
@@ -37,7 +41,7 @@ git clean -qfd infrastructure
 
 # Read the route wiring off the live cluster and hand it to the builder. The branch
 # cannot supply it -- every route there belongs to op-dev.
-LIB="$(cd "$(dirname "$0")" && pwd)/lib-onprem-ctx.sh"
+LIB="$SCRIPT_DIR/lib-onprem-ctx.sh"
 # shellcheck source=/dev/null
 source "$LIB"; onprem_resolve_ctx "$BR" || {
   echo "!! need the op-prod cluster. Rebuild access first:" >&2
@@ -250,7 +254,7 @@ assert os.path.basename(VS_PATH) in k and os.path.basename(ES_PATH) in k
 for line in did: print("   " + line)
 PY
 
-LINT="$(cd "$(dirname "$0")" && pwd)/lint-manifest-apiversions.py"
+LINT="$SCRIPT_DIR/lint-manifest-apiversions.py"
 [ -f "$LINT" ] && { echo; python3 "$LINT" "$REPO" "$BR" || {
   echo "!! apiVersion disagreement -- not pushing." >&2; exit 1; }; }
 
