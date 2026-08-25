@@ -35,6 +35,40 @@ git checkout -q -B "$TOPIC" "origin/$BR"
 git checkout -q "origin/$BR" -- infrastructure
 git clean -qfd infrastructure
 
+# Read the route wiring off the live cluster and hand it to the builder. The branch
+# cannot supply it -- every route there belongs to op-dev.
+LIB="$(cd "$(dirname "$0")" && pwd)/lib-onprem-ctx.sh"
+# shellcheck source=/dev/null
+source "$LIB"; onprem_resolve_ctx "$BR" || {
+  echo "!! need the op-prod cluster. Rebuild access first:" >&2
+  echo "   scripts/onprem-prod-kubeconfig.sh ops-controller" >&2; exit 1; }
+K() { kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" "$@"; }
+
+# the nodes actually running istio-ingressgateway, then their InternalIPs
+NODES=$(K -n istio-ingress get pods -l app=istio-ingressgateway           -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' 2>/dev/null | sort -u)
+[ -n "$NODES" ] || { echo "!! no istio-ingressgateway pods on $BR" >&2; exit 1; }
+IPS=""
+for n in $NODES; do
+  ip=$(K get node "$n" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+  [ -n "$ip" ] && IPS="${IPS:+$IPS,}$ip"
+done
+[ -n "$IPS" ] || { echo "!! could not read node InternalIPs on $BR" >&2; exit 1; }
+
+GW=$(K get gateways.networking.istio.io -A        -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null      | grep -E '/shared-http$' | head -1)
+[ -n "$GW" ] || { echo "!! no shared-http Gateway on $BR" >&2; exit 1; }
+
+# The Gateway must already serve this cluster's hostnames, or the route cannot match.
+GWHOSTS=$(K -n "${GW%%/*}" get gateways.networking.istio.io "${GW##*/}"             -o jsonpath='{range .spec.servers[*]}{range .hosts[*]}{.}{" "}{end}{end}' 2>/dev/null)
+case "$GWHOSTS" in
+  *op-prod.usxpress.io*) : ;;
+  *) echo "!! $GW serves '$GWHOSTS' -- not op-prod hostnames." >&2
+     echo "   An argocd.op-prod.usxpress.io route would never match it. Land this first:" >&2
+     echo "     scripts/pr-istio-gateway-op-prod.sh --push" >&2
+     exit 1 ;;
+esac
+export ARGOCD_DNS_TARGETS="$IPS"
+export ARGOCD_GATEWAYS="$GW"
+
 python3 - <<'PY'
 import os, glob, collections, yaml
 
@@ -83,57 +117,28 @@ assert argocd_es, "no ExternalSecret under infrastructure/argocd* on %s" % BR
 ES_DIR = os.path.dirname(argocd_es[0])
 print("   ExternalSecrets: %s, %s, store %s/%s" % (ES_DIR, ES_API, ST_KIND, ST_NAME))
 
-# ------------------------------- 2. a route on THIS cluster to copy the wiring from
-# Never generalise DNS targets: op-dev uses all 7 workers, op-qa 3 of 13. And never
-# trust a route whose hostname belongs to another cluster -- op-qa was found live
-# serving grafana.op-dev.usxpress.io on 2026-08-24, and this branch is a copy of it.
-ref_vs = None
-for f in sorted(glob.glob("infrastructure/**/*.yaml", recursive=True)):
-    if "/argocd" in f: continue
-    for d in load_all(f):
-        if d.get("kind") != "VirtualService": continue
-        hosts = (d.get("spec") or {}).get("hosts") or []
-        if any(str(h).endswith(SUFFIX) for h in hosts):
-            ref_vs = (f, d); break
-    if ref_vs: break
-assert ref_vs, ("no VirtualService on %s whose host ends in %s -- every route here "
-                "belongs to another cluster, so there is nothing safe to copy." % (BR, SUFFIX))
-rf, rd = ref_vs
-rhosts = rd["spec"]["hosts"]
-assert all(str(h).endswith(SUFFIX) for h in rhosts), \
-    "%s serves %r -- a foreign hostname; refusing to copy its wiring" % (rf, rhosts)
-GATEWAYS = rd["spec"]["gateways"]
-ANN = (rd.get("metadata") or {}).get("annotations") or {}
-TARGETS = ANN.get("external-dns.alpha.kubernetes.io/target")
-assert TARGETS, ("%s has no external-dns target annotation. istio-ingressgateway is "
-                 "ClusterIP+hostNetwork with no LB address, so the annotation is "
-                 "REQUIRED or no record is published." % rf)
-print("   route model: %s" % rf)
-print("     hosts    %s" % rhosts)
+# --------------------- 2. route wiring, read from the LIVE cluster, not the branch
+# The op-prod branch has no route that belongs to op-prod: all 5 of its
+# VirtualServices carry op-dev hostnames and dev's worker IPs. So the targets come
+# from the cluster itself -- the node addresses where istio-ingressgateway is
+# actually running. That is the value external-dns must publish, and it is not the
+# same shape as the other clusters: op-dev 7 workers, op-qa 3 of 13, op-prod all 10.
+import subprocess, json
+TARGETS = os.environ.get("ARGOCD_DNS_TARGETS", "").strip()
+GATEWAYS = [g for g in os.environ.get("ARGOCD_GATEWAYS", "").split(",") if g]
+assert TARGETS, "ARGOCD_DNS_TARGETS not set -- the wrapper reads it from the cluster"
+assert GATEWAYS, "ARGOCD_GATEWAYS not set"
+print("   route wiring, from the live cluster:")
 print("     gateways %s" % GATEWAYS)
 print("     targets  %s" % TARGETS)
 
-vs = {
-    "apiVersion": rd["apiVersion"],
-    "kind": "VirtualService",
-    "metadata": {
-        "name": "argocd-server",
-        "namespace": "argocd",
-        "annotations": {"external-dns.alpha.kubernetes.io/target": TARGETS},
-    },
-    "spec": {
-        "hosts": [HOST],
-        "gateways": GATEWAYS,
-        "http": [{"route": [{"destination": {"host": "argocd-server.argocd.svc.cluster.local",
-                                             "port": {"number": 80}}}]}],
-    },
-}
 VS_PATH = os.path.join(ES_DIR, "virtualservice-argocd.yaml")
 with open(VS_PATH, "w") as fh:
     fh.write("# INFRA-1639. argocd.op-prod.usxpress.io did not resolve before this:\n"
              "# op-prod had no Argo route at all, so the OIDC callback had nowhere to\n"
-             "# land. Gateway and external-dns targets are copied from %s, a route\n"
-             "# already serving THIS cluster -- they are not the same across clusters.\n" % rf)
+             "# land. Gateway and external-dns targets are read from the LIVE cluster --\n"
+             "# the nodes where istio-ingressgateway actually runs. They are not the same\n"
+             "# across clusters: op-dev 7 workers, op-qa 3 of 13, op-prod all 10.\n")
     yaml.safe_dump(vs, fh, sort_keys=False)
 did.append("added %s" % VS_PATH)
 
