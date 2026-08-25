@@ -303,3 +303,65 @@ Also read at the same time, and worth recording:
 **Trap:** `scripts/argocd-token-claims.sh` takes a cluster argument. It was handed over
 without one and exited on usage. Corrected in the runbook and in the app-roles script's
 closing instructions.
+
+## PROVEN: the roles claim arrives. 2026-08-25, 19:18Z
+
+```
+-- token issued 19:18:27Z  sub doke@usxpress.com   <-- issued against the CURRENT config
+   claims present: aud, email, exp, iat, iss, name, nbf, oid, preferred_username,
+                   rh, roles, sid, sub, tid, uti, ver
+   GROUPS: ABSENT
+   ROLES:  1 -> platform-admin
+```
+
+**The authorization blocker is broken.** Entra will not emit `groups` for this
+application under any configuration tried, but it emits `roles` from an
+appRoleAssignment on the same service principal, in the same token, at the same time.
+
+**The control was free, and it is decisive.** Idris Fagbemi signed in at 19:12:01Z, six
+minutes earlier, against the identical configuration:
+
+```
+-- token issued 19:12:01Z  sub ifagbemi@usxpress.com   <-- issued against the CURRENT config
+   claims present: aud, email, exp, ... (no roles)
+   ROLES:  ABSENT
+```
+
+He holds only **default access** (`appRoleId 00000000-…`). Same app, same tenant, same
+federation, minutes apart — the one with an assignment gets the claim, the one without
+does not. Nothing about this is coincidental timing or a cached token.
+
+**Group-to-app-role assignment worked on the first attempt.** `usx-cloud-admin`
+(`b9a1ff74-…`) holds `platform-admin` directly. The Entra ID P1 caveat written into the
+script was speculative and never fired — teams can be granted as groups, with no
+per-user administration.
+
+### Corrections to guesses made earlier today
+
+* **`emit_as_roles` was never set** — `additionalProperties: []`. Ruled out by reading
+  `optionalClaims` in full, which is what should have happened before any of the
+  `groupMembershipClaims` permutations.
+* **The Entra ID P1 limit did not apply.** Stated as a likely obstacle, it was not one.
+
+### The check that was still lying
+
+`argocd-token-claims.sh` printed claim **names**. `roles` appearing in that list proves
+the claim was emitted and says nothing about what is inside it — and `policy.csv` matches
+on the contents. It now prints values, and distinguishes `ABSENT` from
+`present but EMPTY`. Same family as the escaped-JSON grep and the substring assertion:
+a true statement about the thing adjacent to the one that matters.
+
+### The invariant that replaced a warning
+
+`policy.csv` briefly held two subjects of different kinds — the admin line on a group
+object ID, the viewer line on an app-role value. Under a roles claim the first matches
+nothing, and **which of the two is dead is invisible from the file**. The builder now
+rekeys the admin subject in the same edit and asserts that **every `g,` subject is the
+same kind**, refusing a mixed policy outright. An opt-out flag was written and then
+deleted: it could only ever produce a config the invariant rejects.
+
+**Proven:** `roles` reaches Argo CD on op-dev, carrying `platform-admin`, with a
+negative control in the same log window. Group assignment needs no extra licence.
+**Tested and killed:** `emit_as_roles`; the P1 limit; every `groups` permutation.
+**Traps:** a claim NAME is not its value; mixed subject kinds in one `policy.csv`;
+`argocd-token-claims.sh` takes a cluster argument.

@@ -21,6 +21,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REPO="${REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
 GROUP=""; PUSH="no"; ONLY=""; PROJECT=""; ROLE_VALUE=""
+# When the subject is a role value, the EXISTING admin line -- keyed on a group
+# object ID -- matches nothing, because this tenant emits no groups claim. Shipping
+# it would leave a policy.csv where one of two subjects is silently dead, which is
+# the failure this whole exercise has been about. So it is rekeyed, not optional:
+# an opt-out flag existed briefly and could only ever produce a config the
+# same-kind invariant below rejects.
+ADMIN_ROLE_VALUE="platform-admin"
 while [ $# -gt 0 ]; do
   case "$1" in
     --group)   GROUP="$2";   shift 2 ;;
@@ -28,6 +35,7 @@ while [ $# -gt 0 ]; do
     # (scripts/entra-argocd-app-roles.sh), the subject is the role VALUE, not an
     # object ID, and scopes has to name the roles claim or Argo never looks there.
     --role-value) ROLE_VALUE="$2"; shift 2 ;;
+    --admin-role-value) ADMIN_ROLE_VALUE="$2"; shift 2 ;;
     --project) PROJECT="$2"; shift 2 ;;
     --only)    ONLY="$2";    shift 2 ;;
     --repo)    REPO="$2";    shift 2 ;;
@@ -50,6 +58,7 @@ if [ -n "$ROLE_VALUE" ]; then
   [[ "$ROLE_VALUE" =~ ^[A-Za-z0-9._-]+$ ]] || {
     echo "!! '$ROLE_VALUE' is not a plausible app-role value" >&2; exit 2; }
   echo "   subject: app-role value '$ROLE_VALUE' (scopes will be set to [roles, groups])"
+  echo "   admin subject: rekeyed to app-role value '$ADMIN_ROLE_VALUE'"
   GROUP="$ROLE_VALUE"
 elif [ -z "$GROUP" ]; then
   cat >&2 <<'MSG'
@@ -157,9 +166,10 @@ PY
   esac
   echo "   sync permission: $SYNC"
 
-  python3 - "$HR" "$GROUP" "$PROJ" "$SYNC" "$BR" "$ROLE_VALUE" <<'PY'
+  python3 - "$HR" "$GROUP" "$PROJ" "$SYNC" "$BR" "$ROLE_VALUE" "$ADMIN_ROLE_VALUE" <<'PY'
 import sys, yaml, re
-path, group, proj, sync, br, role_value = sys.argv[1:7]
+path, group, proj, sync, br, role_value, admin_role_value = sys.argv[1:8]
+GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 lines = open(path).readlines()
 
@@ -218,6 +228,22 @@ else:
 out = lines[:end] + [pad + a for a in add] + lines[end:]
 
 if role_value:
+    rekeyed = 0
+    for i, ln in enumerate(out):
+        st = ln.strip()
+        if not st.startswith("g,"):
+            continue
+        parts = [x.strip() for x in st.split(",")]
+        if len(parts) == 3 and parts[2] == "role:admin" and GUID.match(parts[1]):
+            ind = " " * (len(ln) - len(ln.lstrip()))
+            out[i] = (ind + "# was the group object ID %s. Rekeyed 2026-08-25: this\n" % parts[1]
+                      + ind + "# tenant emits no groups claim, so that subject matched nothing.\n"
+                      + ind + "g, %s, role:admin\n" % admin_role_value)
+            rekeyed += 1
+    assert rekeyed == 1, ("expected exactly one group-keyed admin line to rekey, found %d -- "
+                          "resolve by hand rather than guessing" % rekeyed)
+
+if role_value:
     # Argo only looks in the claims that scopes names. Leaving it '[groups]' while
     # the subject is a role value is a policy that can never match -- the exact
     # failure we are already routing around.
@@ -251,20 +277,22 @@ else:
 assert cfg["rbac"]["policy.default"] == "", repr(cfg["rbac"]["policy.default"])
 # and the admin mapping that was already there must survive this edit
 assert "role:admin" in csv, "the existing admin mapping was lost: %r" % csv
+# Every `g,` subject must be the same KIND. A policy.csv holding both a group
+# object ID and an app-role value means one of them can never match, and which one
+# is invisible from the file. Two subjects, one silently dead, is the failure this
+# whole exercise has been about.
+subjects = [l.strip().split(",")[1].strip() for l in csv.splitlines()
+            if l.strip().startswith("g,") and len(l.strip().split(",")) >= 3]
+kinds = {("guid" if GUID.match(x) else "role-value") for x in subjects}
+assert len(kinds) == 1, (
+    "policy.csv mixes subject kinds %s across %r -- one of them matches nothing"
+    % (sorted(kinds), subjects))
+print("   subjects: %s, all %s" % (", ".join(subjects), kinds.pop()))
+
 want_scopes = "[roles, groups]" if role_value else "[groups]"
 assert cfg["rbac"].get("scopes") == want_scopes, \
     "scopes must be %r or the subject is never read: %r" % (want_scopes, cfg["rbac"].get("scopes"))
 print("   parsed back: role:app-viewer on %s/* | admin mapping intact | policy.default ''" % proj)
-if role_value:
-    admin_subjects = [l.split(",")[1].strip() for l in csv.splitlines()
-                      if l.strip().startswith("g,") and l.strip().endswith("role:admin")]
-    guidish = [a for a in admin_subjects if re.match(r"^[0-9a-f-]{36}$", a)]
-    if guidish:
-        print("   NOTE: the admin mapping is still keyed on a group object ID (%s)."
-              % ", ".join(guidish))
-        print("         If the roles claim is what works, that line matches nothing either --")
-        print("         give the admin group an app role too and rekey it. Not a regression:")
-        print("         it matches nothing today. Local `admin` login is unaffected.")
 PY
   rc=$?
   [ $rc -eq 3 ] && continue
