@@ -48,6 +48,7 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
 | `capture-learning` | an investigation just concluded — run it before moving on |
 | `pr-review-rw` | "review PR #N on `<repo>`", anything touching RisingWave namespaces |
 | `prod-auth-triage` | blanket 401s from a prod API, `IDX10214`, `AADSTS500011` |
+| `entra-authz-claims` | an Entra login succeeds and the user has **no permissions** — empty Argo UI, "SSO is broken" |
 | `azure-oidc-federation` | `AADSTS700213`, a workflow failing `azure/login` on a new branch |
 
 ## The learning loop

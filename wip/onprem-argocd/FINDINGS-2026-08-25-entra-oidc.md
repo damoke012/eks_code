@@ -365,3 +365,53 @@ negative control in the same log window. Group assignment needs no extra licence
 **Tested and killed:** `emit_as_roles`; the P1 limit; every `groups` permutation.
 **Traps:** a claim NAME is not its value; mixed subject kinds in one `policy.csv`;
 `argocd-token-claims.sh` takes a cluster argument.
+
+## Confirmed by sign-in — op-dev, 2026-08-25
+
+Doke confirms the Argo CD UI now grants permissions after an Entra sign-in. PR **#138**
+(op-dev) and **#139** (op-qa) rekey `policy.csv` to app-role subjects and set
+`scopes: "[roles, groups]"`.
+
+**Scope of that confirmation, stated narrowly on purpose.** It covers one person, holding
+`platform-admin`, on one cluster. It does **not** yet cover:
+
+* **op-qa** — #139 is the identical change and is pushed, but a PR is not a deployment.
+  QA has never had a browser sign-in at all; it was verified by `curl` against
+  `/api/v1/settings`.
+* **`role:app-viewer`** — nobody has exercised it. Idris holds the assignment
+  (`86486897-edd4-537d-b04f-805d6aeff583`) and his sign-in is the real acceptance test:
+  he should see `risingwave-etl` and nothing outside the `apps` project.
+* **op-prod** — not started; see the chain below.
+
+The reason for the caution is on this page already: on 2026-08-20 "proven end to end"
+described one execution, and the path was dead an hour later for 18 hours.
+
+### op-qa and op-prod need no Entra work
+
+App roles and their assignments live on the **app registration**, not per cluster, and all
+three callbacks were registered on 2026-08-25. `platform-admin` and `app-viewer`, and every
+assignment made today, already apply to QA and prod. What each still needs is a branch PR.
+
+**op-qa:** merge #139, then `scripts/verify-argocd-rbac.sh op-qa`, then a browser sign-in.
+
+**op-prod is a chain of four, in order** — each blocked by the one before, and the builder
+for each refuses rather than guessing:
+
+1. `scripts/pr-cert-issuer-op-prod.sh --push` — the ACME solver still names op-qa's zone,
+   so an Order for `*.op-prod.usxpress.io` matches no solver and gets **zero** Challenges.
+   Written, fixed, still unpushed.
+2. `wildcard-op-prod` issues. A Challenge existing at all is the milestone; it has never
+   happened on this cluster.
+3. `scripts/pr-argocd-entra-prod.sh` — refuses while `istio-ingress/shared-http` does not
+   serve op-prod hostnames, which is correct: the OIDC callback needs somewhere to land.
+   This PR is what creates `configs.rbac` on the prod branch.
+4. `scripts/pr-argocd-rbac-app-viewer.sh --role-value app-viewer --only op-prod` — refuses
+   today with *"op-prod has no configs.rbac yet"*, which is step 3's output, not a bug.
+
+On prod `role:app-viewer` is written **without** `sync`: promotion there stays
+human-initiated by the platform, by design.
+
+**Procedure changed** — `.claude/skills/entra-authz-claims/SKILL.md`. The next time a login
+succeeds and grants nothing, on any app in this tenant, the answer should take minutes.
+Grafana on-prem uses the same tenant and the same secret convention
+(`op-usxpress-*/platform/grafana/azure-ad`), so it is the likely next consumer.
