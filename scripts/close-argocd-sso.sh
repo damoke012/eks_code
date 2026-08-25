@@ -67,16 +67,27 @@ printf '%s' "$SETTINGS" | grep -q 'login.microsoftonline.com' \
   || bad "provider: issuer is not Entra"
 
 # 4. The client secret has CONTENT. A green ExternalSecret proves the sync ran.
+#
+# Read the keys that EXIST rather than guessing names, and never with jsonpath: op-dev
+# holds it as `oidc.entra.clientSecret` in argocd-secret, and `-o jsonpath={.data.oidc.
+# entra.clientSecret}` parses those dots as nested fields, so the key can never be
+# found. The first version of this check reported a working cluster as a failure.
+SEEN=""
 for S in argocd-entra-oidc argocd-secret; do
-  for KEY in client_secret oidc.entra.clientSecret; do
-    V=$("${K[@]}" -n argocd get secret "$S" -o jsonpath="{.data.$KEY}" 2>/dev/null)
-    [ -n "$V" ] && { N=$(printf '%s' "$V" | base64 -d | wc -c)
-      [ "$N" -ge 32 ] && ok "secret: $S/$KEY holds $N bytes" \
-                      || bad "secret: $S/$KEY holds only $N bytes"
-      FOUND=1; break 2; }
-  done
+  KEYS=$("${K[@]}" -n argocd get secret "$S" \
+           -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' 2>/dev/null) || continue
+  [ -n "$KEYS" ] || continue
+  SEEN="$SEEN $S:[$(printf '%s' "$KEYS" | tr '\n' ' ')]"
+  MATCH=$(printf '%s\n' "$KEYS" | grep -iE 'client.?secret' | head -1)
+  [ -n "$MATCH" ] || continue
+  V=$("${K[@]}" -n argocd get secret "$S" \
+        -o go-template="{{index .data \"$MATCH\"}}" 2>/dev/null)
+  N=$(printf '%s' "$V" | base64 -d 2>/dev/null | wc -c)
+  if [ "$N" -ge 32 ]; then ok "secret: $S/$MATCH holds $N bytes"
+  else bad "secret: $S/$MATCH holds only $N bytes"; fi
+  FOUND=1; break
 done
-[ "${FOUND:-0}" = 1 ] || bad "secret: no client secret found in argocd-entra-oidc or argocd-secret"
+[ "${FOUND:-0}" = 1 ] || bad "secret: no key matching /client.?secret/i. Keys present:${SEEN:- none}"
 
 # 5. The policy can match a subject. Delegated -- one implementation, one behaviour.
 echo

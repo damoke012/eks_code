@@ -572,3 +572,39 @@ authorises from the `roles` claim; op-prod resolves, terminates TLS with its own
 certificate, and serves Argo.
 **Still unexercised:** `role:app-viewer` — nobody has signed in as an application-team
 member. That, not our own admin access, is the acceptance test for INFRA-1639.
+
+## Closing evidence, and the fourth check that reported itself
+
+`scripts/close-argocd-sso.sh op-prod` — **all machine-checkable criteria pass**: 10 A
+records all on op-prod's ingressgateway nodes, HTTPS 200 with a validating certificate
+(no `--insecure`, which would hide exactly the fault that sat there for 27 days), the
+Entra issuer in `/api/v1/settings`, a 40-byte client secret, and a consistent policy.
+
+**op-dev reported FAIL, and the cluster was fine.** The secret check took a key name and
+interpolated it into `-o jsonpath="{.data.$KEY}"`. op-dev holds the value as
+`oidc.entra.clientSecret` in `argocd-secret`, and jsonpath reads those dots as **nested
+fields** — so that key could never be found on the one cluster whose sign-in we had
+already proven end to end.
+
+Fixed by inverting it: enumerate the keys that exist (`go-template` over `.data`), match
+`/client.?secret/i`, and read the value with `{{index .data "..."}}`, which takes the key
+literally. A genuine absence now also prints the keys it did find, so the next failure is
+diagnosable instead of merely negative.
+
+**This is the fourth check today whose failure was about itself, not the environment**,
+after the escaped-JSON grep, the prod-sync assertion that could only ever pass, and the
+rekey count that made prod's finished state look broken. The pattern in all four: a
+predicate written against *the shape I happened to be looking at* rather than the property
+that has to hold. `close-argocd-sso.sh` was written from op-prod's shape, where the key is
+`client_secret`, and op-dev's differs for a good reason — dev merges into the chart-owned
+`argocd-secret` and prod uses its own labelled secret.
+
+**Corollary worth keeping:** a check that names the thing it expects can only find that
+name. A check that enumerates what is there can report both the answer and the reason.
+
+**op-qa was unreachable at the same moment** — `cannot reach 10.10.82.51`. It was reachable
+an hour earlier, and the plausible cause is self-inflicted: `rm -rf ~/.aws/cli/cache
+~/.aws/sso/cache` was run three times during the prod work, and op-qa's cluster access goes
+through **AWS SSO via the self-hosted aws-iam-authenticator** ([[onprem-human-access-model]]),
+so the credentials it needs were cleared. `aws sso login --profile ops-controller` refreshed
+a different profile.
