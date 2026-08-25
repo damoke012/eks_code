@@ -37,6 +37,7 @@
 - [Prose through shell strings](prose-through-shell-strings.md) — a PR body as `--body "..."` executed its own backticks and reached `aws iam put-role-policy`; pass prose as a file
 - [Flux stale dependency cascade](flux-stale-dependency-cascade.md) — 'dependency X is not ready' is the LAST-ATTEMPT reason; X is often Ready now. Compare revisions; reconcile from the chain root
 - [Identity names don't cross systems](identity-names-do-not-cross-systems.md) — onprem-platform-admins is a k8s/aws-auth name, never a directory group; Argo uses usx-cloud-admin
+- [Argo CD on-prem Entra OIDC](argocd-onprem-entra-oidc.md) — ✅ auth PROVEN on op-dev 2026-08-25 (Dex deleted, secret by ESO); ❌ Entra emits NO groups claim so RBAC is dead; QA/prod need only a branch PR
 - [Argo SSO / Identity Center limits](argocd-sso-blocked-on-management-account.md) — SAML+Dex decided; mgmt account 660075424663 needed, and the SAML app is CONSOLE-ONLY (create/ACS/audience/mappings have no API)
 - [Corp AD reachable from op-dev](onprem-ad-ldap-reachable.md) — CoreDNS forwards usxpress.com, 636 LDAPS open from the argocd namespace; makes a zero-console Dex LDAP connector viable
 

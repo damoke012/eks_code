@@ -35,3 +35,11 @@ set it calls `identitystore list-groups` and refuses to write if the group does 
 list-instances` answers from member accounts and proves nothing about admin rights;
 `sso-admin list-applications` is the discriminating call. See
 [[argocd-sso-blocked-on-management-account]].
+
+
+**Third instance, 2026-08-25 (Entra).** `usx-cloud-admin` is a **cloud-only** group
+(`onPremisesSyncEnabled: null`), and Entra can emit a group's *display name* only when the group
+is AD-synced. So an Entra token can only ever carry its **object ID**,
+`b9a1ff74-efa1-4b20-be8a-8706a5ab2636`, and `policy.csv` must be keyed on that GUID with a
+comment explaining why. Check `onPremisesSyncEnabled` before writing any group name into an
+authorization file.

@@ -168,3 +168,10 @@ Two traps to settle before building, both checked by `scripts/entra-argocd-prefl
 2. **A human may not be able to store the client secret.** `op-qa-platform-admin` had no
    `secretsmanager:PutSecretValue` on the RisingWave path on 2026-08-13; ESO could read what a
    human could not write. OIDC needs a client secret where SAML needed none.
+
+
+## Superseded 2026-08-25 — the SAML route was abandoned, not solved
+
+Entra OIDC replaced it on op-dev and authentication works. The Identity Center "No access"
+was never explained. See [[argocd-onprem-entra-oidc]] for what replaced it and for the one
+thing that remains broken (the groups claim).
