@@ -64,3 +64,19 @@ reverted an ApplicationSet's `repoURL` from `ssh://` to `https://`, taking op-qa
 for 18 hours. `check-foreign-cluster-ids.sh` passed it — that check looks for *another
 cluster's* identifiers, not for a regression against what is already deployed. Now CLAUDE.md
 rule 7. See [[onprem-app-cicd]].
+
+## 2026-08-24 — confirmed LIVE at the ingress layer, not just on branches
+
+**op-qa is serving `grafana.op-dev.usxpress.io`.** Its Grafana VirtualService on the running
+QA cluster claims a dev hostname. Dev serves the same name. Two clusters claim one DNS record,
+both running external-dns against zone `usxpress.io`; as of 21:50 it resolved to dev's seven
+nodes, so whichever wrote last wins. Opening dev's Grafana URL can land you on QA's.
+
+`op-prod`'s branch carries the same copied file plus `credentialName: wildcard-op-qa-tls` on
+its shared gateway — **branch content only, NOT verified live.** Nothing under `~/.kube`
+reaches 10.10.82.52; prod checks that day were break-glass and were not persisted.
+
+Found by `scripts/onprem-ingress-audit.sh`, which groups every claimed hostname by suffix so a
+foreign one shows as a count rather than something to spot by eye. It compares each cluster
+against **itself**, which is why it caught a cluster nobody was looking at.
+

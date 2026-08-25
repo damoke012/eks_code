@@ -8,12 +8,12 @@
 - [RisingWave on-prem](risingwave-onprem.md) — risingwave (Idris) + risingwave-2 (Tim) namespaces; Phase 1 handoff done
 - [On-prem networking/ingress](onprem-networking-ingress.md) — Phase 1 INFRA-1494 CLOSED 2026-06-01; May 29 networking/CySec call decisions
 - [Entra secret rotation](entra-secret-rotation.md) — ACTIVE: 11 app-reg secrets expiring Jul–Aug 2026; rotate in-use, confirm all before cleanup
-- [Argo CD on-prem (INFRA-1622)](pr73-argocd-repo-sync-review.md) — ✅ platform stack COMPLETE on dev + QA 2026-07-24; app-* guardrail proven; Istio VS still TODO
+- [Argo CD on-prem (INFRA-1622)](pr73-argocd-repo-sync-review.md) — ✅ dev+QA stack complete; ✅ dev route live 2026-08-24 (argocd.op-dev.usxpress.io, 200); configs.cm.url was the chart default everywhere; SSO still needs a provider + policy.csv
 - [Data-lake Kafka→S3 monitoring](datalake-kafka-s3-monitoring.md) — NEW: Nathaniel/Anthony Confluent→S3 migration wants Kafka Connect + S3 alerting via Grafana; ticket pending
 - [EKS K8s upgrade](eks-k8s-upgrade.md) — NEW 2026-07-13: assess EKS version (~1.34/1.35), automate fleet-style upgrade dev→QA→prod
 - [Prod stand-up](prod-standup.md) — INFRA-1589/1621; ✅ cluster UP + full platform reconciled 2026-07-29 (ESO/IRSA/Istio/ArgoCD green); 4 source gaps open before destroy→rebuild
 - [EKS human access model](eks-human-access-model.md) — grant kubectl via AWS SSO permission set mapped to aws-auth `view` group; NEVER hand-edit aws-auth
-- [On-prem human access model](onprem-human-access-model.md) — ✅ AWS SSO LIVE on op-usxpress-qa 2026-07-28 via self-hosted aws-iam-authenticator; certs demoted to break-glass; Entra OIDC dropped (no Azure access)
+- [On-prem human access model](onprem-human-access-model.md) — ✅ AWS SSO LIVE on op-usxpress-qa 2026-07-28 via self-hosted aws-iam-authenticator; certs demoted to break-glass; Entra OIDC dropped for CLUSTER access; ⚠️ "no Azure access" corrected 2026-08-25 — app-reg update is proven
 - [Octopus green ≠ applied](octopus-green-but-no-apply.md) — iaac-talos deploys print the plan, skip apply, report Success; TfApply=false everywhere but production
 - [Cloud EKS platform doc](cloud-eks-platform-doc.md) — Confluence + artifact refs; ⚠️ idris-kt KT repo trees are STALE (real iaac-eks / terraform-variant-apps structure)
 - [RW/platform SSO via Entra](rw-platform-sso-entra.md) — NEW 2026-07-13: reusable dev service-account Entra SSO pattern, RisingWave first consumer
@@ -34,3 +34,9 @@
 - [QA postgres password drift](qa-postgres-password-drift.md) — initdb 08-11, secret rotated 08-12, DB never learned it; fixed 08-20, meta pod still to recreate
 - [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring
 - [Alerts reach nobody on-prem](onprem-alerts-not-delivered.md) — dev: 40 rules, 54 firing, no Alertmanager; Flux rules were dead for FOUR reasons in series, fixed dev+QA 2026-08-24, prod pending
+- [Prose through shell strings](prose-through-shell-strings.md) — a PR body as `--body "..."` executed its own backticks and reached `aws iam put-role-policy`; pass prose as a file
+- [Flux stale dependency cascade](flux-stale-dependency-cascade.md) — 'dependency X is not ready' is the LAST-ATTEMPT reason; X is often Ready now. Compare revisions; reconcile from the chain root
+- [Identity names don't cross systems](identity-names-do-not-cross-systems.md) — onprem-platform-admins is a k8s/aws-auth name, never a directory group; Argo uses usx-cloud-admin
+- [Argo SSO / Identity Center limits](argocd-sso-blocked-on-management-account.md) — SAML+Dex decided; mgmt account 660075424663 needed, and the SAML app is CONSOLE-ONLY (create/ACS/audience/mappings have no API)
+- [Corp AD reachable from op-dev](onprem-ad-ldap-reachable.md) — CoreDNS forwards usxpress.com, 636 LDAPS open from the argocd namespace; makes a zero-console Dex LDAP connector viable
+

@@ -75,3 +75,15 @@ Stream the tfstate (`cp ... -`), never save it — it holds every secret in plai
 ⚠️ Two different things are called "QA": **`qa-one`** = AWS EKS cloud QA (acct 527101283767); **`op-usxpress-qa`** = on-prem Talos QA (uses that same AWS account for SM/S3/IRSA). Don't conflate.
 
 ⚠️ Prod was Doke's accidental default context earlier; an expired SSO token was the only thing that stopped commands hitting prod. Always `kubectl cluster-info | head -1` first. Related: [[user-doke-onprem-platform]].
+
+**On-prem PROD `op-usxpress-prod` (10.10.82.52) has NO kubeconfig on this machine** — verified
+2026-08-24 by scanning every `~/.kube/*.yaml` for that server address: zero matches. The prod
+verification done earlier that day was break-glass and was not persisted. Reaching prod means
+regenerating credentials first. Use `scripts/onprem-ingress-audit.sh --cluster op-prod`, which
+resolves by endpoint and says so plainly rather than falling back to another cluster.
+
+⚠️ A pasted `export KUBECONFIG=$HOME/.kube/<placeholder>` dies on a bash syntax error and
+leaves KUBECONFIG at its PREVIOUS value — on 2026-08-24 four commands labelled "prod" ran
+against op-dev. Same trap as 2026-07-24. Resolve by endpoint with a script, never by pasting
+a path.
+

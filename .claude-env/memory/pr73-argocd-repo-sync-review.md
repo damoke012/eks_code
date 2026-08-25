@@ -149,3 +149,27 @@ TLS ends at the gateway). Merged as iaac-talos-flux-platform **#99** then **#101
 the `external-dns.alpha.kubernetes.io/target` annotation without which the route exists, Flux
 reports Ready, and the name never resolves — see [[onprem-networking-ingress]]).
 **op-usxpress-prod has neither this route nor a Git credential.**
+
+## 2026-08-24 — the Istio VirtualService TODO is closed on dev
+
+`argocd.op-dev.usxpress.io` is live: PR #126 added the VirtualService (shared-http gateway,
+port 80, `wildcard-op-dev-tls`), external-dns wrote the A record, and
+`curl --resolve argocd.op-dev.usxpress.io:443:10.10.82.21` returns **200**. QA's route
+already existed.
+
+**`configs.cm.url` was never set on ANY branch** — it was the chart default
+`https://argocd.example.com` until PRs #126 (op-dev) and #127 (op-qa). Argo builds every
+emitted link and its OIDC `redirect_uri` from it, so SSO was blocked on this, not on a
+provider choice.
+
+⚠️ **`argocd-secret` has a different owner per cluster** and it decides how an OIDC
+clientSecret gets in: op-dev sets `configs.secret.createSecret: false` (it adopted a 49-day
+raw install holding `server.secretkey`), op-qa has no `configs.secret` block at all so Helm
+owns it. Merged by ExternalSecret on dev; contended with Helm on QA.
+
+Still open for SSO: the provider (`dex.enabled: false` on QA, so Dex means installing a
+component), and **`policy.csv` + `policy.default` are both empty** — a successful SSO login
+currently lands with zero permissions, which looks like a broken login but is RBAC.
+
+See [[manifests-copied-across-branches]] — wip/onprem-argocd/FINDINGS-2026-08-24-argocd-url-and-route.md
+

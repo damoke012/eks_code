@@ -84,6 +84,15 @@ control plane, `EKSConfigMap` backend reading `kube-system/aws-auth` in the exac
 dropped as the cluster-access answer — it needs an app registration and Doke has no Azure access (still right
 for app-level SSO, [[rw-platform-sso-entra]]).
 
+**Corrected 2026-08-25: "no Azure access" was wrong.** `az ad app update --id
+e112d6ce-cc60-4884-9898-8fcc5b78b0b1` ran successfully on 2026-08-13 to add RisingWave QA's redirect
+URI (`wip/rw-qa-operator-split/rw-qa-dex-sso-2026-08-13.md`), and Doke confirmed Azure AD access on
+2026-08-24. So app-registration **update** is proven; **create** is untested. The belief blocked the
+Entra route for Argo CD for weeks while the Identity Center SAML route burned a session on
+console-only state — see [[argocd-sso-blocked-on-management-account]]. Verify with
+`scripts/entra-argocd-preflight.sh`. This does not revive Entra for *cluster* access: aws-iam-authenticator
+via AWS SSO is live and is the answer there.
+
 Pack + full write-up: `wip/onprem-qa-access/aws-sso-webhook/` (`FINDINGS-2026-07-28.md`).
 
 **How to apply — the traps that cost the most, in order:**
