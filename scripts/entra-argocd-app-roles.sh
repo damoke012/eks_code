@@ -142,21 +142,32 @@ PY
               --query 'displayName' --output tsv 2>/dev/null || true)
     [ -n "$PNAME" ] || { echo "!! $PRINCIPAL is not a readable directory object" >&2; exit 1; }
     echo "   assigning '$VALUE' ($RID) to $PNAME"
-    az rest --method POST \
+    ERR_OUT=$(az rest --method POST \
       --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$SP/appRoleAssignedTo" \
       --headers 'Content-Type=application/json' \
       --body "{\"principalId\":\"$PRINCIPAL\",\"resourceId\":\"$SP\",\"appRoleId\":\"$RID\"}" \
-      --output none \
-      || { cat >&2 <<'ERR'
-!! the assignment failed. If the error mentions a licence or subscription, this is
-   the known limit: assigning a GROUP to an app role requires Entra ID P1. Assign
-   the individual user instead -- that works on any tier and is enough to PROVE the
-   roles claim arrives before deciding whether to buy the licence:
+      --output none 2>&1) && echo "   assigned" || {
+      # Re-running is normal -- this script is meant to be safe to repeat, and the
+      # first version reported the idempotent case as a failure and then pointed at
+      # a licence limit that had nothing to do with it.
+      case "$ERR_OUT" in
+        *"already exists on the object"*)
+          echo "   already assigned -- nothing to do" ;;
+        *[Ll]icense*|*[Ll]icence*|*subscription*|*Subscription*)
+          cat >&2 <<'ERR'
+!! assigning a GROUP to an app role requires Entra ID P1, and this tenant will not
+   allow it. Assign the individual user instead -- that works on any tier and proves
+   the roles claim arrives before anyone has to buy anything:
 
      az ad signed-in-user show --query id --output tsv
 ERR
-           exit 1; }
-    echo "   assigned"
+          exit 1 ;;
+        *)
+          echo "!! the assignment failed:" >&2
+          printf '   %s\n' "$(printf '%s' "$ERR_OUT" | head -3)" >&2
+          exit 1 ;;
+      esac
+    }
     inspect
     ;;
 

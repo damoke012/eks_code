@@ -88,4 +88,16 @@ for c in rows:
             print("   GROUPS: ABSENT")
     else:
         print("   GROUPS: %d -> %s" % (len(g), ", ".join(g)))
+    # Print the VALUE, not merely the name. A claim name in the list proves the
+    # claim was emitted; policy.csv matches on what is INSIDE it, and the two have
+    # been confused here before.
+    r = c.get("roles")
+    if r is None:
+        print("   ROLES:  ABSENT")
+    elif not r:
+        print("   ROLES:  present but EMPTY -- no appRoleAssignment reached this token")
+    else:
+        print("   ROLES:  %d -> %s" % (len(r), ", ".join(r)))
+        print("           policy.csv subjects must be these exact strings,")
+        print("           and configs.rbac.scopes must name 'roles'.")
 '
