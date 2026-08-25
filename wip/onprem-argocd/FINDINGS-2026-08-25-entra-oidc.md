@@ -720,3 +720,52 @@ with nobody remembering that the CLI uses a different redirect.
 **Proven:** nothing yet — the URIs are registered but no CLI login has completed.
 **Trap:** an app registration has more than one client type, and the redirect URI decides
 which one Entra applies.
+
+## The groups claim DOES arrive — in the CLI's flow, not the server's
+
+`argocd account get-user-info` after `argocd login --sso` on op-qa and op-prod:
+
+```
+Logged In: true   Username: doke@usxpress.com
+Groups: platform-admin,d10ff06b-...,00e9931c-...,4c095d23-...   (44 entries)
+```
+
+`platform-admin` is the `roles` claim. The other ~43 are **group object IDs**, including
+`b9a1ff74-efa1-4b20-be8a-8706a5ab2636` — matching the 42 returned by `me/getMemberGroups`
+this afternoon. (Argo lists every subject it collected across `scopes` under one "Groups"
+heading, which is its own small trap: the label does not mean the `groups` claim.)
+
+**Every browser-flow token today came back `GROUPS: ABSENT`.** Nothing about group
+configuration changed in between. The variable is the **flow**: this login used the CLI's
+**public-client PKCE** flow; `argocd-server` uses the **confidential web** flow. Same
+registration, same user, same tenant, minutes apart.
+
+Not yet independently confirmed — `get-user-info` is Argo's view of the merged subject
+list, not a claim dump. `scripts/argocd-token-claims.sh op-qa` reads the claim names off
+the token itself and settles it.
+
+### It does not change the design, and it strengthens the choice
+
+Keying `policy.csv` on **app-role values works in both flows**. Keying on group object IDs
+would have worked in the CLI and silently failed in the browser — the majority of use, and
+the harder failure to diagnose. The decision made this afternoon for one reason turns out
+to be right for a second, better one.
+
+It also means the rekey in #138/#139 was not merely cosmetic: had those GUID subjects
+stayed, `scopes: "[roles, groups]"` would have made them live for CLI sessions and dead for
+browser sessions — the same user holding different permissions depending on how they signed
+in, which is far worse than uniformly broken.
+
+### For the questionnaire
+
+This sharpens question 1 considerably. The report to the directory owner is no longer
+"groups never arrives" but: **on one registration, the `groups` claim is emitted to the
+public-client PKCE flow and withheld from the confidential web flow, for the same user in
+the same minute.** That is a far more specific thing to explain.
+
+### And a check that flattered itself
+
+`argocd-can-i.sh` printed "AUTHORISATION CONFIRMED ... allow and deny both" for
+`platform-admin`, which has **no deny probes** — it is supposed to do everything. A true
+sounding line about a test that never ran. Fixed to state what was actually asserted.
+Fifth of the day.

@@ -82,5 +82,12 @@ case "$ROLE" in
 esac
 
 echo
-[ "$FAIL" -eq 0 ] && echo "  AUTHORISATION CONFIRMED for $ROLE on $BR, allow and deny both." \
+# Say what was actually tested. platform-admin has no deny probes -- it is meant to be
+# able to do everything -- so claiming "allow and deny both" there was a true-sounding
+# line about a test that did not run. app-viewer is where the boundaries are asserted.
+case "$ROLE" in
+  app-viewer) SCOPE="allow and deny both" ;;
+  *)          SCOPE="allow only -- this role has no boundaries to assert" ;;
+esac
+[ "$FAIL" -eq 0 ] && echo "  AUTHORISATION CONFIRMED for $ROLE on $BR ($SCOPE)." \
                   || { echo "  $BR does NOT match the intended policy for $ROLE." >&2; exit 1; }
