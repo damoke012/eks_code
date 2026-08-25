@@ -147,7 +147,10 @@ cat <<OUT
         issuer: https://login.microsoftonline.com/$TENANT/v2.0
         clientID: $APPID
         enablePKCEAuthentication: true
-        requestedScopes: ["openid", "profile", "email", "groups"]
+        requestedScopes: ["openid", "profile", "email"]
+        requestedIDTokenClaims:
+          groups:
+            essential: true
 
     and configs.rbac.policy.csv:
 

@@ -92,7 +92,15 @@ oidc = [
     "          issuer: https://login.microsoftonline.com/%s/v2.0\n" % tenant,
     "          clientID: %s\n" % client_id,
     "          enablePKCEAuthentication: true\n",
-    '          requestedScopes: ["openid", "profile", "email", "groups"]\n',
+    # Entra's v2.0 endpoint validates scopes: they must be the OIDC standard ones or
+    # a resource-qualified api://.../name. A bare "groups" is NOT a scope and the
+    # request is rejected outright. Groups arrive as an ID-TOKEN CLAIM instead --
+    # emitted because the registration sets groupMembershipClaims=ApplicationGroup
+    # and lists groups under optionalClaims.idToken.
+    '          requestedScopes: ["openid", "profile", "email"]\n',
+    "          requestedIDTokenClaims:\n",
+    "            groups:\n",
+    "              essential: true\n",
 ]
 out, done = [], False
 for ln in lines:
@@ -127,7 +135,10 @@ assert o["clientID"] == client_id, o["clientID"]
 assert o["issuer"] == "https://login.microsoftonline.com/%s/v2.0" % tenant, o["issuer"]
 assert o["enablePKCEAuthentication"] is True, "PKCE off -- a client secret would be required"
 assert "clientSecret" not in o, "a clientSecret appeared; PKCE needs a public client"
-assert set(o["requestedScopes"]) == {"openid", "profile", "email", "groups"}, o["requestedScopes"]
+assert set(o["requestedScopes"]) == {"openid", "profile", "email"}, o["requestedScopes"]
+assert "groups" not in o["requestedScopes"], \
+    "groups is a claim, not a scope -- Entra rejects the authorize request outright"
+assert o["requestedIDTokenClaims"]["groups"]["essential"] is True, o.get("requestedIDTokenClaims")
 assert v["dex"]["enabled"] is False, "dex still enabled"
 csv = v["configs"]["rbac"]["policy.csv"]
 assert ("g, %s, role:admin" % group_id) in csv, "policy.csv missing the object-ID rule"
