@@ -51,9 +51,30 @@ One new ticket is still warranted, but it is a question, not a blocker.
 > Write-up: `wip/onprem-argocd/FINDINGS-2026-08-25-entra-oidc.md`.
 > Procedure: `.claude/skills/entra-authz-claims/SKILL.md`.
 
-**Do not close until an application-team member has signed in.** Everything else is our
-own admin access, and the ticket is about theirs. Idris holds `app-viewer`
-(`86486897-edd4-537d-b04f-805d6aeff583`).
+**Do not close on a sign-in alone.** Corrected 2026-08-25 after Doke pointed out that a
+sign-in on QA and prod tests **authentication**, which was never in doubt.
+
+**op-dev and op-prod have no Applications at all** — no ApplicationSet yet (INFRA-1650).
+This is trap 6 in the findings note, written earlier the same day and then walked past:
+*zero Applications makes the Argo UI useless as an RBAC test — an admin and an
+unauthorised user see the identical empty screen.* Only **op-qa** carries a real
+Application (`risingwave-etl`), so QA is the only cluster the UI can prove anything on.
+
+Authorisation is provable without one. `scripts/argocd-can-i.sh <cluster> --role <role>`
+asks the server for the RBAC decision directly and checks **allow and deny together** — a
+policy that granted everything would pass every allow-check and still be wrong. The deny
+cases are the ones that matter: no creating or deleting Applications, no cluster config,
+no project management, and **no sync on prod**.
+
+Acceptance, then, is:
+
+| Cluster | Evidence |
+|---|---|
+| op-qa | Idris signs in, sees `risingwave-etl` and nothing else — the real end-to-end test |
+| op-dev, op-prod | `argocd-can-i.sh` for `app-viewer`, allow **and** deny |
+| all three | `close-argocd-sso.sh` ✅ already passing |
+
+Idris holds `app-viewer` (`86486897-edd4-537d-b04f-805d6aeff583`).
 
 ---
 

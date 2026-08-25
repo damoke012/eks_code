@@ -643,3 +643,41 @@ op-qa and op-prod, read from the running systems.
 permissions. Doke has done this on op-dev only. **No application-team member has signed in
 on any cluster** — that is what INFRA-1639 asks for, and it is the last thing standing
 between here and closing it. Idris holds `app-viewer`.
+
+## Correction: a sign-in on QA and prod tests authentication, not authorisation
+
+Doke's observation, and it invalidates the closing step proposed a minute earlier.
+
+**op-dev and op-prod have no Applications.** Neither has an ApplicationSet yet
+(INFRA-1650). So the Applications screen is empty for everyone, and an admin and a user
+with zero permissions see exactly the same page. Signing in there demonstrates that the
+OIDC round-trip completes — which has not been in question since 14:00 — and nothing about
+`policy.csv`.
+
+This is **trap 6 in this very note**, written hours earlier:
+
+> Zero Applications makes the Argo UI useless as an RBAC test — an admin and an
+> unauthorized user see the same empty screen.
+
+I wrote it, and then proposed exactly that as the closing evidence for two of the three
+clusters. Recording a trap does not stop you walking into it; the trap has to be attached
+to the step that would trigger it. It now is, in the closure document and in the skill.
+
+**Only op-qa can prove authorisation through the UI** — it carries `risingwave-etl` from
+the ApplicationSet proven on 2026-08-20.
+
+### The check that closes the gap
+
+`scripts/argocd-can-i.sh <cluster> [--role platform-admin|app-viewer]` asks
+`argocd account can-i` for the server's own RBAC decision, so it works on an empty
+cluster.
+
+It checks **allow and deny together**, which is the part that carries the information: a
+`policy.csv` granting `*` to everyone would pass every allow-check and be catastrophically
+wrong. For `app-viewer` the boundaries asserted are no create, no delete, no cluster
+config, no project management — and **`sync` must be denied on op-prod specifically**,
+where it is granted on dev and QA. That last probe is the design decision made testable;
+nothing else in today's tooling would catch a Sync button appearing on production.
+
+**Proven:** nothing new — this is a correction to what counts as proof.
+**Trap:** an empty Applications list is not a permissions result. Ask the server.
