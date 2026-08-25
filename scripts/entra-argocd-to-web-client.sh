@@ -63,6 +63,35 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
   echo "   The REGION column is what --secret writes to. A secret written to any"
   echo "   other region reports SecretSynced against nothing."
   ;;
+--groups)
+  # ApplicationGroup emits only groups ASSIGNED to the app. That is configured and
+  # verified here, yet the id_token carried no groups claim at all on 2026-08-25
+  # 14:29Z. SecurityGroup emits every security group the user belongs to, which is
+  # a strictly wider set, so it distinguishes "Entra will not emit groups for this
+  # app" from "ApplicationGroup specifically is not producing them".
+  #
+  # Overage is the reason to prefer ApplicationGroup: past ~200 groups Entra drops
+  # the claim and sends _claim_names instead. This user is in 4, so SecurityGroup
+  # is safe here -- but that is a fact about this directory, not a general licence.
+  MODE="${2:-}"
+  case "$MODE" in SecurityGroup|ApplicationGroup) : ;; *)
+    echo "!! --groups takes SecurityGroup or ApplicationGroup (got '${MODE:-}')" >&2; exit 2 ;; esac
+  OBJID=$(az ad app show --id "$APP_ID" --query id -o tsv) || exit 1
+  BODY=$(python3 -c '
+import json,sys
+print(json.dumps({"groupMembershipClaims": sys.argv[1],
+                  "optionalClaims": {"idToken": [{"name": "groups", "essential": False,
+                                                  "additionalProperties": []}],
+                                     "accessToken": [], "saml2Token": []}}))' "$MODE")
+  echo "== setting groupMembershipClaims to $MODE"
+  az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$OBJID" \
+     --headers 'Content-Type=application/json' --body "$BODY" || exit 1
+  az ad app show --id "$APP_ID" \
+     --query '{groupMembershipClaims:groupMembershipClaims, idTokenClaims:optionalClaims.idToken}' -o json
+  echo
+  echo "   Sign out of Argo completely and sign in again in a fresh private window."
+  echo "   A token already issued will not gain the claim."
+  ;;
 --secret)
   PROFILE="${2:-}"
   [ -n "$PROFILE" ] || { echo "!! usage: $0 --secret <aws-profile>" >&2; exit 2; }
@@ -142,5 +171,5 @@ import json,sys; print(json.dumps({"client_id": sys.argv[1], "client_secret": sy
   echo "   stored at $SM_PATH (account $ACCT, region $REGION) with keys client_id, client_secret"
   ;;
 *)
-  echo "!! usage: $0 --web | $0 --check | $0 --secret <aws-profile>" >&2; exit 2 ;;
+  echo "!! usage: $0 --web | $0 --check | $0 --groups <SecurityGroup|ApplicationGroup> | $0 --secret <aws-profile>" >&2; exit 2 ;;
 esac
