@@ -7,6 +7,10 @@
 #
 #   scripts/prod-argocd-entra-preflight.sh
 set -uo pipefail
+# Resolve this BEFORE any cd. Gate 1 cds into the platform repo, which broke the
+# relative lookup in gate 2 and reported the cluster as unreachable -- a check
+# failing in a way indistinguishable from the thing it checks for.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BR=op-prod
 REPO="${REPO:-$HOME/pr-work/iaac-talos-flux-platform}"
 ACCOUNT=937464026810
@@ -33,7 +37,7 @@ else
 fi
 
 say "2. Is the op-prod cluster reachable, and what is its ClusterSecretStore"
-LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-onprem-ctx.sh"
+LIB="$SCRIPT_DIR/lib-onprem-ctx.sh"
 if [ -f "$LIB" ] && command -v kubectl >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   if source "$LIB" && onprem_resolve_ctx "$BR" 2>/dev/null; then
@@ -72,7 +76,19 @@ else
   huh "aws not on PATH"
 fi
 
-say "4. Does the prod hostname resolve"
+say "4. Does op-prod even have an Argo route to land the callback on"
+echo "   -- infrastructure/argocd-config on the branch --"
+git ls-tree --name-only "origin/$BR" infrastructure/argocd-config/ 2>/dev/null | sed 's/^/         /'
+VS=$(git grep -l 'kind: VirtualService' "origin/$BR" -- 'infrastructure/argocd*' 2>/dev/null)
+if [ -n "$VS" ]; then
+  ok "a VirtualService exists for argocd on the branch"
+  printf '%s\n' "$VS" | sed "s|^origin/$BR:|         |"
+else
+  no "NO VirtualService for argocd on op-prod -- there is no route, so external-dns"
+  val "publishes no record and the OIDC callback has nowhere to land. op-dev needed"
+  val "one added (PR #126) before argocd.op-dev.usxpress.io resolved."
+fi
+
 R=$(dig +short argocd.op-prod.usxpress.io @1.1.1.1 2>/dev/null)
 [ -n "$R" ] && { ok "argocd.op-prod.usxpress.io resolves"; printf '%s\n' "$R" | sed 's/^/         /'; } \
             || no "does not resolve -- prod has no Argo route yet; SSO would have nowhere to land"
