@@ -39,10 +39,18 @@ python3 - <<'PY'
 import glob, yaml
 changed = []
 for p in sorted(glob.glob("infrastructure/cert-manager-issuers/letsencrypt-*.yaml")):
-    txt = open(p).read()
-    if "op-qa" not in txt:
-        print("   %s: no op-qa literal, leaving alone" % p); continue
-    open(p, "w").write(txt.replace("op-qa", "op-prod"))
+    lines = open(p).readlines()
+    if not any(l.strip() == "- op-qa.usxpress.io" for l in lines):
+        print("   %s: no op-qa dnsZone, leaving alone" % p); continue
+    # Rewrite ONLY the list items. A blind text substitution turned the comment
+    # "(op-qa, op-prod) get their own selector blocks" into "(op-prod, op-prod)":
+    # prose is not configuration, and substituting across both corrupts it.
+    out = []
+    for l in lines:
+        if l.strip() == "- op-qa.usxpress.io":
+            l = l.replace("op-qa.usxpress.io", "op-prod.usxpress.io")
+        out.append(l)
+    open(p, "w").write("".join(out))
     changed.append(p)
 assert changed, "no issuer carried an op-qa zone -- already fixed?"
 
@@ -56,13 +64,17 @@ for p in changed:
         for z in zones:
             assert "op-qa" not in z, z
             assert z.endswith("op-prod.usxpress.io"), z
+        assert zones, "solver has no dnsZones selector in %s" % p
         r53 = (s.get("dns01") or {}).get("route53") or {}
         # The cross-account role lives in the network account and is NOT
         # per-cluster; rewriting it would break the delegation.
         if r53.get("role"):
             assert "155768531003" in r53["role"], \
                 "the route53 role was rewritten -- it is shared, not per-cluster: %s" % r53["role"]
-    print("   %s -> zones now op-prod, route53 role untouched" % p)
+    # comments must survive untouched
+    body = open(p).read()
+    assert "(op-prod, op-prod)" not in body, "a comment was corrupted by substitution in %s" % p
+    print("   %s -> dnsZones now op-prod; comments and the route53 role untouched" % p)
 PY
 
 echo
