@@ -240,8 +240,15 @@ if role_value:
                       + ind + "# tenant emits no groups claim, so that subject matched nothing.\n"
                       + ind + "g, %s, role:admin\n" % admin_role_value)
             rekeyed += 1
-    assert rekeyed == 1, ("expected exactly one group-keyed admin line to rekey, found %d -- "
-                          "resolve by hand rather than guessing" % rekeyed)
+    # 0 is the ALREADY-CORRECT state, not a failure. op-prod's Entra PR emits the
+    # app-role subject directly, so there is nothing to rekey there -- while op-dev
+    # and op-qa, built before we knew the tenant emits no groups claim, each have
+    # exactly one. Demanding 1 made the finished state look broken.
+    # More than one is genuinely ambiguous and still refuses.
+    assert rekeyed <= 1, ("found %d group-keyed admin lines -- resolve by hand rather "
+                          "than guessing which is authoritative" % rekeyed)
+    print("   admin line: %s" % ("rekeyed to %s" % admin_role_value if rekeyed
+                                 else "already an app-role value, nothing to rekey"))
 
 if role_value:
     # Argo only looks in the claims that scopes names. Leaving it '[groups]' while
