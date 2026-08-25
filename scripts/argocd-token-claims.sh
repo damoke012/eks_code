@@ -49,7 +49,10 @@ for c in rows:
     when = datetime.datetime.fromtimestamp(iat, datetime.timezone.utc).strftime("%H:%M:%SZ") if iat else "?"
     age  = int(now - iat) if iat else None
     g = c.get("groups")
-    stale = "" if age is None or age < 180 else "   <-- STALE: issued %dm%02ds ago, before any change you just made" % (age // 60, age % 60)
+    # Only report the age. Whether it predates a given change is not something
+    # this script can know, and asserting it made a valid post-change token read
+    # as untested on 2026-08-25.
+    stale = "" if age is None or age < 180 else "   <-- %dm%02ds old; check this against when you made the change" % (age // 60, age % 60)
     print("-- token issued %s (%ss ago)  sub %s%s" % (
         when, age if age is not None else "?", str(c.get("preferred_username") or c.get("sub"))[:40], stale))
     print("   claims present: %s" % ", ".join(sorted(c.keys())))
