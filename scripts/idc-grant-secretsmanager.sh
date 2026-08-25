@@ -111,11 +111,35 @@ aws sso-admin put-inline-policy-to-permission-set --profile "$PROFILE" --region 
   --inline-policy "$MERGED" || exit 1
 echo "   written"
 
-# A permission set change does nothing until it is re-provisioned to the account.
-aws sso-admin provision-permission-set --profile "$PROFILE" --region "$REGION" \
+# A permission set change does nothing until it is re-provisioned to the account,
+# and provisioning is ASYNCHRONOUS -- it returns IN_PROGRESS. Retrying before it
+# reaches SUCCEEDED fails with the identical AccessDenied, which reads exactly like
+# the grant not having worked.
+REQ=$(aws sso-admin provision-permission-set --profile "$PROFILE" --region "$REGION" \
   --instance-arn "$INSTANCE_ARN" --permission-set-arn "$PS_ARN" \
   --target-type AWS_ACCOUNT --target-id "$ACCOUNT" \
-  --query 'PermissionSetProvisioningStatus.Status' --output text || exit 1
+  --query 'PermissionSetProvisioningStatus.RequestId' --output text) || exit 1
+echo "   provisioning request $REQ"
+
+for i in $(seq 1 30); do
+  ST=$(aws sso-admin describe-permission-set-provisioning-status \
+         --profile "$PROFILE" --region "$REGION" --instance-arn "$INSTANCE_ARN" \
+         --provision-permission-set-request-id "$REQ" \
+         --query 'PermissionSetProvisioningStatus.Status' --output text 2>/dev/null)
+  case "$ST" in
+    SUCCEEDED) echo "   provisioning SUCCEEDED after ${i}0s"; break ;;
+    FAILED)
+      aws sso-admin describe-permission-set-provisioning-status \
+        --profile "$PROFILE" --region "$REGION" --instance-arn "$INSTANCE_ARN" \
+        --provision-permission-set-request-id "$REQ" --output json
+      echo "!! provisioning FAILED" >&2; exit 1 ;;
+    *) printf '   %s (%ds)\r' "${ST:-?}" $((i*10)); sleep 10 ;;
+  esac
+done
+[ "${ST:-}" = "SUCCEEDED" ] || { echo; echo "!! still $ST after 300s -- check before retrying" >&2; exit 1; }
+
 echo
-echo "   Re-provisioned to $ACCOUNT. Your existing session carries the OLD policy --"
-echo "   run 'aws sso login --profile <the $BR profile>' again before retrying."
+echo "   Granted and provisioned to $ACCOUNT."
+echo "   Your cached ROLE credentials still carry the old policy. aws sso login alone"
+echo "   refreshes the SSO token, not the assumed-role credentials, so clear them:"
+echo "     rm -rf ~/.aws/cli/cache ~/.aws/sso/cache && aws sso login --profile <$BR profile>"
