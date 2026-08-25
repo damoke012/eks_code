@@ -41,6 +41,23 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
   echo "   client type from where the redirect URI is registered, and a URI left"
   echo "   under spa keeps the cross-origin restriction alive for that URI."
   ;;
+--check)
+  # Do not assume the region or the store. Read them off the cluster.
+  LIB="$(dirname "${BASH_SOURCE[0]}")/lib-onprem-ctx.sh"
+  # shellcheck source=/dev/null
+  source "$LIB"; onprem_resolve_ctx op-dev || exit 1
+  K=(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX")
+  echo "== ClusterSecretStores on op-dev"
+  "${K[@]}" get clustersecretstores.external-secrets.io \
+     -o custom-columns=NAME:.metadata.name,REGION:.spec.provider.aws.region,SERVICE:.spec.provider.aws.service 2>&1
+  echo
+  echo "== an existing ExternalSecret, for the key convention actually in use"
+  "${K[@]}" get externalsecrets.external-secrets.io -A \
+     -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,STORE:.spec.secretStoreRef.name,KEY:.spec.data[0].remoteRef.key 2>&1 | head -15
+  echo
+  echo "   The REGION column is what --secret writes to. A secret written to any"
+  echo "   other region reports SecretSynced against nothing."
+  ;;
 --secret)
   PROFILE="${2:-}"
   [ -n "$PROFILE" ] || { echo "!! usage: $0 --secret <aws-profile>" >&2; exit 2; }
@@ -52,6 +69,16 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
     echo "!! profile '$PROFILE' is account ${ACCT:-<unreadable>}, not op-dev ($DEV_ACCOUNT)." >&2
     echo "   Writing the secret to the wrong account would sync green and serve nothing." >&2
     exit 2; }
+
+  LIB="$(dirname "${BASH_SOURCE[0]}")/lib-onprem-ctx.sh"
+  # shellcheck source=/dev/null
+  source "$LIB"; onprem_resolve_ctx op-dev || exit 1
+  REGION=$(kubectl --kubeconfig="$ONPREM_KC" --context="$ONPREM_CTX" \
+             get clustersecretstores.external-secrets.io default \
+             -o jsonpath='{.spec.provider.aws.region}' 2>/dev/null)
+  [ -n "${REGION:-}" ] || { echo "!! could not read the region from op-dev's ClusterSecretStore." >&2
+                            echo "   Run: $0 --check" >&2; exit 1; }
+  echo "== region $REGION, read from op-dev's ClusterSecretStore (not defaulted)"
 
   # --append, or every other credential on this app is deleted. The value is shown
   # once and never again, so it goes straight into a variable and then into Secrets
@@ -66,16 +93,16 @@ print(json.dumps({"web": {"redirectUris": json.loads(sys.argv[1])},
   # JSON, not a bare string: ESO reads a property out of it. A raw string syncs
   # green and serves nothing usable -- the 2026-08-13 trap.
   PAYLOAD=$(python3 -c 'import json,sys; print(json.dumps({sys.argv[1]: sys.argv[2]}))' "$SM_KEY" "$SECRET")
-  if aws secretsmanager describe-secret --profile "$PROFILE" --secret-id "$SM_PATH" >/dev/null 2>&1; then
-    aws secretsmanager put-secret-value --profile "$PROFILE" \
+  if aws secretsmanager describe-secret --profile "$PROFILE" --region "$REGION" --secret-id "$SM_PATH" >/dev/null 2>&1; then
+    aws secretsmanager put-secret-value --profile "$PROFILE" --region "$REGION" \
       --secret-id "$SM_PATH" --secret-string "$PAYLOAD" --query VersionId -o text || exit 1
   else
-    aws secretsmanager create-secret --profile "$PROFILE" \
+    aws secretsmanager create-secret --profile "$PROFILE" --region "$REGION" \
       --name "$SM_PATH" --secret-string "$PAYLOAD" --query ARN -o text || exit 1
   fi
   unset SECRET PAYLOAD
-  echo "   stored at $SM_PATH key $SM_KEY (account $ACCT)"
+  echo "   stored at $SM_PATH key $SM_KEY (account $ACCT, region $REGION)"
   ;;
 *)
-  echo "!! usage: $0 --web | $0 --secret <aws-profile>" >&2; exit 2 ;;
+  echo "!! usage: $0 --web | $0 --check | $0 --secret <aws-profile>" >&2; exit 2 ;;
 esac
