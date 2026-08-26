@@ -35,12 +35,33 @@ for line in sys.stdin:
     sys.stdout.write(line)
 '
 }
+# Files that are stock upstream config and tell us nothing about this project. On
+# 2026-08-26 postgresql.conf alone emitted ~800 lines and pushed the whole survey out of
+# the terminal scrollback, losing sections 1-9.
+STOCK='postgresql\.conf|pg_hba\.conf|\.lock$|package-lock|yarn\.lock'
+MAXLINES=140
+
 show() {  # show <path-relative-to-repo>
-  local f="$REPO/$1"
+  local f="$REPO/$1" n
   echo; echo "───── $1 ─────"
   [ -f "$f" ] || { echo "  (absent)"; return; }
+  n=$(wc -l < "$f")
+  if printf '%s' "$1" | grep -qE "$STOCK"; then
+    echo "  (stock upstream config, ${n} lines -- skipped; non-default lines only:)"
+    grep -vE '^[[:space:]]*(#|$)' "$f" | red | sed 's|^  |    |' | head -30
+    return
+  fi
+  if [ "$n" -gt "$MAXLINES" ]; then
+    echo "  (${n} lines -- first ${MAXLINES}; ask for the rest if it matters)"
+    head -"$MAXLINES" "$f" | red
+    return
+  fi
   red < "$f"
 }
+
+OUT="${HOME}/rw-pipeline-survey.txt"
+exec > >(tee "$OUT") 2>&1
+echo "(full output also being written to $OUT)"
 
 echo "############### 1. IDENTITY ###############"
 echo "origin : $ORIGIN"
@@ -123,3 +144,10 @@ show SECRET_MANAGEMENT.md
 echo
 echo "############### 10. docker/ ###############"
 for f in $(git -C "$REPO" ls-files 'docker/*'); do show "$f"; done
+
+echo
+echo "######################################################################"
+echo "Full survey written to $OUT"
+echo "Send it in parts:   sed -n '1,150p' $OUT"
+echo "                    sed -n '150,400p' $OUT   ... and so on"
+echo "Total: $(wc -l < "$OUT") lines"
