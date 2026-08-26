@@ -769,3 +769,41 @@ the same minute.** That is a far more specific thing to explain.
 `platform-admin`, which has **no deny probes** — it is supposed to do everything. A true
 sounding line about a test that never ran. Fixed to state what was actually asserted.
 Fifth of the day.
+
+## Correction: the prod ingress work was never INFRA-1663
+
+**INFRA-1663 is "op-usxpress-prod has no Talos machine config in iaac-talos — no
+prod.tfvars, no mention on any branch."** It is a Terraform source-of-truth ticket. This
+note, and the delivery-standard note, both called the prod ingress work by that number.
+
+The mislabel propagated: a wrong number written into a working note on 2026-08-24 was
+carried forward all through 2026-08-25 and then used, on 2026-08-26, to post a certificate
+write-up onto a Terraform ticket and close it. **The ticket's summary was never read.**
+
+Corrected: INFRA-1663 reopened with the comment retracted; the ingress work recorded as
+**INFRA-1671**, filed and closed with its evidence.
+
+### What INFRA-1663 actually still needs, and why the kubeconfig recovery is not it
+
+Its AC is *a written answer to where op-usxpress-prod's Talos machine config comes from.*
+What the last two days established is narrower than it looked:
+
+* `op-usxpress-prod/talosconfig` exists in Secrets Manager (937464026810, us-east-2), and
+  `scripts/onprem-prod-kubeconfig.sh` mints a working kubeconfig from it — verified against
+  13 live nodes.
+
+That is a **client credential for talking to a cluster that already exists.** It is not the
+machine config, it does not identify what generated the machine config, and it gives prod no
+IaC home. A production cluster whose machine config has no known source still cannot be
+rebuilt from source.
+
+The description's own warning stands: **do not add a `prod.tfvars` on the assumption that
+prod matches dev and QA.** If prod is driven from Octopus variables — the standing
+hypothesis, consistent with `TfApply=false` everywhere but production — a repo tfvars is
+either ignored or a second source of truth, and both are worse than the current state.
+Verify in Octopus.
+
+**Trap, and it is a new one for this repo:** a ticket number in a working note is not
+evidence. Read the ticket's own summary before commenting on it, and certainly before
+transitioning it. Every other check in this repo is about not trusting an adjacent green
+signal; this was the same mistake pointed at an identifier instead of a status.

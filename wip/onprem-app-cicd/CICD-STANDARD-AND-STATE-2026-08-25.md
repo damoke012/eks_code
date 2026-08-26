@@ -73,7 +73,7 @@ RisingWave.
 | P4 | ECR bootstrap into Terraform | ECR acct | INFRA-1651 | repo + push role exist **outside** IaC; owning repo unidentified |
 | P5 | ECR registry policy | ECR acct | — | `PutImage` granted to the whole org `o-yza5l1xhrc`, which weakens the scoped per-app push roles |
 | P6 | Argo CD **RBAC for app teams** | dev + QA | — | see §5 — SSO authenticates, group-based authorisation does not |
-| P7 | Prod ingress | prod | INFRA-1663 | Gateway served QA hostnames; wildcard cert failed 27 days; cert-manager had no IRSA. Being fixed 2026-08-25 |
+| P7 | Prod ingress | prod | INFRA-1671 | Gateway served QA hostnames; wildcard cert failed 27 days; cert-manager had no IRSA. Being fixed 2026-08-25 |
 | P8 | Auto-merge on green | platform repo | filed | every PR is an immediate deploy to that branch's cluster — "ship to dev, then prod" is not achievable by intent today |
 
 ## 4. What remains — RisingWave (Idris)
