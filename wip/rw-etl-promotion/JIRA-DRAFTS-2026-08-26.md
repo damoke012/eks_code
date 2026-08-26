@@ -5,43 +5,57 @@ postgres pod on each cluster. Full write-up in `FINDINGS-2026-08-18.md`.
 
 ---
 
-## A. Comment on INFRA-1637 — reopen
+## A. ~~Comment on INFRA-1637 — reopen~~ WITHDRAWN — replaced by A2
 
-> Re-read both clusters today with `rw-etl-inventory.sh` and this looks like it's still open —
-> flagging rather than reopening unilaterally, in case what you completed was a different part
-> of it than I'm testing.
+**Why withdrawn.** Drafted from live-cluster evidence alone, and it implied Idris had not done
+the work. He had. `pipelines/Brand/100-sources.rw` on `master` carries his header:
+
+```
+08/18/2026 - Idris Fagbemi - INFRA-1637: switch all Confluent credentials to secret references.
+                             Plaintext SASL/schema-registry credentials have been removed.
+```
+
+Every credential in that file is now a `secret` reference. The repo is clean.
+
+**The lesson, and it is the same one as always:** `rw_catalog` and `git` answer different
+questions. The catalog holds what the streaming job was *created with*; the repo holds what we
+*intend*. A fix committed to the repo changes nothing in RisingWave until something applies it,
+and nothing has. Reading only the cluster made a completed fix look like an ignored ticket.
+Reading only the repo would have made a live exposure look closed. Neither source is the
+answer on its own.
+
+---
+
+## A2. Comment on INFRA-1637 — the gap is deployment, not the fix
+
+> Your `100-sources.rw` rewrite looks right — every credential is a `secret` reference now.
+> Flagging that it hasn't reached the cluster, plus two things that I think block the cutover.
 >
-> **op-dev, `risingwave` namespace, 2026-08-26:**
+> **op-dev `risingwave` catalog, 2026-08-26:**
 >
 > ```
 > sources: 1  -- brand_source_kafka
 > plaintext credentials in source DDL: brand_source_kafka  PLAINTEXT PRESENT
-> secrets defined: 15  (kafka_api_key, kafka_api_secret, kafka_bootstrap_server,
->                       kafka_schema_registry_api_key, kafka_schema_registry_api_secret, …)
 > ```
 >
-> `rw_catalog.rw_sources.connector_props` still stores the Confluent Cloud sasl and
-> schema-registry credentials as `"type": "plaintext"`. Any principal that can open a SQL
-> connection and read the catalog gets working keys — no cluster access needed. The fifteen
-> secrets are all present and **none of them is referenced by the source DDL**, so the secret
-> layer exists and is unused.
+> The live streaming job is still the one created from the pre-fix DDL, so the Confluent keys
+> are still readable from `rw_catalog.rw_sources.connector_props` by anything that can open a
+> SQL connection. The repo is fixed; the cluster hasn't been told.
 >
-> The AC has two halves and I can only see one from outside: no plaintext in any catalog table
-> **on any cluster**, and the old Confluent key **revoked** rather than replaced. Can you
-> confirm where each stands?
+> **1. Applying the new file will not remove the exposure.** The repo creates `kafka_brand`;
+> the live source is `brand_source_kafka`. `DROP SOURCE IF EXISTS kafka_brand CASCADE` doesn't
+> match it. So a clean source appears alongside the dirty one and the plaintext stays. Dropping
+> `brand_source_kafka` also takes `brand_mv_raw`, `brand_mv_state` and `brand_mv_flat` with it
+> via CASCADE — what's the cutover plan?
 >
-> **Why this got more urgent rather than less.** We confirmed today that Tim's ETL is not in QA
-> — `op-qa/risingwave` probes fine and reports 0 sources, 0 materialized views, 0 sinks. The
-> platform is promoted; the ETL isn't. And the reason it can't be promoted is *this ticket*:
-> the topic (`dev_brand_management_cdc_brand_avro`), the group prefix
-> (`dx__dev_risingwave_risingwave_dev`) and the credentials are literals inside the DDL. Our
-> promotion model builds once and ships the same digest to QA and prod, so an artefact built
-> from this DDL carries dev's topic and dev's keys into QA.
+> **2. Who substitutes the `%VAR%` placeholders?** The file uses `'%KAFKA_TOPIC_BRAND%'`,
+> `'%KAFKA_STARTUP_MODE%'` and `'%KAFKA_SCHEMA_REGISTRY_MESSAGE%'`. The Argo CD sync-hook
+> applier runs `psql -f` with no substitution step that I can see, so it would send the literal
+> `%KAFKA_TOPIC_BRAND%` to RisingWave. If substitution only happens on the ARC path, that's a
+> blocker on INFRA-1635 and I need to add it to the applier.
 >
-> So 1637 isn't just a credential-hygiene item any more — it's the gate on the whole RW
-> promotion path. Rewriting the source to `SECRET kafka_api_key` etc. (the form in
-> `FINDINGS-2026-08-18.md` §5) closes the exposure and unblocks promotion in the same change.
-> One new secret is needed, `kafka_topic_brand`; everything else already exists.
+> **3. Was the old Confluent key revoked, or replaced?** The AC asks for revoked. Separate
+> question from everything above and the only one with a clock on it.
 
 ---
 
