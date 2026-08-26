@@ -80,7 +80,7 @@ RisingWave.
 
 | # | Item | Why it is his |
 |---|---|---|
-| R1 | **Containerise the RW workload properly** | he built the RW platform and has the dev background; this is the piece the path cannot supply |
+| R1 | ~~**Containerise the RW workload properly**~~ **WRONG — withdrawn 2026-08-26** | This became INFRA-1665 and was closed unstarted. Idris's question ("do you mean the current `risingwave-onprem`?") exposed it. **RisingWave was never ours to containerise** — it is an upstream product (`risingwavelabs/risingwave:v2.8.2`) deployed by its operator, running as pods on op-dev since May. And the **pipeline applier** was already containerised too: `risingwave-pipeline/build/Dockerfile` → `sha256:d6162426…` from commit `987ea1ca`, pulled by digest on QA on 2026-08-20. Nothing to build. The real item is R6/INFRA-1644 (now his), then pointing `PIPELINE_DIR` at the real DDL (INFRA-1635, mine). |
 | R2 | A `deploy/` directory in the app repo: base + `overlays/{dev,qa,prod}` | app-owned by design |
 | R3 | **Nothing environment-specific in the image** | hostnames, topics, ports → ConfigMap in the overlay; credentials → Secrets Manager → ExternalSecret. An inlined `dev-` topic will not fail loudly in QA — it will succeed against the wrong thing |
 | R4 | Digest-bump PRs (QA, then prod with the same digest) | the promotion decision is the app team's |
