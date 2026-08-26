@@ -10,3 +10,11 @@ __pycache__/
 *.tfplan
 *.tfstate
 *.tfstate.*
+
+# Clones of variant-inc / USX corporate repos, dropped here for reading only.
+# This repo pushes to PERSONAL GitHub (damoke012). Corporate source must never
+# reach it -- CLAUDE.md rule 10. Anything cloned in for a review lives here and
+# stays untracked. Added 2026-08-26 after risingwave-pipeline was cloned into
+# the working tree, where a routine `git add -A` would have pushed it.
+/risingwave-pipeline/
+/repos/
