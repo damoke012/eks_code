@@ -111,3 +111,33 @@ when one exists. Validated red against this defect and green after the fix.
 cluster of three**. Neither ticket's acceptance said which cluster. Check the other branches
 before closing anything platform-wide — `scripts/check-wip-matches-branch.sh <checkout> <branch>`
 finds it mechanically. See [[manifests-copied-across-branches]].
+
+## 2026-08-26 — the vehicle was real, the payload was a smoke test
+
+The confusion that produced (and killed) INFRA-1665 "Containerise the RisingWave workload":
+
+* **RisingWave itself was never ours to containerise.** Upstream product, upstream image
+  `risingwavelabs/risingwave:v2.8.2`, deployed by the RW operator. It has always run as pods.
+* **The pipeline applier was already containerised too** — `risingwave-pipeline/build/Dockerfile`
+  → `sha256:d6162426…` (commit `987ea1ca`), pulled by digest on QA 2026-08-20.
+* What was "dimmed down" was **not the image, it was the payload**: `PIPELINE_DIR=smoke/`
+  (`SELECT version(); SELECT 1`) instead of `pipelines/Brand`. The applier is the intended
+  production vehicle, carrying a test load. Separate the two claims:
+  **the delivery path is proven; the pipeline is not deployed.**
+
+**`rw-pipeline-parity.sh` on op-dev, 2026-08-26** (op-qa unreachable that run — VPN/SSO):
+
+* `risingwave` 16 pods (operator v0.16.0), `risingwave-2` 21 pods (operator v0.17.2), RW v2.8.2 both.
+* ARC `autoscalingrunnersets/risingwave-pipeline` in `arc-runners`, min 0 / max 2, **zero current
+  runners** — installed, scale-to-zero, costs nothing idle. Relevant to INFRA-1644's price.
+* **op-dev has ZERO Argo CD Applications and ZERO ApplicationSets**, and its `app-risingwave`
+  namespace exists but is **empty** — no images, no `PIPELINE_DIR`. Dev does not have the new
+  delivery path at all; it has the old ARC runner. Two mechanisms, not one promoted across.
+
+So dev↔QA is **not** like-for-like on either axis, and never was designed to be:
+dev = ARC runner + real DDL against `risingwave-2`; QA = Argo CD sync-hook Job + smoke test into
+`app-risingwave`. Closing the gap is INFRA-1644 (retire or justify dev's runner — Idris) then
+INFRA-1635 (point `PIPELINE_DIR` at the real DDL — mine).
+
+See [[adjacent-step-green-signals]] — "proven end to end" was a true statement about the step
+next to the one anyone cares about.

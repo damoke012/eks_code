@@ -29,7 +29,7 @@
 - [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
 - [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod
 - [DX deploy failure ≠ clean release](dx-deploy-failure-not-clean-release.md) — the three real DX-Apply failure modes and their identity-safe fixes
-- [On-prem app CI/CD](onprem-app-cicd.md) — build in GHA → ECR → Argo CD; ✅ PROVEN END TO END on QA 2026-08-20; prod has no Git credential or ApplicationSet
+- [On-prem app CI/CD](onprem-app-cicd.md) — build in GHA → ECR → Argo CD; ✅ path PROVEN on QA 2026-08-20 but carrying a SMOKE payload (PIPELINE_DIR=smoke/); op-dev has ZERO Argo Apps + empty app-risingwave — dev↔QA is two mechanisms, not parity
 - [Pod env secret resolution](pod-env-secret-resolution.md) — secretKeyRef env resolves at POD creation; container restarts replay the old value for months
 - [QA postgres password drift](qa-postgres-password-drift.md) — initdb 08-11, secret rotated 08-12, DB never learned it; fixed 08-20, meta pod still to recreate
 - [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring — but it's a PRIOR not a law (external-dns was per-cluster)

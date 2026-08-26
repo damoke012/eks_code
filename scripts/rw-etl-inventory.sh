@@ -146,24 +146,32 @@ tracking_table() {
   ctr=$(K -n "$ns" get pod "$pod" -o json 2>/dev/null | jq -r '
     [ .spec.containers[] | select(.image | test("postgres")) | .name ] | first // empty')
 
-  # Try every (secret, key, user) combination this namespace offers, rather than guessing one.
-  local sec key pw="" user="" k
-  for sec in $(K -n "$ns" get secrets -o name 2>/dev/null | sed 's|secret/||'); do
-    for key in $(K -n "$ns" get secret "$sec" -o go-template='{{range $k,$v := .data}}{{$k}} {{end}}' 2>/dev/null); do
-      case "$key" in *assword*) ;; *) continue ;; esac
-      k=$(K -n "$ns" get secret "$sec" -o go-template="{{index .data \"$key\"}}" 2>/dev/null | base64 -d 2>/dev/null)
+  # Try every (secret, key, user) combination -- and look in app-risingwave too, not just
+  # this namespace. The applier Job runs in app-risingwave and gets its Postgres credential
+  # from an ExternalSecret THERE, while the database it writes to lives in the risingwave
+  # namespace. On 2026-08-26 a same-namespace-only search reported UNKNOWN on op-qa for
+  # exactly that reason.
+  local sec key pw="" user="" k credns
+  for credns in "$ns" app-risingwave; do
+  K get ns "$credns" >/dev/null 2>&1 || continue
+  for sec in $(K -n "$credns" get secrets -o name 2>/dev/null | sed 's|secret/||'); do
+    for key in $(K -n "$credns" get secret "$sec" -o go-template='{{range $k,$v := .data}}{{$k}} {{end}}' 2>/dev/null); do
+      case "$key" in *assword*|*PASSWORD*) ;; *) continue ;; esac
+      k=$(K -n "$credns" get secret "$sec" -o go-template="{{index .data \"$key\"}}" 2>/dev/null | base64 -d 2>/dev/null)
       [ -n "$k" ] || continue
-      for user in postgres rwadmin root; do
+      for user in postgres rwadmin root risingwave app; do
         if K -n "$ns" exec "$pod" -c "$ctr" -- env PGPASSWORD="$k" PGCONNECT_TIMEOUT=8 \
              psql -h localhost -p 5432 -U "$user" -d postgres -tAc 'SELECT 1;' 2>/dev/null \
              | tr -d '[:space:]' | grep -qx 1; then
-          pw="$k"; break 3
+          pw="$k"; echo "       ${ns}: opened postgres:5432 as ${user} via ${credns}/${sec}:${key}"; break 4
         fi
       done
     done
   done
+  done
   if [ -z "$pw" ]; then
-    echo "       ${ns}: UNKNOWN -- no secret/user pair in this namespace opened postgres:5432"
+    echo "       ${ns}: UNKNOWN -- no secret/user pair in ${ns} or app-risingwave opened postgres:5432"
+    echo "                   users tried: postgres rwadmin root risingwave app"
     return
   fi
 
