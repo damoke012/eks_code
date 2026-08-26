@@ -94,3 +94,13 @@ pointing at op-dev nodes, and two external-dns instances contend for them, arbit
 `txtOwnerId`. Unconfirmable without cluster access (INFRA-1663). This also blocks the Argo
 route on prod: there is no correct route on the branch to derive DNS targets from, and targets
 are not portable between these clusters.
+
+
+**Counter-example, 2026-08-25 — it is a prior, not a law.** op-prod's external-dns carries
+`--txt-owner-id=iaac-talos/us-east-2/op-usxpress-prod`, genuinely per-cluster, and a
+`--domain-filter` broad enough for all three. Predicted instance ten; there wasn't one.
+
+**How to apply:** the pattern covers files **written by hand and copied between branches**
+(Gateways, Certificates, VirtualServices, ClusterIssuers). It does **not** cover values a
+module already templates per cluster. Check before predicting — calling it everywhere sends
+you to fix things that are correct.

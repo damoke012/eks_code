@@ -32,14 +32,14 @@
 - [On-prem app CI/CD](onprem-app-cicd.md) — build in GHA → ECR → Argo CD; ✅ PROVEN END TO END on QA 2026-08-20; prod has no Git credential or ApplicationSet
 - [Pod env secret resolution](pod-env-secret-resolution.md) — secretKeyRef env resolves at POD creation; container restarts replay the old value for months
 - [QA postgres password drift](qa-postgres-password-drift.md) — initdb 08-11, secret rotated 08-12, DB never learned it; fixed 08-20, meta pod still to recreate
-- [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring
+- [Platform branches are copies](manifests-copied-across-branches.md) — op-qa/op-prod manifests still carry DEV role ARNs; diff before wiring — but it's a PRIOR not a law (external-dns was per-cluster)
 - [Alerts reach nobody on-prem](onprem-alerts-not-delivered.md) — dev: 40 rules, 54 firing, no Alertmanager; Flux rules were dead for FOUR reasons in series, fixed dev+QA 2026-08-24, prod pending
 - [Prose through shell strings](prose-through-shell-strings.md) — a PR body as `--body "..."` executed its own backticks and reached `aws iam put-role-policy`; pass prose as a file
 - [Flux stale dependency cascade](flux-stale-dependency-cascade.md) — 'dependency X is not ready' is the LAST-ATTEMPT reason; X is often Ready now. Compare revisions; reconcile from the chain root
 - [Identity names don't cross systems](identity-names-do-not-cross-systems.md) — onprem-platform-admins is a k8s/aws-auth name, never a directory group; Argo uses usx-cloud-admin
 - [A merged defect authorizes itself](merged-defect-authorizes-itself.md) — precedent-based checks invert into defect-propagation once the bug lands; use dominant-value + exclude-self + self-test both directions
 - [Platform admin can't write its own secrets](platform-admin-cannot-write-its-own-secrets.md) — op-*-platform-admin had ONLY sts:GetCallerIdentity; ✅ op-qa fixed 2026-08-25, dev+prod still open
-- [Argo CD on-prem Entra OIDC](argocd-onprem-entra-oidc.md) — ✅ auth + authz SOLVED op-dev 2026-08-25: groups never arrives, but app ROLES do (roles→platform-admin, negative control confirmed); group assignment needs no P1; policy.csv subjects are role VALUES
+- [Argo CD on-prem Entra OIDC](argocd-onprem-entra-oidc.md) — ✅ SSO LIVE on ALL THREE clusters 2026-08-25: groups never arrives, app ROLES do; policy.csv subjects are role VALUES, scopes [roles, groups]; role:app-viewer still unexercised
 - [Argo SSO / Identity Center limits](argocd-sso-blocked-on-management-account.md) — SAML+Dex decided; mgmt account 660075424663 needed, and the SAML app is CONSOLE-ONLY (create/ACS/audience/mappings have no API)
 - [Corp AD reachable from op-dev](onprem-ad-ldap-reachable.md) — CoreDNS forwards usxpress.com, 636 LDAPS open from the argocd namespace; makes a zero-console Dex LDAP connector viable
 

@@ -1,6 +1,6 @@
 ---
 name: argocd-onprem-entra-oidc
-description: dev+QA Argo CD authenticate via Entra OIDC (Dex removed); groups claim never arrives but APP ROLES DO — roles->platform-admin PROVEN on op-dev 2026-08-25
+description: Argo CD SSO live on ALL THREE on-prem clusters 2026-08-25 — Entra OIDC auth + authz from the ROLES claim (groups never arrives); policy.csv subjects are app-role values
 metadata:
   type: project
 ---
@@ -88,3 +88,26 @@ never match, and which one is invisible from the file;
 this. `scripts/argocd-token-claims.sh <cluster>` needs its cluster argument and now prints
 claim **values** — a claim NAME in a list proves emission, not content
 ([[adjacent-step-green-signals]]).
+
+
+**✅ ALL THREE CLUSTERS, 2026-08-25.** op-prod completed the chain: ACME solver zone (#140)
+→ `wildcard-op-prod` issued → Gateway serving op-prod (#137) → Argo route + OIDC + RBAC
+(#141) → `role:app-viewer` (#142); dev and QA via #138/#139. `argocd.op-prod.usxpress.io`
+resolves to 10 A records — **the first DNS record external-dns ever published on op-prod**,
+after 27 days of "All records are already up to date".
+
+**Still unexercised: `role:app-viewer`.** Idris holds the assignment
+(`86486897-edd4-537d-b04f-805d6aeff583`); nobody has signed in as an application-team
+member. That is the acceptance test for INFRA-1639, not our own admin access.
+
+
+**Closing evidence, 2026-08-25.** `scripts/close-argocd-sso.sh <cluster>` passes on all
+three: DNS verified against the nodes actually running each cluster's ingressgateway
+(**7 dev / 3 qa / 10 prod**), HTTPS 200 on that cluster's own certificate, Entra issuer
+served, 40-byte client secret, consistent policy. The secret's home differs by design —
+op-dev merges into the chart-owned `argocd-secret` as `oidc.entra.clientSecret` (an adopted
+install's `server.secretkey` had to survive); QA and prod use their own labelled
+`argocd-entra-oidc/client_secret` so a chart upgrade cannot drop it.
+
+**The only thing left for INFRA-1639 is a human sign-in by an APPLICATION-TEAM member.**
+No script can establish it, and everything verified so far is platform-admin access.

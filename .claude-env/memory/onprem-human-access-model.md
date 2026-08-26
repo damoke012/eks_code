@@ -119,3 +119,11 @@ Flux-managed on the env branch and are the target of any auth front-end. Per-use
 VIPs vLAN 82: dev `.50` / qa `.51` / prod `.52`, all `:6443`. AWS accts: dev `700736442855`,
 qa `527101283767`, prod `937464026810`. Prod must NOT get a standing admin assignment.
 See [[qa-cluster-standup]], [[prod-standup]].
+
+
+**Trap, 2026-08-25: `rm -rf ~/.aws/sso/cache` breaks op-qa cluster access.** op-qa reaches
+the API server through AWS SSO via the self-hosted aws-iam-authenticator, so clearing the
+SSO cache — a routine step when refreshing assumed-role credentials for a *different*
+profile — takes the cluster offline for you. It presents as `cannot reach 10.10.82.51`,
+which reads like VPN. Fix: `aws sso login --profile op-qa`. Refreshing another profile
+does not help.
