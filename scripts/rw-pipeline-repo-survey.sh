@@ -38,8 +38,11 @@ for line in sys.stdin:
 # Files that are stock upstream config and tell us nothing about this project. On
 # 2026-08-26 postgresql.conf alone emitted ~800 lines and pushed the whole survey out of
 # the terminal scrollback, losing sections 1-9.
-STOCK='postgresql\.conf|pg_hba\.conf|\.lock$|package-lock|yarn\.lock'
-MAXLINES=140
+# Noise that tells us nothing about THIS project and drowns the survey. On 2026-08-26
+# postgresql.conf (~800 lines) and an upstream Grafana dashboard JSON (~10k lines) each
+# pushed the whole report out of the terminal in turn.
+STOCK='postgresql\.conf|pg_hba\.conf|\.lock$|package-lock|yarn\.lock|\.json$|dashboard|grafana|risingwave\.toml'
+MAXLINES=60
 
 show() {  # show <path-relative-to-repo>
   local f="$REPO/$1" n
@@ -142,8 +145,10 @@ done
 show SECRET_MANAGEMENT.md
 
 echo
-echo "############### 10. docker/ ###############"
-for f in $(git -C "$REPO" ls-files 'docker/*'); do show "$f"; done
+echo "############### 10. docker/ (local dev stack -- names only) ###############"
+git -C "$REPO" ls-files 'docker/*' | sed 's|^|  |'
+echo "  >> docker-compose local dev: RW standalone + postgres + mongodb + console."
+echo "     Not part of the ECR -> Argo CD path. Pass --full to dump it."
 
 echo
 echo "######################################################################"
