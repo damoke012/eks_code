@@ -37,12 +37,18 @@ inventory_ns() {
   fi
 
   # A pod that already runs psql. Never `kubectl run`.
-  local pod
+  # Pod AND container. `kubectl exec` without -c prints "Defaulted container ..." on
+  # stderr; on 2026-08-26 that warning was folded into the probe by 2>&1 and op-qa was
+  # reported UNKNOWN when its probe had in fact returned 1. Name the container, and never
+  # let stderr reach a value that gets compared.
+  local pod ctr
   pod=$(K -n "$ns" get pods -o json 2>/dev/null | jq -r '
     [ .items[]
       | select(.status.phase == "Running")
       | select([.spec.containers[].image] | map(test("postgres")) | any)
       | .metadata.name ] | first // empty')
+  ctr=$(K -n "$ns" get pod "$pod" -o json 2>/dev/null | jq -r '
+    [ .spec.containers[] | select(.image | test("postgres")) | .name ] | first // empty')
   if [ -z "$pod" ]; then
     echo "     UNKNOWN -- no running postgres pod in this namespace to run psql from."
     echo "               (not the same as 'no ETL' -- we could not ask)"
@@ -68,7 +74,7 @@ inventory_ns() {
                  | sed 's|secret/||' | grep -Ei 'root|credential' ); do
     pw=$(K -n "$ns" get secret "$sec" -o go-template='{{index .data "password"}}' 2>/dev/null \
            | base64 -d 2>/dev/null) || pw=""
-    [ -n "$pw" ] && { echo "     auth: secret/${sec} · frontend svc/${svc}:4567 · pod ${pod}"; break; }
+    [ -n "$pw" ] && { echo "     auth: secret/${sec} · frontend svc/${svc}:4567 · pod ${pod}/${ctr}"; break; }
   done
   if [ -z "$pw" ]; then
     echo "     UNKNOWN -- no secret in ${ns} yields a 'password' key for RW root."
@@ -76,15 +82,19 @@ inventory_ns() {
     return
   fi
 
-  Q() { K -n "$ns" exec "$pod" -- env PGPASSWORD="$pw" PGCONNECT_TIMEOUT=10 \
-          psql -h "$svc" -p 4567 -U root -d dev -tAF'|' -c "$1" 2>&1; }
+  # Q returns the VALUE (stdout only). Qdiag is for showing a failure, and is the only
+  # one that ever merges stderr.
+  Q()     { K -n "$ns" exec "$pod" -c "$ctr" -- env PGPASSWORD="$pw" PGCONNECT_TIMEOUT=10 \
+              psql -h "$svc" -p 4567 -U root -d dev -tAF'|' -c "$1" 2>/dev/null; }
+  Qdiag() { K -n "$ns" exec "$pod" -c "$ctr" -- env PGPASSWORD="$pw" PGCONNECT_TIMEOUT=10 \
+              psql -h "$svc" -p 4567 -U root -d dev -tAF'|' -c "$1" 2>&1; }
 
   # ---- THE PROBE. Nothing below is believable until this passes.
   local probe
   probe=$(Q 'SELECT 1;')
   if [ "$(printf '%s' "$probe" | tr -d '[:space:]')" != "1" ]; then
     echo "     UNKNOWN -- cannot query RisingWave. This is NOT 'the ETL is absent'."
-    printf '%s\n' "$probe" | sed 's/^/                /' | head -4
+    Qdiag 'SELECT 1;' | sed 's/^/                /' | head -6
     return
   fi
 
@@ -119,25 +129,56 @@ inventory_ns() {
 }
 
 # ---------------------------------------------------------------- tracking table
+# Rewritten 2026-08-26. The first version returned silently whenever it could not find a
+# credential -- so "no tracking table" and "never looked" printed identically, which is the
+# same defect the probe above exists to prevent. It also assumed the bitnami key name
+# `postgres-password` and the secret name `postgres`; op-qa uses `pg-credentials`.
 tracking_table() {
   local cluster="$1" ns="$2"
   K get ns "$ns" >/dev/null 2>&1 || return
-  local pod pw sec
+
+  local pod ctr
   pod=$(K -n "$ns" get pods -o json 2>/dev/null | jq -r '
     [ .items[] | select(.status.phase=="Running")
       | select([.spec.containers[].image] | map(test("postgres")) | any)
       | .metadata.name ] | first // empty')
-  [ -n "$pod" ] || return
-  for sec in $(K -n "$ns" get secrets -o name 2>/dev/null | sed 's|secret/||' | grep -Ei 'postgres'); do
-    pw=$(K -n "$ns" get secret "$sec" -o go-template='{{index .data "postgres-password"}}' 2>/dev/null | base64 -d 2>/dev/null) || pw=""
-    [ -n "$pw" ] && break
+  [ -n "$pod" ] || { echo "       ${ns}: no running postgres pod -- not asked"; return; }
+  ctr=$(K -n "$ns" get pod "$pod" -o json 2>/dev/null | jq -r '
+    [ .spec.containers[] | select(.image | test("postgres")) | .name ] | first // empty')
+
+  # Try every (secret, key, user) combination this namespace offers, rather than guessing one.
+  local sec key pw="" user="" k
+  for sec in $(K -n "$ns" get secrets -o name 2>/dev/null | sed 's|secret/||'); do
+    for key in $(K -n "$ns" get secret "$sec" -o go-template='{{range $k,$v := .data}}{{$k}} {{end}}' 2>/dev/null); do
+      case "$key" in *assword*) ;; *) continue ;; esac
+      k=$(K -n "$ns" get secret "$sec" -o go-template="{{index .data \"$key\"}}" 2>/dev/null | base64 -d 2>/dev/null)
+      [ -n "$k" ] || continue
+      for user in postgres rwadmin root; do
+        if K -n "$ns" exec "$pod" -c "$ctr" -- env PGPASSWORD="$k" PGCONNECT_TIMEOUT=8 \
+             psql -h localhost -p 5432 -U "$user" -d postgres -tAc 'SELECT 1;' 2>/dev/null \
+             | tr -d '[:space:]' | grep -qx 1; then
+          pw="$k"; break 3
+        fi
+      done
+    done
   done
-  [ -n "${pw:-}" ] || return
-  local out
-  out=$(K -n "$ns" exec "$pod" -- env PGPASSWORD="$pw" psql -h localhost -p 5432 -U postgres \
-          -tAF'|' -c "SELECT filename, image_digest, applied_at, applied_by FROM pipeline_applied ORDER BY applied_at DESC LIMIT 10;" 2>&1)
-  echo "       pipeline_applied (${ns}):"
-  printf '%s\n' "$out" | sed 's/^/         /' | head -12
+  if [ -z "$pw" ]; then
+    echo "       ${ns}: UNKNOWN -- no secret/user pair in this namespace opened postgres:5432"
+    return
+  fi
+
+  P() { K -n "$ns" exec "$pod" -c "$ctr" -- env PGPASSWORD="$pw" PGCONNECT_TIMEOUT=8 \
+          psql -h localhost -p 5432 -U "$user" -d "$1" -tAF'|' -c "$2" 2>/dev/null; }
+
+  local dbs db found=0
+  dbs=$(P postgres "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;")
+  for db in $dbs; do
+    [ "$(P "$db" "SELECT to_regclass('public.pipeline_applied') IS NOT NULL;" | tr -d '[:space:]')" = "t" ] || continue
+    found=1
+    echo "       ${ns} / db ${db} -- pipeline_applied:"
+    P "$db" "SELECT * FROM pipeline_applied ORDER BY 1 DESC LIMIT 10;" | sed 's/^/         /'
+  done
+  [ "$found" -eq 1 ] || echo "       ${ns}: connected OK, no pipeline_applied table in any of: $(echo $dbs | tr '\n' ' ')"
 }
 
 # ---------------------------------------------------------------- main
