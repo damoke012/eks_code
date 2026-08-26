@@ -112,19 +112,24 @@ Also: the OIDC trust matches the branch **exactly**, and these repos use `master
 
 ---
 
-**Where I'd start**
+**Your queue, in order**
 
-1. **INFRA-1637** — you marked it complete on the 18th. The acceptance criteria have two
-   halves though: no plaintext in any catalog table *on any cluster*, and the old key
-   **revoked** rather than replaced. Can you confirm both? It's the most urgent thing open.
-2. **Containerise the RisingWave workload.** This has no ticket, which is my fault — it's the
-   highest-leverage item on the whole programme and the one thing the platform genuinely
-   can't do for you. File it or I will.
-3. **INFRA-1501** — bring `pg-postgresql` under GitOps. This reads like tidying and isn't:
-   it's the same instance behind the QA password drift, where initdb ran on the 11th, the
-   secret rotated on the 12th, and the database never learned it. Nine days, silent.
-4. **Sign in to Argo CD on QA.** Five minutes, and it's the acceptance test for the SSO work —
-   you're the first application-team member to use it, so if it's wrong you'll find it.
+I filed the ones that were missing. Priority is in the titles because Jira priority fields
+drift and a number in the summary doesn't.
+
+| | | |
+|---|---|---|
+| **0** | **INFRA-1637** | You marked it complete on the 18th. The AC has two halves though: no plaintext in any catalog table *on any cluster*, and the old key **revoked** rather than replaced. Can you confirm both? Most urgent thing open. |
+| **1** | **INFRA-1665** | Containerise the RisingWave workload. Highest leverage on the whole programme, and the one thing the platform genuinely can't do for you. **Blocked on INFRA-1670** (mine) — the existing push role is bolted to `risingwave/etl-pipeline`'s ARN, so a second image needs its own repo. I'll clear that. |
+| **2** | **INFRA-1666** | `deploy/` base + per-env overlays, digest-pinned. Depends on 1665. |
+| **3** | **INFRA-1501** | Bring `pg-postgresql` under GitOps. Reads like tidying and isn't — it's the same instance behind the QA password drift: initdb on the 11th, secret rotated on the 12th, database never learned it, nine days silent. |
+| **4** | **INFRA-1667** | The 238 SIGSEGV restarts. This gates prod, not curiosity — we don't know what fixed it, so we'd meet it again there. "Cause not established" is a legitimate answer; a silent unknown isn't. |
+| **5** | **INFRA-1668** | Check whether the console's Dex config authorises on group membership. If it doesn't, close it and we're done. |
+| **6** | **INFRA-1669** | Sign in to Argo CD on QA. Five minutes, and it's the acceptance criterion for INFRA-1639 — you're the first app-team member to use it, so if it's wrong you'll find it. |
+| **7** | **INFRA-1500** | Small cleanup — check the unused HelmRelease is still there, then remove it. |
+
+**INFRA-1477** (dev SQL pipelines) I've left alone deliberately — it needs re-scoping against
+the standard, and that waits on the dev-pipeline decision, which is on me.
 
 ---
 
