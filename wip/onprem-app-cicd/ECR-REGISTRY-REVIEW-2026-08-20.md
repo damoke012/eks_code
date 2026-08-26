@@ -85,3 +85,56 @@ which is why F1 cannot be remediated as a single PR.
    configuration. `get-registry-policy` is the call for the permissions policy.
 3. **A digest pin is the only defence against F2 that survives a mutable tag.** It is the
    reason on-prem is safe here, and it was put in place for unrelated reasons.
+
+## Where the ECR IaC lives — searched 2026-08-26, and the answer looks like "nowhere"
+
+INFRA-1651 and INFRA-1670 both wait on identifying which repository owns account
+064859874041. Searched the whole `variant-inc` org:
+
+```
+gh search code --owner variant-inc "064859874041"      -> 202 results
+gh search code --owner variant-inc "aws_ecr_repository" ->   1 result
+```
+
+**All 202 hits are consumers** — Dockerfiles with `FROM 064859874041.dkr.ecr…`, READMEs,
+helm `oci://` references. The single `aws_ecr_repository` hit is
+`interview-platform-eng-sandbox/exercises/04-tf-state-split/monolith.tf`, which is an
+interview exercise.
+
+**517 repositories exist in that registry and no Terraform in the organisation describes
+any of them.** The strong inference is that they are created imperatively — most likely on
+demand by the shared build actions (`actions-dotnet`, `actions-python`, `actions-go`,
+`actions-nodejs`, all of which document the registry in their READMEs). Next search:
+`create-repository` and the actions' `action.yml`.
+
+### Ruled out: `iac-tf-manual-runs`
+
+It looked like the owner because `apps/common/ecr_endpoint/README.md` names
+`arn:aws:iam::064859874041:role/github-iac-ecr-vpc-endpoint-role`. Reading the module
+settles it: the inline policy is **entirely `ec2:`** — `CreateVpc`, `CreateVpcEndpoint`,
+security groups, route tables. **Not one `ecr:` action.** It provisions the *VPC endpoint*
+used to reach ECR privately, not ECR repositories.
+
+Its trust policy points onward — `sub: repo:variant-inc/iac-tf-common-endpoints:*` — so
+`iac-tf-manual-runs` is the manual bootstrap that created a role for
+`iac-tf-common-endpoints` to use. Still endpoints. Still not repositories.
+
+**What this means for INFRA-1670.** If ECR repositories are created imperatively by the
+shared actions, then `wip/onprem-app-cicd/terraform/ecr-app-repos.tf` is a *deliberate
+deviation from the house pattern*, not an adoption of it — and that is a decision to make
+openly rather than discover later. The on-prem case is different in a way that may justify
+it: these repositories need a **cross-account pull policy** for three cluster accounts,
+which a build action creating a repository on demand will not add, and whose absence is
+invisible until the first pull.
+
+### Two findings that are not about ECR
+
+* **`terraform.tfstate` is committed to git** at `apps/common/ecr_endpoint/terraform.tfstate`
+  (and `.backup`), readable through code search. This module's state holds account IDs, role
+  ARNs, full inline policies and the assumed-role identity of the engineer who ran it —
+  nothing secret here, but state in git is a pattern, and Terraform state routinely contains
+  secrets in modules that manage them. Worth a ticket against whoever owns that repo.
+* **Account `108141096600` holds Terraform state**, via
+  `arn:aws:iam::108141096600:role/github-iac-tf-state-role`. Not previously in our account
+  map: dev 700736442855, QA 527101283767, prod 937464026810, ECR 064859874041, network
+  155768531003, org management 660075424663.
