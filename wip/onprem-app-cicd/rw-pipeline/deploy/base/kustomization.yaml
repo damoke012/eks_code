@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - job.yaml
+# externalsecret.yaml is NOT here. Each overlay carries a complete one.
+#
+# It used to live in base with the overlays patching /spec/data/N/remoteRef/key by
+# POSITIONAL INDEX. That broke silently on 2026-08-26: the prod overlay patched indices
+# 0 and 1 but not 2, so prod's PG_USER kept `PLACEHOLDER/risingwave/postgres`, the
+# ExternalSecret could never sync, and the Job could never start. Growing the list from
+# 3 entries to 12 would have made that failure mode four times more likely, and it is
+# invisible -- a missing patch produces a valid manifest that fetches the wrong path.
+#
+# Duplicating the whole resource per overlay is the cost. It buys a LOUD failure instead:
+# a key an overlay forgot is an unset environment variable, and build/apply.sh refuses the
+# file and prints the placeholder name. Verbose beats silent here.

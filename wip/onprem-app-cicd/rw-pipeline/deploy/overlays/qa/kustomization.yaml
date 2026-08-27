@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: app-risingwave
+resources:
+  - ../../base
+  - endpoints.yaml
+  - externalsecret.yaml      # complete, not a patch -- see base/kustomization.yaml
+
+images:
+  - name: etl-pipeline
+    newName: 064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/etl-pipeline
+    # bumped by the build-and-push workflow's promotion PR
+    digest: sha256:d6162426d98af2a69e38d09d45a4799178e0a8140abed08d597339796e2ed803

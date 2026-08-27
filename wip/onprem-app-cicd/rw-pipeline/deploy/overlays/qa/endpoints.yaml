@@ -1,0 +1,56 @@
+# Per-cluster coordinates and per-environment CHOICES for op-usxpress-qa.
+#
+# Everything here is non-secret. Credentials, and the nine KAFKA__* values, arrive through
+# the ExternalSecret beside this file. What lives here is what an operator decides for this
+# environment: which pipelines run, which topic is read, which consumer group is joined.
+#
+# The Job runs in app-risingwave and reaches ACROSS to the RisingWave instance the platform
+# runs in the `risingwave` namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: etl-pipeline-endpoints
+data:
+  # ── which pipelines run ──────────────────────────────────────────────────────────
+  PIPELINE_DIR: /pipeline/pipelines        # was /pipeline/smoke -- the smoke test proved
+                                           # the DELIVERY PATH on 2026-08-20; this is the
+                                           # switch to real DDL.
+  # Widening this is a ConfigMap edit -- no rebuild, no new digest.
+  #   Template          scaffold; applied, it creates objects named after the example
+  #   scripts           docker-compose initdb material, per its own README
+  #   900-user-access   audit + manager_user. Mixes RisingWave grants, a Postgres function
+  #                     call and Materialize CLUSTER syntax; runs on neither engine.
+  #   employee          needs Postgres CDC and CdcTableSchemaMap, which the RisingWave
+  #                     licence gates at 4 cores. Unverified on op-qa.
+  #   secret_manager    two more sources; in once Brand is proven
+  #   001-secrets-mongodb, 400-sink
+  #                     no op-usxpress-qa/risingwave/mongodb secret exists. And the sink
+  #                     WRITES -- pointing it at dev's MongoDB would have QA inserting rows
+  #                     into a dev database, which is a different thing from reading dev's
+  #                     topic.
+  EXCLUDE_RE: "/(Template|scripts|900-user-access|employee|secret_manager)/|001-secrets-mongodb|400-sink"
+
+  # ── where it connects ────────────────────────────────────────────────────────────
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"
+  RW_DB:   dev
+  RW_USER: root
+  PG_HOST: pg-postgresql.risingwave.svc.cluster.local   # NOT postgres-postgresql (03c68f3)
+  PG_PORT: "5432"
+  PG_DB:   risingwave                                   # POSTGRES_DB on the StatefulSet;
+                                                        # NOT postgres (d5a07b5)
+  # PG_USER comes from the credentials secret, beside its password.
+  APPLIED_BY: argocd-qa
+
+  # ── per-environment choices rendered into the SQL ────────────────────────────────
+  # Reading DEV's topic, deliberately and temporarily, to prove the delivery path. Change
+  # this one line when QA has its own topic -- no rebuild.
+  KAFKA_TOPIC_BRAND: dev_brand_management_cdc_brand_avro
+  KAFKA_STARTUP_MODE: earliest
+  KAFKA_SCHEMA_REGISTRY_MESSAGE: message_name
+
+  # ⚠️ QA's OWN consumer group, not dev's. Dev runs dx__dev_risingwave_risingwave_dev.
+  # Sharing a group.id.prefix puts both pipelines in one consumer group and Kafka splits
+  # the partitions between them -- QA would take messages dev never sees, and dev would go
+  # silently, partially blind. Reading dev's topic is safe; joining dev's group is not.
+  KAFKA_GROUP_ID_PREFIX: dx__qa_risingwave_risingwave_qa
