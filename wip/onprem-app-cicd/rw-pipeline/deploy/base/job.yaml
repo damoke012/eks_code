@@ -1,0 +1,54 @@
+# Applies the pipeline SQL from inside the cluster.
+#
+# RisingWave's frontend is a ClusterIP service with no external route, so the work has to
+# happen in-cluster. On dev that is the ARC runner; here it is this Job, run by Argo CD as
+# a Sync hook so it re-runs on every sync and its logs land in the Argo UI — which is where
+# the RisingWave team watch their deploys.
+#
+# apply.sh is idempotent: a re-sync with no SQL change is a no-op.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-pipeline-apply
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: etl-pipeline-apply
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ecr-pull-secret          # written by ecr-credentials-sync every 5 min
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: apply
+          image: etl-pipeline            # overlays pin the digest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          # Both sources are consumed wholesale. Enumerating keys here would mean this
+          # list and the ExternalSecret had to be kept in step by hand -- the same
+          # keep-two-lists-aligned coupling that left prod's PG_USER pointing at
+          # PLACEHOLDER. The secret carries 12 keys now and will carry more as connectors
+          # are added; adding one should mean editing the ExternalSecret and nothing else.
+          #
+          # Both resolve at POD CREATION. This is a Job created fresh on every sync, so it
+          # always reads current values. A long-running Deployment would keep serving the
+          # pre-rotation value until it restarted -- which has bitten us before.
+          envFrom:
+            - configMapRef:
+                name: etl-pipeline-endpoints    # per-cluster coordinates and choices
+            - secretRef:
+                name: etl-pipeline-credentials  # every credential, whatever the set is

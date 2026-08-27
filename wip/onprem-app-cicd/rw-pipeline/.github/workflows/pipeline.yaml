@@ -1,0 +1,295 @@
+name: Pipeline Query Runner
+
+on:
+  push:
+    branches:
+      - master
+
+    paths:
+      - 'pipelines/**'
+
+# Required for GitHub OIDC token generation and repo checkout
+permissions:
+  id-token: write
+  contents: read
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flow:  validate  ──►  approve (pauses – leader must approve)  ──►  execute
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── 1. Validate ────────────────────────────────────────────────────────────
+  # Detects changed files and runs SQL guardrails.
+  # Fails immediately if dangerous or injected SQL is found.
+  validate:
+    runs-on: ubuntu-latest
+
+    outputs:
+      changed_files: ${{ steps.files.outputs.changed_files }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed SQL and RW files
+        id: files
+        shell: bash
+        run: |
+          set -e
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+
+          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+            # First push to this branch — list all pipeline files
+            CHANGED_FILES=$(git ls-files 'pipelines/' | grep -E '\.(sql|rw)$' || true)
+          else
+            CHANGED_FILES=$(git diff --name-only "$BEFORE" "$AFTER" \
+              | grep -E '^pipelines/.*(\.sql|\.rw)$' || true)
+          fi
+
+          echo "Detected changed files:"
+          echo "$CHANGED_FILES"
+
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # ── SQL Guardrails ────────────────────────────────────────────────────
+      # Blocks the pipeline if any changed file contains:
+      #   • DROP TABLE / DATABASE / SCHEMA / VIEW / SEQUENCE / INDEX / TYPE /
+      #     FUNCTION / PROCEDURE
+      #   • TRUNCATE
+      #   • DELETE FROM <table> with no WHERE clause
+      #   • Common SQL-injection fingerprints (tautology OR, UNION SELECT,
+      #     statement-stacking with DROP / DELETE / TRUNCATE)
+      - name: SQL guardrails – block dangerous and injected statements
+        shell: bash
+        run: |
+          set -e
+
+          CHANGED_FILES="${{ steps.files.outputs.changed_files }}"
+          BLOCKED=false
+
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            [[ ! -f "$file" ]] && continue
+
+            # ── Destructive DDL ──────────────────────────────────────────────
+            # Rewritten 2026-08-26. The previous pattern had the risk inverted: it blocked
+            # five of this repo's own files -- Brand/200-ingest.rw, three employee/ files
+            # and the audit setup -- while letting DROP SOURCE, SINK, SECRET, USER and ROLE
+            # through, 30+ occurrences of them. Recreating a materialized view is how you
+            # iterate on RisingWave DDL; dropping a source, every Kafka secret, or a
+            # database user is not.
+            #
+            # Two changes:
+            #   * IF EXISTS is exempt. `DROP ... IF EXISTS x; CREATE x;` is the idempotent
+            #     recreate the applier depends on. An unguarded DROP is not.
+            #   * SOURCE, SINK, SECRET, CONNECTION, USER and ROLE are now covered.
+            #   * Anchored to the start of a line, so DROP has to be a STATEMENT. Without
+            #     the anchor, `GRANT DROP SECRET ON DATABASE dev TO manager_user` is read as
+            #     a drop -- it grants a privilege whose NAME contains "DROP SECRET".
+            #     Statement-stacking (`; DROP TABLE x`) stays covered by the injection rule
+            #     below, which is where it belongs.
+            DESTRUCTIVE='^\s*DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|SEQUENCE|INDEX|TYPE|FUNCTION|PROCEDURE|SOURCE|SINK|SECRET|CONNECTION|USER|ROLE)\s+(?!IF\s+EXISTS)'
+            if grep -qiP "$DESTRUCTIVE" "$file"; then
+              echo "::error file=$file::BLOCKED – unguarded DROP detected"
+              echo "::error file=$file::Use DROP ... IF EXISTS for an idempotent recreate, or"
+              echo "::error file=$file::justify the unguarded drop in review."
+              grep -niP "$DESTRUCTIVE" "$file" | head -5
+              BLOCKED=true
+            fi
+
+            # ── TRUNCATE ────────────────────────────────────────────────────
+            if grep -qiP 'TRUNCATE\s+' "$file"; then
+              echo "::error file=$file::BLOCKED – TRUNCATE statement detected"
+              grep -niP 'TRUNCATE\s+' "$file" | head -5
+              BLOCKED=true
+            fi
+
+            # ── DELETE without a WHERE clause ────────────────────────────────
+            # Catches: DELETE FROM tbl;  (no WHERE between table name and ;)
+            if grep -qiP 'DELETE\s+FROM\s+[\w."]+\s*;' "$file"; then
+              echo "::error file=$file::BLOCKED – DELETE without WHERE clause detected"
+              grep -niP 'DELETE\s+FROM\s+[\w."]+\s*;' "$file" | head -5
+              BLOCKED=true
+            fi
+
+            # ── SQL injection fingerprints ───────────────────────────────────
+            if grep -qiP \
+              "(['\"])\s*(OR|AND)\s*\1\s*=\s*\1|UNION\s+SELECT|;\s*(DROP|DELETE|TRUNCATE)\s" \
+              "$file"; then
+              echo "::error file=$file::BLOCKED – SQL injection pattern detected"
+              grep -niP \
+                "(['\"])\s*(OR|AND)\s*\1\s*=\s*\1|UNION\s+SELECT|;\s*(DROP|DELETE|TRUNCATE)\s" \
+                "$file" | head -5
+              BLOCKED=true
+            fi
+
+          done <<< "$CHANGED_FILES"
+
+          if [[ "$BLOCKED" == "true" ]]; then
+            echo ""
+            echo "One or more dangerous SQL patterns were detected."
+            echo "Review the flagged files and resolve the issues before re-running."
+            exit 1
+          fi
+
+          echo "Guardrail check passed – no dangerous SQL found."
+
+  # ── 2. Approve ─────────────────────────────────────────────────────────────
+  # Pauses the pipeline and sends a review request to the required reviewers
+  # configured on the 'pipeline-approval' GitHub Environment.
+  #
+  # Setup (one-time, in the GitHub repo):
+  #   Settings → Environments → New environment → "pipeline-approval"
+  #   → Add required reviewers (the team lead / approvers)
+  #   → Set a review timeout if desired (e.g. 7 days)
+  approve:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: pipeline-approval   # ← pauses here until a reviewer approves
+
+    steps:
+      - name: Approval received
+        run: |
+          echo "Pipeline approved by a required reviewer."
+          echo "Approved at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Triggered by commit: ${{ github.sha }}"
+          echo "Triggered by actor:  ${{ github.actor }}"
+
+  # ── 3. Execute ─────────────────────────────────────────────────────────────
+  # Runs only after both validate and approve succeed.
+  execute:
+    needs: [validate, approve]
+    runs-on: risingwave-pipeline
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tooling (aws CLI + jq for self-hosted runner)
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq unzip curl
+          if ! command -v aws >/dev/null 2>&1; then
+            curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+            unzip -q /tmp/awscliv2.zip -d /tmp
+            sudo /tmp/aws/install --update
+          fi
+          aws --version
+          jq --version
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::700736442855:role/gha-op-usxpress-dev-risingwave-pipeline-secrets
+          aws-region: us-east-2
+
+      - name: Verify caller identity (sanity)
+        run: aws sts get-caller-identity
+
+      - name: Pull Postgres credentials
+        id: pg
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id op-usxpress-dev/risingwave-2/postgres \
+            --query SecretString --output text)
+          PG_USER=$(echo "$SECRET_JSON" | jq -r .username)
+          PG_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+          echo "::add-mask::$PG_USER"
+          echo "::add-mask::$PG_PASS"
+          echo "user=$PG_USER" >> $GITHUB_OUTPUT
+          echo "pass=$PG_PASS" >> $GITHUB_OUTPUT
+
+      - name: Pull RisingWave root password
+        id: rw
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id op-usxpress-dev/risingwave-2/root \
+            --query SecretString --output text)
+          RW_PASS=$(echo "$SECRET_JSON" | jq -r .password)
+          echo "::add-mask::$RW_PASS"
+          echo "pass=$RW_PASS" >> $GITHUB_OUTPUT
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-common postgresql-client-16
+
+      - name: Execute SQL files on PostgreSQL
+        if: contains(needs.validate.outputs.changed_files, '.sql')
+        shell: bash
+        run: |
+          set -e
+
+          echo "${{ needs.validate.outputs.changed_files }}" | while read file; do
+
+            if [[ "$file" == *.sql ]]; then
+              echo "========================================"
+              echo "Running SQL file on PostgreSQL:"
+              echo "$file"
+              echo "========================================"
+
+              PGPASSWORD="${{ steps.pg.outputs.pass }}" psql \
+                -h "${{ secrets.POSTGRES_HOST }}" \
+                -p "${{ secrets.POSTGRES_PORT }}" \
+                -U "${{ steps.pg.outputs.user }}" \
+                -d postgres \
+                -f "$file"
+
+              echo "Completed: $file"
+            fi
+
+          done
+
+      - name: Execute RW files on RisingWave
+        if: contains(needs.validate.outputs.changed_files, '.rw')
+        shell: bash
+        run: |
+          set -e
+
+          echo "${{ needs.validate.outputs.changed_files }}" | while read file; do
+
+            if [[ "$file" == *.rw ]]; then
+              echo "========================================"
+              echo "Running RW file on RisingWave:"
+              echo "$file"
+              echo "========================================"
+
+              # Strip sqllogictest directives: comments (#), statement/query
+              # headers, result blocks (after ---), and result rows.
+              SQL=$(awk '
+                /^#/          { next }
+                /^statement /  { in_result=0; next }
+                /^query/       { in_result=0; next }
+                /^-+$/         { in_result=1; next }
+                /^$/           { in_result=0; print ""; next }
+                               { if (!in_result) print }
+              ' "$file")
+
+              echo "$SQL" | PGPASSWORD="${{ steps.rw.outputs.pass }}" psql \
+                -h "${{ secrets.RISINGWAVE_HOST }}" \
+                -p "${{ secrets.RISINGWAVE_PORT }}" \
+                -U root \
+                -d dev
+
+              echo "Completed: $file"
+            fi
+
+          done
+
+      - name: Workflow summary
+        run: |
+          echo "## Pipeline Execution Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit**: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Actor**: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Status**: Completed successfully" >> "$GITHUB_STEP_SUMMARY"
