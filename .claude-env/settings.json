@@ -148,13 +148,13 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "bash /workspaces/eks_code/.claude/hooks/guard-mutations.sh"
           }
-        ],
-        "matcher": "Bash"
+        ]
       }
     ],
     "SessionEnd": [
@@ -167,5 +167,6 @@
         ]
       }
     ]
-  }
+  },
+  "agentPushNotifEnabled": true
 }

@@ -37,9 +37,16 @@ PG_PORT="${PG_PORT:-5432}"
 PG_DB="${PG_DB:-postgres}"
 PG_USER="${PG_USER:-postgres}"
 DRY_RUN="${DRY_RUN:-false}"
-# Template/ is a scaffold for authoring new pipelines, not a pipeline. Applying it creates
-# junk objects named after the example.
-EXCLUDE_RE="${EXCLUDE_RE:-/Template/}"
+# Directories under $PIPELINE_DIR that hold .sql/.rw files which are NOT pipeline steps.
+# Regex, matched against the full path.
+#   Template/  - a scaffold for authoring new pipelines. Applied, it creates junk objects
+#                named after the example.
+#   scripts/   - docker-compose initdb material. Its own README: "run from within the
+#                container to setup the server". 100-helpers.sql uses CREATE FUNCTION with
+#                no OR REPLACE, so a second run fails. It has always been inside the
+#                pipelines/**/*.sql glob; renaming shared/ -> 000-shared/ only made it
+#                sort early enough to notice.
+EXCLUDE_RE="${EXCLUDE_RE:-/(Template|scripts)/}"
 
 echo "pipeline dir : ${PIPELINE_DIR}"
 echo "risingwave   : ${RW_USER}@${RW_HOST}:${RW_PORT}/${RW_DB}"
@@ -112,7 +119,7 @@ applied=0; skipped=0; excluded=0
 for f in "${files[@]}"; do
   rel="${f#/pipeline/}"
 
-  if [[ "$f" == *${EXCLUDE_RE}* ]]; then
+  if [[ "$f" =~ $EXCLUDE_RE ]]; then
     echo "  exclude  ${rel}"; excluded=$((excluded+1)); continue
   fi
 
