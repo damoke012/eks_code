@@ -10,6 +10,11 @@ data:
   RW_PORT: "4567"
   RW_DB:   dev
   RW_USER: root
+  # ⚠️ UNVERIFIED against op-usxpress-prod. These are the values QA carried before
+  # 2026-08-20, when QA turned out to be pg-postgresql / database risingwave (03c68f3,
+  # d5a07b5). Prod's service name and database have never been read from the cluster.
+  # Check both before wiring prod -- unlike the absent KAFKA_* keys, a wrong value here
+  # fails as a connection error rather than a named refusal.
   PG_HOST: postgres-postgresql.risingwave.svc.cluster.local
   PG_PORT: "5432"
   PG_DB:   postgres
