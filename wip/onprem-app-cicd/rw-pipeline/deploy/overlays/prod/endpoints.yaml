@@ -1,0 +1,29 @@
+# Per-cluster coordinates. The Job runs in app-risingwave and reaches ACROSS to the
+# RisingWave instance the platform runs in the `risingwave` namespace on op-usxpress-prod.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: etl-pipeline-endpoints
+data:
+  PIPELINE_DIR: /pipeline/smoke        # switch to /pipeline/pipelines/Brand for the real run
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"
+  RW_DB:   dev
+  RW_USER: root
+  PG_HOST: postgres-postgresql.risingwave.svc.cluster.local
+  PG_PORT: "5432"
+  PG_DB:   postgres
+  # PG_USER comes from the credentials secret, beside its password.
+  APPLIED_BY: argocd-prod
+
+  # ── DELIBERATELY INCOMPLETE ──────────────────────────────────────────────────────
+  # prod has no EXCLUDE_RE and none of the KAFKA_* values, because none of them has been
+  # decided: prod's topic name, its consumer-group prefix and which pipelines it should
+  # run are all open questions, and prod has no ApplicationSet, so nothing renders this.
+  #
+  # This is safe by construction rather than by luck. build/apply.sh refuses any file it
+  # cannot fully render and names the missing placeholder, so wiring prod before these are
+  # set produces a loud failure in the sync-hook logs -- not a source pointed at dev's
+  # topic. Fill them in as a deliberate act when prod is actually being stood up.
+  #
+  # PIPELINE_DIR below still points at the smoke payload for the same reason.
