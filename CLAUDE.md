@@ -61,6 +61,13 @@ questions: what is now proven, what did we believe that was wrong, **did a proce
 `bash scripts/weekly-maintenance.sh` checks the notes, the skill descriptions, the upstream
 skill pin, the guard, and the backup freshness.
 
+## House style for answers
+
+Doke assigns work and briefs people; he does not hold the detail. **Lead with the decision or
+the status, then who does what next.** Detail only when asked for it. When correcting an
+earlier position, say what changed in one line and move on — do not re-litigate. Separate the
+original ask from what was discovered doing it, or scope creep reads as confusion.
+
 ## House style for notes
 
 End every note with what was **proven**, what was **tested and killed**, and the **traps**.
