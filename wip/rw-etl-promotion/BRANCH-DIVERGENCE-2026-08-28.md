@@ -86,10 +86,47 @@ object names. It is an ancestor. Do not treat it as current.
   Clear with `CANCEL JOBS <id>;`. ⚠️ **Still outstanding on op-dev as of writing.**
 * **The ALTER-vs-DROP question is still unanswered** — the probe never got past the wedge.
 
+## RESOLVED 2026-08-28 — two repos, one canonical
+
+Tim's link pointed at **`usxpressinc/risingwave-poc`**, not `variant-inc/risingwave-pipeline`.
+Same repo, forked. Settled by `git ls-remote` + `rev-list --left-right`:
+
+    poc/master  28ea5308   ...   poc-only: 0
+    variant/master 310aa151 ...  variant-only: 27
+    f/driver    16f9374d   IDENTICAL in both
+
+**`variant-inc/risingwave-pipeline` is canonical** — its master is a strict superset of the
+POC's, which is a pure ancestor whose last real content is 2025-09-11 (only a `.gitignore`
+tweak since, 2026-01-23). The POC has none of the machinery: no `build/apply.sh`, no
+`Dockerfile`, no `smoke/`, 1 deploy file vs 8, 1 workflow vs 6.
+
+Because `f/driver` is the same commit in both, the merge can be done in variant-inc with
+nothing lost. ⚠️ The trap avoided: Tim's self-assigned "get master up to date" would have
+landed in the POC repo, which **nothing builds from**.
+
+**Tim confirmed `f/driver` is the most up-to-date** and owns bringing master current.
+
+## Also raised 2026-08-28 — SQLMesh
+
+Zach (RisingWave) recommended **SQLMesh** (sqlmesh.readthedocs.io); Tim asked us to evaluate.
+The summary he was given claims it is "purpose-built for RisingWave's SQL dialect and
+streaming semantics" — that reads as an LLM overstatement; SQLMesh is a general SQL
+transformation framework from Tobiko Data. **UNVERIFIED, do not repeat the claim.**
+Three questions before it enters any plan:
+1. Is there a real RisingWave **engine adapter**, not just compatible SQL?
+2. Does it model **continuously maintained** views? SQLMesh thinks in scheduled/incremental
+   runs; a RisingWave MV has nothing to "run".
+3. What does it do with `CREATE SOURCE` / `CREATE SINK` / `CREATE SECRET` — connectors, not
+   models. Expectation: no concept for them.
+
+Scope note: SQLMesh would replace **`apply.sh`** (what SQL to run), not the image/ECR/Argo CD
+path (what reaches which cluster). Different halves — say so early or it becomes
+"SQLMesh vs our CI/CD".
+
 ## Open — needs Tim
 
-1. Is `f/driver` current, or superseded by something unpushed?
-2. Why did it never merge?
+1. ~~Is `f/driver` current?~~ **Answered: yes, Tim confirmed 2026-08-28.**
+2. ~~Why did it never merge?~~ Not blocked — it is on Tim's own task list.
 3. Dev runs **0 sinks** though `400-sink.rw` defines `mongo_brands` — deliberate, or
    dropped and never recreated? (INFRA-1644 has been open on an assumption.)
 
