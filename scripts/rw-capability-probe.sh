@@ -32,7 +32,8 @@ for i in $(seq 1 40); do
 done
 
 PSQL=(psql -h 127.0.0.1 -p "$LPORT" -d "$DB" -U "$PGUSER_" -tAq -v ON_ERROR_STOP=1)
-run() { "${PSQL[@]}" -c "$1" 2>/tmp/rw-err.txt; }   # stdout clean, stderr to file
+TMO="${TMO:-25}"
+run() { timeout "$TMO" "${PSQL[@]}" -c "$1" 2>/tmp/rw-err.txt; }  # 124 = hung
 
 echo; echo "== 0. preflight =="
 out=$(run "SELECT 1;"); rc=$?
@@ -66,10 +67,21 @@ probe() { # probe <label> <sql>
     0) printf '  OK           %-38s\n' "$label" ;;
     3) printf '  UNSUPPORTED  %-38s %s\n' "$label" \
          "$(head -1 /tmp/rw-err.txt | cut -c1-100)" ;;
+  124) printf '  HUNG(>%ss)   %-38s DDL never completed — barrier blocked\n' "$TMO" "$label" ;;
     2) printf '  CONNECTION LOST at %s — remaining results are void\n' "$label"; exit 1 ;;
     *) printf '  ERROR(rc=%s)  %-38s %s\n' "$rc" "$label" "$(head -1 /tmp/rw-err.txt)" ;;
   esac
 }
+
+echo; echo "== 3b. is DDL healthy at all? =="
+prog=$(run "SELECT count(*) FROM rw_catalog.rw_ddl_progress;")
+echo "  in-flight DDL jobs: ${prog:-<query failed>}"
+run "SELECT ddl_id, ddl_statement, progress FROM rw_catalog.rw_ddl_progress;" | sed 's/^/    /'
+echo "  fragments/actors:"
+run "SELECT 'fragments', count(*) FROM rw_catalog.rw_fragments
+     UNION ALL SELECT 'actors', count(*) FROM rw_catalog.rw_actors;" | sed 's/^/    /'
+echo "  worker nodes:"
+run "SELECT id, host, port, type, state FROM rw_catalog.rw_worker_nodes ORDER BY id;" | sed 's/^/    /'
 
 echo; echo "== 4. can ALTER replace DROP?  (throwaway zz_probe_ objects) =="
 run "DROP MATERIALIZED VIEW IF EXISTS zz_probe_mv CASCADE;"  >/dev/null
