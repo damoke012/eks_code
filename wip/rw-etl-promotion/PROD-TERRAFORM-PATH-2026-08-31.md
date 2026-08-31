@@ -57,6 +57,18 @@ The same comment already says *"Remove these blocks after the first successful a
 per environment."* That never happened, so the blocks are now a landmine for every
 new environment.
 
+### The fix — DONE, PR #31
+
+`variant-inc/iaac-risingwave-onprem#31`, branch `fix/INFRA-1674-drop-import-blocks`,
+opened 2026-08-31. 29 lines deleted from `secrets.tf`, one file, nothing else in the diff.
+`terraform validate` passes; `terraform fmt -check` fails on a **pre-existing**
+misalignment in `variables.tf` (`aws_profile`) that was deliberately left alone.
+
+Not yet confirmed: that the removal is a plan no-op for dev and QA. The reasoning is
+sound — an import block already consumed leaves nothing behind to remove — but it is
+reasoning, not evidence. A QA plan showing "No changes" is the proof, and an Octopus
+run with `TfApply=false` is the safe way to get it.
+
 ### The fix
 
 Delete the five `import` blocks. Safe for dev and QA — their secrets are already in
