@@ -1,38 +1,40 @@
-Idris — thanks for turning INFRA-1675 around fast. Three things before it goes anywhere near QA or prod, and the first one is my error, not yours.
+Idris — three things on INFRA-1675 and PR #18. The first one is my error.
 
-**1. The prod account ID in the ticket is wrong — I gave you a bad number.**
+**1. I gave you the wrong prod account ID.**
 
-The ticket says prod = `786352483360`. It should be **`937464026810`**. That is op-usxpress-prod; I confirmed it today against the prod account directly. Dev `700736442855` and QA `527101283767` are both correct.
+INFRA-1675 says prod = `786352483360`. It should be **`937464026810`** — that is op-usxpress-prod, confirmed against the account today. Dev `700736442855` and QA `527101283767` are both right.
 
-You implemented what the ticket said, so this is on me. But it is now a literal in `pipeline.yaml`, `secret.yaml` and `user-access-deploy.yaml`, and as written prod's OIDC role ARN points at an account we do not own. Please correct all three.
+I have corrected the ticket. If you already wired `786352483360` into the workflows, that needs changing before it goes anywhere. And if `786352483360` is a real account we use for something else, tell me which — I want to know how it got into my notes.
 
-Worth a sanity check while you are in there: if `786352483360` is a real account we use for something else, I would like to know which, because that is how the wrong value got into my notes.
+**2. I cannot find the INFRA-1675 work — where does it live?**
 
-**2. The secret path change needs to come out.**
+Your comment lists eleven changed files, but there is no branch, no PR and no commit for it on `variant-inc/risingwave-pipeline`. The newest commit on master is `310aa151` from 26 August. Is it still local, or on a fork?
 
-Changing `risingwave-2/postgres` and `risingwave-2/root` to `risingwave/*` in `pipeline.yaml` and `user-access-deploy.yaml` is not a naming alignment — it changes which database the applier authenticates to. `risingwave-2` is Tim's namespace on dev.
+I would like to read the full diff before it merges. Not because I doubt the work — two things in your summary need a second pair of eyes and I would rather find them now than in QA.
 
-It may well be the right change. But it was not in the ticket, it is not covered by any acceptance criterion, and it needs Tim's sign-off before it moves. Please pull it out into its own ticket and I will get Tim to confirm.
+**3. PR #18 and INFRA-1675 currently contradict each other.**
 
-The reason I am firm on this: in August a PR about Kyverno also carried an unrelated one-line change to an ApplicationSet URL, and it took delivery down for eighteen hours with every status field showing green. Unrequested hunks in a fix PR are the thing that bites us.
+In #18, `pipeline.yaml` is done the right way — environment detected, role computed through `needs.validate.outputs.aws_role`, no hardcoded account. That is exactly the shape AC3 wants.
 
-**3. Your notes contradict each other on the prod overlay, and it is the kind that syncs green.**
+But `secret.yaml` line 224 goes the other way: it swaps the hardcoded `700736442855` for `${{ secrets.AWS_ACCOUNT_ID }}`, a single repo-level secret. That is the specific thing INFRA-1675 AC3 exists to remove, because one secret cannot hold three different account IDs. Whichever of these merges second will undo the other.
 
-You wrote that the prod overlay's missing index 2 ExternalSecret patch was "pre-existing, not addressed here", and then a few lines later that you "also fixed the prod overlay's missing index 2 patch while adding indices 3-4". Both cannot be true.
+Suggestion: make `secret.yaml` in #18 use the same computed-role pattern you already wrote for `pipeline.yaml`, and AC3 becomes mostly done. Then 1675 only has to cover `user-access-deploy.yaml`.
 
-It matters because these are index-based patches into an array. If index 2 really was absent, indices 3 and 4 land in the wrong slots, and the ExternalSecret ends up mapping the right keys to the wrong names. That syncs successfully and reports `SecretSynced`. It has caught us twice before — a green sync proves the sync ran, not that the value is correct.
+**Also on #18 — it is much bigger than its title.** The diff runs past a thousand added lines of PowerShell and documentation: Kafka and Mongo connection helpers, template automation, credential guidance. A PR called "replace hardcoded AWS account ID in OIDC workflows" that also lands a tooling library is very hard to review, and the workflow change is the part that needs care. Can that be split? The ARN fix could merge today.
 
-Please paste the rendered output rather than the patch, for both overlays:
+**Two things in your 1675 summary I want to look at when I see the diff:**
 
-    kubectl kustomize deploy/overlays/qa   | sed -n '/kind: ExternalSecret/,/^---/p'
-    kubectl kustomize deploy/overlays/prod | sed -n '/kind: ExternalSecret/,/^---/p'
+- **The secret path change.** Moving `risingwave-2/postgres` and `risingwave-2/root` to `risingwave/*` is not a naming alignment — it changes which database the applier authenticates to, and `risingwave-2` is Tim's namespace on dev. It may be correct, but it was not in the ticket and it needs Tim's sign-off. Please keep it as its own change so it can be judged on its own.
 
-**Three questions, not blockers:**
+- **The prod overlay note contradicts itself.** You wrote that the missing index 2 ExternalSecret patch was "pre-existing, not addressed here", and then that you "also fixed the prod overlay's missing index 2 patch while adding indices 3-4". Both cannot be true, and it matters: these are index-based patches into an array, so if index 2 really was absent then 3 and 4 land in shifted slots and the ExternalSecret maps the right keys to the wrong names. That reports `SecretSynced` and looks fine. Easiest resolution is the rendered output rather than the patch:
 
-- **Dev overlay.** You added `POSTGRES_SERVER` / `POSTGRES_PORT` / `POSTGRES_ENTITY_DB` to the QA and prod overlays. What about dev? Dev is the only environment currently applying `.sql`, so if its overlay does not have them, the new refusal logic breaks the one path that works today.
-- **Empty string vs unset.** The QA and prod ConfigMap values are `""`. Does `apply.sh` refuse on an empty value, or only on an unset one? `-z` catches both, `-v` does not.
-- **The regex test.** How did you run the four cases? Asking because when I first checked for unguarded DROPs I used `git grep` without `-P`, it silently ignored the lookahead, and it reported zero findings — a clean pass that meant nothing. If your test used `grep -P` and you have the output, paste it and this one is closed.
+      kubectl kustomize deploy/overlays/qa   | sed -n '/kind: ExternalSecret/,/^---/p'
+      kubectl kustomize deploy/overlays/prod | sed -n '/kind: ExternalSecret/,/^---/p'
 
-Everything else reads right to me. The guardrail fix is the correct shape — anchoring with `^\s*`, the `IF EXISTS` lookahead, and the six missing object types are exactly what unblocks Tim's 19 files without letting `DROP SOURCE` through. The `app()` split with the refusal when it would resolve to the meta store is better than what I sketched.
+**Three quick questions:**
 
-Last thing: I could not find a PR for this. Where does the branch live? I would like to read the full diff before it merges — including the hunks neither of us meant to change.
+- You added `POSTGRES_SERVER` / `POSTGRES_PORT` / `POSTGRES_ENTITY_DB` to the QA and prod overlays. What about dev? Dev is the only environment applying `.sql` today, so if its overlay lacks them the new refusal logic breaks the one working path.
+- The QA and prod values are `""`. Does `apply.sh` refuse on an empty value or only an unset one?
+- How did you run the four guardrail cases? Asking because my own first check for unguarded DROPs used `git grep` without `-P`, which silently ignored the lookahead and reported zero findings — a clean pass that meant nothing. If yours used `grep -P`, paste the output and that one is closed.
+
+The parts I am not worried about: the guardrail fix is the right shape — `^\s*` anchoring, the `IF EXISTS` lookahead and the six missing object types are exactly what unblocks Tim's nineteen files without letting `DROP SOURCE` through. And the `app()` split refusing when it would resolve to the meta store is better than what I sketched in the write-up.
