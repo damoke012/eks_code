@@ -11,23 +11,22 @@ not real.** Only DNS goes to another team; the licence gates the console alone.
 
 ---
 
-## The one request to send — DNS (networking)
+## DNS — ours, and automatic. NOT a request.
 
-> We are standing RisingWave up on the on-prem prod cluster (op-usxpress-prod) and need
-> three A records, each with the same three targets:
->
->     risingwave-dashboard.op-prod.usxpress.io   ->  10.10.82.108, 10.10.82.110, 10.10.82.111
->     rw-sql.op-prod.usxpress.io                 ->  10.10.82.108, 10.10.82.110, 10.10.82.111
->     rw-postgres.op-prod.usxpress.io            ->  10.10.82.108, 10.10.82.110, 10.10.82.111
->
-> Those three addresses are the prod cluster's platform worker nodes
-> (`talos-wk-op-prod-platform-1/-2/-3`), which is the same pattern as QA — where
-> `risingwave-dashboard.op-qa.usxpress.io` and its two siblings resolve to
-> `10.10.82.23`, `10.10.82.139`, `10.10.82.106`, the QA platform nodes.
->
-> Same TTLs as the existing op-qa records. None of the three prod names resolve today.
->
-> Ticket is INFRA-1674. What lead time should I plan for?
+Corrected 2026-08-31: an earlier version of this file asked networking for three A records.
+That was wrong. `external-dns` creates them from VirtualService annotations, using the
+`usxpress.io` zone in the network account (155768531003) via
+`arn:aws:iam::155768531003:role/iaac-route53-zone`. We ran it for dev and QA the same way.
+
+Prod's records appear on their own once its VirtualServices carry:
+
+    external-dns.alpha.kubernetes.io/target: 10.10.82.108,10.10.82.110,10.10.82.111
+
+which are `talos-wk-op-prod-platform-3/-2/-1`. Prod's external-dns is already running with
+the correct `--txt-owner-id=iaac-talos/us-east-2/op-usxpress-prod`, so there is no
+ownership collision with dev or QA.
+
+Verify with `bash scripts/onprem-dns-claims.sh dev qa prod`.
 
 ---
 
