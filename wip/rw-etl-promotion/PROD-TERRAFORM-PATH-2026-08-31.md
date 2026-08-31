@@ -171,7 +171,34 @@ and the same client ID and secret reused.
 Untested. But the difference between "new app registration from identity" and "add a
 redirect URI to one that exists" is days.
 
-### 3. QA has **two** RisingWave buckets, and Terraform builds one
+### 3. ~~QA has two buckets and Terraform builds the wrong one~~ — WRONG, corrected same session
+
+The correction, with the evidence that settles it:
+
+| Bucket | Created | Tags | Contents | IRSA grants it? |
+|---|---|---|---|---|
+| `risingwave-state-op-usxpress-qa` | **2026-08-12** | none | `hummock/` | **yes** |
+| `risingwave-data-op-usxpress-qa` | 2026-07-07 | `Project=irsa`, `Cluster=op-usxpress-qa` | empty | no |
+
+Terraform was initialised on **2026-08-12** — the same day `risingwave-state-op-usxpress-qa`
+was created. The provider block sets **no `default_tags`**, so Terraform tags nothing, and
+the untagged bucket is the Terraform one. `op-usxpress-qa-risingwave`'s inline policy grants
+exactly `arn:aws:s3:::risingwave-state-op-usxpress-qa` and `/*`, and that bucket holds
+`hummock/`, RisingWave's actual object store.
+
+`risingwave-data-op-usxpress-qa` is a **July orphan** — created a month before the
+Terraform existed, empty, unused, tagged by whatever made it. Cleanup candidate, nobody's
+blocker.
+
+So **prod needs one bucket, not two**: `s3_bucket_prefix = risingwave-state-op-usxpress-prod`.
+`rw-prod-prereqs.sh` was right to check only that name.
+
+The reasoning that produced the wrong version, kept because it is the trap: I saw tags on
+one bucket, no tags on the other, and inferred the tagged one was Terraform's. Provider
+`default_tags` was an assumption, never read. Two extra facts — the creation dates and the
+role's actual Resource list — reversed the conclusion completely. Tags are not provenance.
+
+### 3b. (superseded) original claim
 
     risingwave-state-op-usxpress-qa
     risingwave-data-op-usxpress-qa
