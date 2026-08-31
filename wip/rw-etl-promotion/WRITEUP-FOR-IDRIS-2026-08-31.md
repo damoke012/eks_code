@@ -164,19 +164,20 @@ would drop live objects and replay the whole Kafka topic.
 
 ---
 
-## 6. A bug in the guardrail, independent of which design wins
+## 6. The three fixes, as code
 
-`pipeline.yaml` currently blocks this pattern:
+All three are written and tested. None of them depends on which design in section 3 we pick.
+
+### 6.1 The guardrail — wrong in both directions
+
+`pipeline.yaml` blocks this today:
 
 ```
 DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|SEQUENCE|INDEX|TYPE|FUNCTION|PROCEDURE)
 ```
 
 No `IF EXISTS` exemption, and `SOURCE`, `SINK`, `SECRET`, `CONNECTION`, `USER`, `ROLE` are
-missing from the list. It is wrong in **both** directions: it blocks the safe form and lets
-the destructive one through.
-
-**The fix**, tested in both directions before writing this:
+missing. It blocks the safe form and lets the destructive one through.
 
 ```diff
 -            if grep -qiP \
@@ -190,20 +191,123 @@ the destructive one through.
                "$file"; then
 ```
 
-Same change on the `grep -niP` immediately after it, which prints the offending lines.
+Same change on the `grep -niP` immediately after, which prints the offending lines.
 
-**Four-case test — it has to be right in both directions, not just stricter:**
+**Four-case test — a gate has to be right in both directions, not just stricter:**
 
 | statement | old | new | wanted | why |
 |---|---|---|---|---|
 | `DROP MATERIALIZED VIEW mv_brand;` | BLOCK | BLOCK | BLOCK | unguarded drop |
-| `DROP SOURCE kafka_brand CASCADE;` | **ALLOW** | BLOCK | BLOCK | destructive, and the old rule missed it |
+| `DROP SOURCE kafka_brand CASCADE;` | **ALLOW** | BLOCK | BLOCK | destructive; old rule missed it |
 | `DROP MATERIALIZED VIEW IF EXISTS brand_mv_raw cascade;` | **BLOCK** | ALLOW | ALLOW | guarded, and mandatory in Tim's style |
-| `GRANT DROP SECRET ON DATABASE dev TO manager_user;` | ALLOW | ALLOW | ALLOW | a GRANT, not a DROP — this is what `^\s*` protects |
+| `GRANT DROP SECRET ON DATABASE dev TO manager_user;` | ALLOW | ALLOW | ALLOW | a GRANT, not a DROP — what `^\s*` protects |
 
-**Against Tim's real tree: the old rule blocks 19 of 44 files; the new rule blocks 0 of 44** —
-while newly catching the unguarded `DROP SOURCE` that used to pass. Worth doing whichever
-design wins.
+**Against Tim's real tree: old blocks 19 of 44 files, new blocks 0 of 44** — while newly
+catching the unguarded `DROP SOURCE` that used to pass.
+
+### 6.2 `.sql` files land in the wrong database
+
+`apply.sh` already routes by extension, so `.sql` "works":
+
+```bash
+case "$f" in
+  *.rw)  ... | rw -q -f - ;;    # -> RisingWave, port 4567
+  *.sql) pg -q -f "$f" ;;       # -> Postgres,   port 5432
+esac
+```
+
+The problem is *where*. `pg()` points at `PG_HOST`/`PG_DB` = `pg-postgresql` / `risingwave` —
+**RisingWave's own meta store**, which is also where `pipeline_applied` lives. Tim's `.sql`
+files create `public.activeresource` and `employee.*`. Those must not go there.
+
+One connection is doing two unrelated jobs. Split it:
+
+```diff
+ PG_HOST="${PG_HOST:?PG_HOST not set}"
+ PG_PORT="${PG_PORT:-5432}"
+ PG_DB="${PG_DB:-postgres}"
+ PG_USER="${PG_USER:-postgres}"
++
++# The APPLICATION database -- where .sql files build tables. Deliberately NOT the meta
++# store. Tim's placeholders already name it: POSTGRES_SERVER / _ENTITY_DB / _ENTITY_USER.
++APP_HOST="${POSTGRES_SERVER:-}"
++APP_PORT="${POSTGRES_PORT:-5432}"
++APP_DB="${POSTGRES_ENTITY_DB:-}"
++APP_USER="${POSTGRES_ENTITY_USER:-}"
+
+ pg()  { PGPASSWORD="${PG_PASSWORD}" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 "$@"; }
++app() { PGPASSWORD="${POSTGRES_ENTITY_PASSWORD}" psql -h "$APP_HOST" -p "$APP_PORT" -U "$APP_USER" -d "$APP_DB" -v ON_ERROR_STOP=1 "$@"; }
+```
+
+and route `.sql` to it, refusing rather than guessing:
+
+```diff
+   case "$f" in
+     *.rw)
+       sed -e '/^statement/d' -e '/^query/d' -e '/^----$/,+0d' "$f" | rw -q -f - ;;
+-    *.sql) pg -q -f "$f" ;;
++    *.sql)
++      if [ -z "$APP_HOST" ] || [ -z "$APP_DB" ] || [ -z "$APP_USER" ]; then
++        echo "  REFUSED  ${rel}"
++        echo "           a .sql file needs an application database, but POSTGRES_SERVER /"
++        echo "           POSTGRES_ENTITY_DB / POSTGRES_ENTITY_USER are not all set."
++        echo "           Refusing to run it against ${PG_HOST}/${PG_DB} -- that is"
++        echo "           RisingWave's meta store, not an application database."
++        exit 1
++      fi
++      if [ "${APP_HOST}:${APP_DB}" = "${PG_HOST}:${PG_DB}" ]; then
++        echo "  REFUSED  ${rel}"
++        echo "           the application database resolves to the meta store"
++        echo "           (${PG_HOST}/${PG_DB}). Point POSTGRES_ENTITY_DB somewhere else."
++        exit 1
++      fi
++      app -q -f "$f" ;;
+   esac
+```
+
+Two properties worth noting. The variables are checked **only when a `.sql` file actually
+appears**, so a Brand-only run needs none of them. And the second check makes it impossible to
+write application tables into the meta store even if someone sets the variables to the same
+place — it fails loudly instead of succeeding quietly.
+
+The overlays then gain `POSTGRES_SERVER`, `POSTGRES_PORT`, `POSTGRES_ENTITY_DB` in the
+ConfigMap and `POSTGRES_ENTITY_USER` / `_PASSWORD` in the ExternalSecret.
+
+### 6.3 The credential in `SHOW CREATE SOURCE`
+
+This is the security cost of step 1 in section 4, and this is exactly what step 2 removes.
+The change, when the licence lands, is mechanical:
+
+**`pipelines/000-shared/000-secrets.rw`** — add the secrets under Tim's names, fed by the same
+renderer that is already supplying them:
+
+```sql
+DROP SECRET IF EXISTS kafka_sasl_password;
+CREATE SECRET kafka_sasl_password WITH ( backend = 'meta' ) AS '%KAFKA_SASL_PASSWORD%';
+DROP SECRET IF EXISTS kafka_schema_registry_password;
+CREATE SECRET kafka_schema_registry_password WITH ( backend = 'meta' ) AS '%KAFKA_SCHEMA_REGISTRY_PASSWORD%';
+```
+
+**Tim's source files** — one substitution per credential:
+
+```diff
+-  properties.sasl.password  = '%KAFKA_SASL_PASSWORD%',
++  properties.sasl.password  = secret kafka_sasl_password,
+-  schema.registry.password  = '%KAFKA_SCHEMA_REGISTRY_PASSWORD%'
++  schema.registry.password  = secret kafka_schema_registry_password
+```
+
+Keeping **Tim's names** (`kafka_sasl_password`, not `kafka_api_secret`) means the diff is a
+`sed`, not a rewrite, and his files stay readable to him.
+
+**Nothing in `build/`, `deploy/` or the workflows changes.** The renderer keeps feeding values
+in; the SQL stops consuming them directly and starts consuming secret objects. That is the
+whole of step 2 — which is why it is a follow-up and not a blocker.
+
+**Until then**, the exposure is bounded by who can run `SHOW CREATE SOURCE` on that cluster:
+today `root` and `manager_user`, nobody else. Whether RisingWave can grant query access while
+hiding source definitions I do not know and will not guess — a concrete question for the
+RisingWave engagement, alongside the ALTER one.
 
 ---
 
@@ -219,44 +323,24 @@ design wins.
 
 ## 8. Explicitly not decided
 
+Everything in section 6 is decided and written. These are not:
+
 * **SQLMesh** — discovery ticket. It would replace `apply.sh` (which SQL to run), not the
-  image or Argo CD (what reaches which cluster). Different halves of the problem — worth
-  saying early or it turns into "SQLMesh vs our CI/CD". I said in standup that it is not
-  RisingWave-owned and may not be supported; **that is my assumption, not something I
-  verified.** Your PoC settles it. It is Apache-2.0 from Tobiko Data; the paid product is
-  Tobiko Cloud, which is a separate thing.
+  image or Argo CD (what reaches which cluster). Different halves — worth saying early or it
+  becomes "SQLMesh vs our CI/CD". I said in standup that it is not RisingWave-owned and may
+  not be supported; **that is my assumption, not something I verified.** Your PoC settles it.
+  It is Apache-2.0 from Tobiko Data; the paid product is Tobiko Cloud, a separate thing.
 
-* **`CREATE SECRET` as step 2** — see section 4. Should happen; not a blocker.
+* **When step 2 happens** (section 6.3) — it needs the licence, and it needs Tim to accept a
+  `sed` across his source files. Worth agreeing with him rather than doing to him.
 
-* **A second Postgres connection, for the `.sql` files.** `apply.sh` routes by extension:
+* **`400-Driver/rw.sql`** — misnamed: a `.sql` extension on a file called "rw". Empty today,
+  so harmless, but if it ever gets RisingWave SQL it goes to Postgres and fails. Rename during
+  Tim's merge.
 
-  ```bash
-  case "$f" in
-    *.rw)  ... | rw -q -f - ;;    # -> RisingWave, port 4567
-    *.sql) pg -q -f "$f" ;;       # -> Postgres,   port 5432
-  esac
-  ```
-
-  So `.sql` already works. The problem is *where it lands*: `PG_HOST`/`PG_DB` currently point
-  at `pg-postgresql` / `risingwave` — **RisingWave's own meta store**, which is also where
-  `pipeline_applied` lives. Tim's `.sql` files create `public.activeresource` and
-  `employee.*`; those must not go in RisingWave's internal catalog database. He anticipated
-  this — his placeholders name a separate one (`POSTGRES_ENTITY_DB`, `_USER`, `_PASSWORD`,
-  `POSTGRES_SERVER`).
-
-  **Fix, when those pipelines ship:** split the one connection in two — `pg()` keeps the
-  bookkeeping, a new `app()` takes the application tables, and `.sql` routes to `app()`.
-  About ten lines.
-
-  **This does not block the first cutover** — see section 9.
-
-* **`400-Driver/rw.sql`** is misnamed: a `.sql` extension on a file called "rw". Empty today,
-  so harmless, but if it ever gets RisingWave SQL it silently goes to Postgres and fails.
-  Worth renaming during Tim's merge.
-
-* **`000-Demos/`** on `f/driver` holds 153 lines of RAG demo SQL and sorts *before*
-  `000-shared/`, so it would run first in every environment. Needs adding to `EXCLUDE_RE`:
-  `"/(000-Demos|Template|shared/scripts)/"`. Not optional.
+* **`000-Demos/`** on `f/driver` — 153 lines of RAG demo SQL that sorts *before* `000-shared/`,
+  so it would run first in every environment. Needs `EXCLUDE_RE: "/(000-Demos|Template|shared/scripts)/"`.
+  Not optional, just not yet written.
 
 ## 9. Suggested order: Brand only, first
 
