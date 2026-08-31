@@ -165,6 +165,22 @@ Two scripts live under `scripts/` to speed up Phase 3:
       an ApplicationSet's `repoURL` from `ssh://` to `https://` and took delivery down for 18
       hours. Check with `scripts/check-argocd-repo-credentials.sh` after any argocd-apps or
       argocd-config change.
+- [ ] **Did I measure the property, or something adjacent to it?** Four confident wrong
+      answers this year came from a proxy: a `%VAR%` count standing in for "is this
+      parameterised", resource **tags** standing in for "did Terraform build this"
+      (they do not — the provider sets no `default_tags`; creation date and the IAM
+      policy's `Resource` list settle it), `git grep` without `-P` standing in for
+      "are there unguarded DROPs", and `kubectl get gateway` standing in for "does this
+      cluster have Istio Gateways". Every one returned a clean result and answered a
+      different question. Name the direct evidence before reporting the property.
+- [ ] **Did the resource kind I queried actually resolve?** `kubectl get gateway` hits the
+      **Gateway API** CRD and returns zero rows while `gateways.networking.istio.io` has
+      several. Zero rows from the wrong kind is not absence. Fully qualify the kind
+      whenever a short name could be ambiguous.
+- [ ] **Before raising an external request, did I check whether another environment already
+      solved it?** RisingWave's prod Entra "app registration request" evaporated on
+      2026-08-31 once dev and QA turned out to share one registration — prod was a redirect
+      URI and a copied secret. Grep the sibling clusters' manifests first.
 - [ ] **Do the container's listen flags agree with the Service's `targetPort`?** A numeric
       `targetPort` needs no matching `containerPort`, so Kubernetes will not complain about a
       Service that points at a port nothing binds.

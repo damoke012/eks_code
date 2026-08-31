@@ -139,5 +139,33 @@ else
   [ "$n" = "0" ] && ok "0 import blocks" || no "$n import blocks still present"
 fi
 
+# ── Claim 9 — ingress parity: DNS targets, Gateways, VirtualServices ─────────
+# Written because the prereq check looked only at Secrets/role/bucket/DNS and would
+# have reported prod complete while 4567 and 5432 routed nowhere.
+hr "claim 9 — ingress parity, op-usxpress-qa vs op-usxpress-prod"
+for env in qa prod; do
+  kc="$HOME/.kube/op-usxpress-$env.yaml"
+  ctx="admin@op-usxpress-$env"
+  if [ ! -f "$kc" ]; then
+    info "SKIPPED $env — no kubeconfig at $kc (not absence; rebuild it)"
+    continue
+  fi
+  printf '  --- op-usxpress-%s\n' "$env"
+  printf '      platform node IPs (these are the A-record targets):\n'
+  KUBECONFIG="$kc" kubectl --context "$ctx" get nodes \
+    -o custom-columns='NAME:.metadata.name,IP:.status.addresses[?(@.type=="InternalIP")].address' \
+    --no-headers 2>/dev/null | grep platform | sed 's/^/        /'
+  printf '      istio Gateways (fully qualified — `get gateway` hits the Gateway API CRD):\n'
+  KUBECONFIG="$kc" kubectl --context "$ctx" get gateways.networking.istio.io -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PORTS:.spec.servers[*].port.number' \
+    --no-headers 2>/dev/null | sed 's/^/        /'
+  printf '      VirtualService hosts NOT matching this environment:\n'
+  KUBECONFIG="$kc" kubectl --context "$ctx" get virtualservice -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,HOSTS:.spec.hosts[*]' \
+    --no-headers 2>/dev/null | grep -v "op-$env.usxpress.io" | sed 's/^/        MISMATCH /'
+done
+info "prod must have BOTH shared-http (80,443) and tcp-passthrough (4567,5432);"
+info "without the second, rw-sql and rw-postgres resolve, reach a node and route nowhere"
+
 hr "done"
 info "MISMATCH lines are the ones that change the plan. SKIPPED is not a pass."
