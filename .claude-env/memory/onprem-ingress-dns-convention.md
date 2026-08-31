@@ -7,11 +7,19 @@ metadata:
 
 Verified across op-usxpress-qa and op-usxpress-prod, 2026-08-31.
 
-**DNS**: a service hostname gets one A record per **platform worker node**, three in total.
-QA's `risingwave-dashboard.op-qa.usxpress.io`, `rw-sql.op-qa…` and `rw-postgres.op-qa…` all
-resolve to `10.10.82.23`, `10.10.82.139`, `10.10.82.106` — exactly
-`talos-wk-op-qa-platform-3`, `-2`, `-1`. Prod's equivalents are `10.10.82.108`,
-`10.10.82.110`, `10.10.82.111` (`talos-wk-op-prod-platform-3`, `-2`, `-1`).
+**DNS targets vary per cluster — there is no single convention.** Corrected 2026-08-31 after
+generalising from QA alone:
+
+| Cluster | Targets |
+|---|---|
+| op-dev | 7 IPs — every dev worker |
+| op-qa | 3 IPs — platform nodes only (`.23`, `.139`, `.106`) |
+| op-prod | 10 IPs — every prod worker, per its working `argocd.op-prod` route |
+
+`istio-ingressgateway` runs as a DaemonSet on every worker on all three, so any worker is a
+valid target; QA restricts to platform nodes, dev and prod do not. **Mirror the cluster's own
+existing working route, not another cluster's.** For a new prod route, copy what
+`argocd.op-prod.usxpress.io` targets.
 
 Derive the targets from the node list, never from another cluster's records:
 
