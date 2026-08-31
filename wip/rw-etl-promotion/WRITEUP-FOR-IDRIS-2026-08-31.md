@@ -42,56 +42,84 @@ That is not in dispute and does not change.
 
 ---
 
-## 3. The one real decision
+## 3. The one real decision — and it is smaller than it looks
 
-**Where does the credential get resolved?**
+The instinct is to frame this as "your design vs mine". It is not. **Yours is a consumer of
+mine.** Look at what your own `shared/000-secrets.rw` does:
 
-| | Yours — inside RisingWave | Mine — at apply time |
+```sql
+CREATE SECRET kafka_api_key WITH ( backend = 'meta' ) AS '%KAFKA_API_KEY%';
+```
+
+That single line is both mechanisms. The `%KAFKA_API_KEY%` is the renderer filling a blank
+from the ConfigMap/Secret chain; the `CREATE SECRET` is your object. Your design **needs**
+the delivery path to get the value in.
+
+So there are three layers, and only the last one is actually in question:
+
+```
+Secrets Manager -> External Secrets -> env var -> render()     <- REQUIRED either way
+                                          |
+                    +---------------------+---------------------+
+                    |                                           |
+       CREATE SECRET kafka_api_key                straight into the source
+       (hidden; needs premium licence)            (visible; no licence)
+                    |                                           |
+       properties.sasl.password =                properties.sasl.password =
+             secret kafka_api_key                    '%KAFKA_SASL_PASSWORD%'
+```
+
+**The delivery path is not optional.** Topics, hosts, database names and CDC slots have
+nowhere else to live — `secret.yaml` has no slot for a Kafka topic name, and
+`deploy/overlays/qa/endpoints.yaml` has no Kafka keys at all today because QA has only ever
+deployed the `smoke/` payload.
+
+**Your last hop is the more secure one** and is where we should end up:
+
+| | `CREATE SECRET` (yours) | inline placeholder |
 |---|---|---|
-| Mechanism | `CREATE SECRET kafka_api_key …` then `properties.sasl.password = secret kafka_api_key` | `%KAFKA_SASL_PASSWORD%` in the SQL, replaced from an env var before it is sent |
-| Values come from | Secrets Manager → GitHub Action → `CREATE SECRET` | Secrets Manager → External Secrets → k8s Secret → `envFrom` |
-| Non-secret values (topics, hosts) | **no home** — the workflow only does secrets | ConfigMap `etl-pipeline-endpoints` |
-| Premium licence | **required** — Secrets Management is gated | not required |
-| Credential visible in `SHOW CREATE SOURCE` | **no** | **yes** |
-| CI needs prod credentials | **yes** | no — the Action only pushes to ECR |
-
-Your version is genuinely better on the security row. INFRA-1637 removed the plaintext
-Confluent credentials from `pipelines/Brand/100-sources.rw` on 18 Aug and that was the right
-fix. I want to be clear I am not arguing your design is careless — it is not.
+| Credential in `SHOW CREATE SOURCE` | **hidden** | **visible** |
+| Premium licence | **required** | not required |
+| Works with Tim's 44 files as written | no | yes |
 
 ---
 
-## 4. Why I am recommending apply-time resolution anyway
+## 4. Recommendation: a sequence, not a winner
 
-Three reasons, in order of weight.
+**Step 1 — ship apply-time now.** Unblocked today, licence-independent, proves the whole path
+end to end with real DDL.
 
-**(a) Tim's tree does not use `secret <name>` at all.**
-`f/driver` — the branch actually running on op-dev, which Tim confirmed is current and is
-merging to master — writes credentials inline:
+**Step 2 — convert to `CREATE SECRET` when the licence lands.** And note what that change
+actually is: **an edit to Tim's SQL, not to the delivery path.** Nothing in `build/`,
+`deploy/` or the workflows changes. The renderer keeps feeding the values in; the SQL stops
+consuming them directly and starts consuming secret objects.
+
+Three reasons for that order, in weight:
+
+**(a) Tim's tree does not use `secret <name>` at all.** `f/driver` — the branch actually
+running on op-dev, which Tim confirmed is current and is merging to master — writes:
 
 ```sql
 properties.sasl.password  = '%KAFKA_SASL_PASSWORD%',
 schema.registry.password  = '%KAFKA_SCHEMA_REGISTRY_PASSWORD%'
 ```
 
-Across all 44 of his SQL files there are **zero** `secret <name>` references. When his
-`pipelines/` lands, the 15 RisingWave secrets become orphans — created, licence-gated, and
-referenced by nothing. Keeping the `CREATE SECRET` design means rewriting all 44 of his files.
+Across all 44 of his SQL files there are **zero** `secret <name>` references. Going
+`CREATE SECRET`-first means editing all 44 before anything can run.
 
-**(b) It takes the premium licence off the critical path.**
-You have been blocked waiting for the licence key because `CREATE SECRET` needs it. Tim's SQL
-does not call it. We can test end to end this week without the key.
+**(b) It takes the premium licence off the critical path.** You have been blocked waiting for
+the key because `CREATE SECRET` is gated. Tim's SQL never calls it. We can test this week.
 
-**(c) Non-secret values need somewhere to live.**
-`secret.yaml` handles credentials well. It has no home for a Kafka **topic name**, a MongoDB
-host, or a Postgres database name — and those differ per environment too. Right now
-`deploy/overlays/qa/endpoints.yaml` has no Kafka keys at all, because QA has only ever
-deployed the `smoke/` payload. That gap has to be filled either way.
+**(c) Non-secret values need a home regardless**, and that is the ConfigMap. That work has to
+happen whichever hop we pick.
 
-**The cost of my recommendation, stated plainly:** the credential ends up inside the source
-definition, so anyone with `SHOW CREATE SOURCE` can read it. That is exactly how I saw live
-Confluent credentials last week. Mitigation is RisingWave user permissions, and moving to
-`CREATE SECRET` as a follow-up once the licence lands — not a reason to block the cutover.
+### Reducing the exposure in the meantime
+
+The credential is readable by anyone who can run `SHOW CREATE SOURCE` on that cluster. So the
+control is **who has RisingWave access** — today `root` and `manager_user`, nobody else.
+Whether RisingWave can grant a user query access while hiding source definitions I do not
+know and will not guess; that is a concrete question for the RisingWave engagement Steve is
+arranging, worth asking alongside the ALTER question.
 
 ---
 
@@ -138,23 +166,44 @@ would drop live objects and replay the whole Kafka topic.
 
 ## 6. A bug in the guardrail, independent of which design wins
 
-`pipeline.yaml` blocks this pattern:
+`pipeline.yaml` currently blocks this pattern:
 
 ```
 DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|SEQUENCE|INDEX|TYPE|FUNCTION|PROCEDURE)
 ```
 
-No `IF EXISTS` exemption, and `SOURCE`, `SINK`, `SECRET`, `USER`, `ROLE` are not in the list.
-Tested against Tim's files:
+No `IF EXISTS` exemption, and `SOURCE`, `SINK`, `SECRET`, `CONNECTION`, `USER`, `ROLE` are
+missing from the list. It is wrong in **both** directions: it blocks the safe form and lets
+the destructive one through.
 
-```
-BLOCKED  DROP MATERIALIZED VIEW IF EXISTS brand_mv_raw cascade;   ← safe and mandatory
-ALLOWED  DROP SOURCE IF EXISTS brand_source_kafka CASCADE;        ← genuinely destructive
-ALLOWED  DROP SECRET IF EXISTS kafka_api_key;                     ← genuinely destructive
+**The fix**, tested in both directions before writing this:
+
+```diff
+-            if grep -qiP \
+-              'DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|SEQUENCE|INDEX|TYPE|FUNCTION|PROCEDURE)' \
+-              "$file"; then
++            # ^\s*        a DROP that STARTS a statement, so "GRANT DROP SECRET" is not a drop
++            # …|SOURCE|SINK|SECRET|CONNECTION|USER|ROLE   the objects that were missing
++            # (?!IF\s+EXISTS)  a guarded drop is the safe, re-runnable form -- do not block it
++            if grep -qiP \
++              '^\s*DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|SEQUENCE|INDEX|TYPE|FUNCTION|PROCEDURE|SOURCE|SINK|SECRET|CONNECTION|USER|ROLE)\s+(?!IF\s+EXISTS)' \
+               "$file"; then
 ```
 
-**19 of Tim's 44 files are blocked** by it today, and the destructive statements pass. The fix
-is to exempt `IF EXISTS` and add the missing object types. Worth doing whichever design we pick.
+Same change on the `grep -niP` immediately after it, which prints the offending lines.
+
+**Four-case test — it has to be right in both directions, not just stricter:**
+
+| statement | old | new | wanted | why |
+|---|---|---|---|---|
+| `DROP MATERIALIZED VIEW mv_brand;` | BLOCK | BLOCK | BLOCK | unguarded drop |
+| `DROP SOURCE kafka_brand CASCADE;` | **ALLOW** | BLOCK | BLOCK | destructive, and the old rule missed it |
+| `DROP MATERIALIZED VIEW IF EXISTS brand_mv_raw cascade;` | **BLOCK** | ALLOW | ALLOW | guarded, and mandatory in Tim's style |
+| `GRANT DROP SECRET ON DATABASE dev TO manager_user;` | ALLOW | ALLOW | ALLOW | a GRANT, not a DROP — this is what `^\s*` protects |
+
+**Against Tim's real tree: the old rule blocks 19 of 44 files; the new rule blocks 0 of 44** —
+while newly catching the unguarded `DROP SOURCE` that used to pass. Worth doing whichever
+design wins.
 
 ---
 
@@ -170,18 +219,61 @@ is to exempt `IF EXISTS` and add the missing object types. Worth doing whichever
 
 ## 8. Explicitly not decided
 
-* **SQLMesh** — discovery ticket. It would replace `apply.sh`, not the image or Argo CD.
-  Different halves of the problem. I said in standup that it isn't RisingWave-owned and may
-  not be supported; that is my assumption, not something I verified. Your PoC settles it.
-* **`CREATE SECRET` as a follow-up** once the licence lands — I think it should happen, just
-  not as a blocker.
-* **A second Postgres connection** for `.sql` files. `apply.sh` has one `pg()` doing two jobs:
-  the `pipeline_applied` bookkeeping and application tables. Tim's `.sql` files create
-  `public.activeresource` and `employee.*`, which must not land in RisingWave's meta store.
-  Only affects ActiveResource and Employee — **Brand has no `.sql` at all**, so it does not
-  block the first cutover.
+* **SQLMesh** — discovery ticket. It would replace `apply.sh` (which SQL to run), not the
+  image or Argo CD (what reaches which cluster). Different halves of the problem — worth
+  saying early or it turns into "SQLMesh vs our CI/CD". I said in standup that it is not
+  RisingWave-owned and may not be supported; **that is my assumption, not something I
+  verified.** Your PoC settles it. It is Apache-2.0 from Tobiko Data; the paid product is
+  Tobiko Cloud, which is a separate thing.
 
-## 9. Suggested order
+* **`CREATE SECRET` as step 2** — see section 4. Should happen; not a blocker.
 
-Brand only, first. Four `.rw` files, no `.sql`, no CDC, no second Postgres. Prove the path
-with real DDL, then add the other three pipelines. Four at once and we cannot tell which broke.
+* **A second Postgres connection, for the `.sql` files.** `apply.sh` routes by extension:
+
+  ```bash
+  case "$f" in
+    *.rw)  ... | rw -q -f - ;;    # -> RisingWave, port 4567
+    *.sql) pg -q -f "$f" ;;       # -> Postgres,   port 5432
+  esac
+  ```
+
+  So `.sql` already works. The problem is *where it lands*: `PG_HOST`/`PG_DB` currently point
+  at `pg-postgresql` / `risingwave` — **RisingWave's own meta store**, which is also where
+  `pipeline_applied` lives. Tim's `.sql` files create `public.activeresource` and
+  `employee.*`; those must not go in RisingWave's internal catalog database. He anticipated
+  this — his placeholders name a separate one (`POSTGRES_ENTITY_DB`, `_USER`, `_PASSWORD`,
+  `POSTGRES_SERVER`).
+
+  **Fix, when those pipelines ship:** split the one connection in two — `pg()` keeps the
+  bookkeeping, a new `app()` takes the application tables, and `.sql` routes to `app()`.
+  About ten lines.
+
+  **This does not block the first cutover** — see section 9.
+
+* **`400-Driver/rw.sql`** is misnamed: a `.sql` extension on a file called "rw". Empty today,
+  so harmless, but if it ever gets RisingWave SQL it silently goes to Postgres and fails.
+  Worth renaming during Tim's merge.
+
+* **`000-Demos/`** on `f/driver` holds 153 lines of RAG demo SQL and sorts *before*
+  `000-shared/`, so it would run first in every environment. Needs adding to `EXCLUDE_RE`:
+  `"/(000-Demos|Template|shared/scripts)/"`. Not optional.
+
+## 9. Suggested order: Brand only, first
+
+`pipelines/100-Brand/` is four files and **zero `.sql`**:
+
+```
+100-sources.rw   200-ingest.rw   300-transform-flat.rw   400-sink.rw
+```
+
+So the first cutover needs no second Postgres connection, no CDC, and no licence. It is the
+smallest thing that exercises the whole path with real DDL rather than `SELECT 1`.
+
+Then add ActiveResource, Employee and Driver — doing the connection split as part of that.
+Four pipelines at once and we will not be able to tell which one broke.
+
+One more thing worth knowing about the merge: `rel` in `apply.sh` is the file's path, and
+Tim's rename `Brand/` -> `100-Brand/` changes every path, so every file looks new to
+`pipeline_applied`. On QA that is exactly what we want (we emptied the table on 27 Aug). On a
+cluster with history it would re-apply everything. Nothing has history except dev, and dev
+does not use this path — so the rename is free right now, and would not be later.
