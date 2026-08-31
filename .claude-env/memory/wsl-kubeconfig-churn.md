@@ -101,3 +101,17 @@ Verified against live node names: **13 nodes** — `talos-cp-op-prod-1..3`,
 `talos-wk-op-prod-application-1..5`, `talos-wk-op-prod-platform-1..3`,
 `talos-wk-op-prod-system-1..2`. Endpoint 10.10.82.52:6443, context `admin@op-usxpress-prod`.
 The same route should work for any cluster whose talosconfig is in Secrets Manager.
+
+⚠️ **Third recurrence 2026-08-28 — and this time the "resolve by endpoint" loop CAUSED it.**
+Matching on `{.clusters[*].cluster.server}` returns **every** server in a file, so a merged
+multi-cluster file matches on merely *containing* dev. A loop that keeps iterating then lets the
+LAST match win: `~/.kube/config` (current context **prod EKS BF7BD089**) was selected while the
+output said `MATCH .../op-usxpress-dev-fresh.yaml` three lines earlier. Only an expired SSO token
+stopped a prod query. **Resolving by endpoint is not enough — it must break on first match, and
+must select a CONTEXT, not a file.** Both `qa-one-eks.yaml` and `config` are merged and contain
+dev; `op-usxpress-dev-fresh.yaml` is the only single-cluster dev file. For op-dev just:
+```
+export KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml
+kubectl cluster-info | head -1     # must say 10.10.82.50 — READ it
+```
+op-dev is **cert-based**: an `aws`/SSO error in the output means you are on an EKS context, not dev.

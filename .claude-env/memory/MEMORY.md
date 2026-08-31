@@ -43,3 +43,7 @@
 - [Argo SSO / Identity Center limits](argocd-sso-blocked-on-management-account.md) — SAML+Dex decided; mgmt account 660075424663 needed, and the SAML app is CONSOLE-ONLY (create/ACS/audience/mappings have no API)
 - [Corp AD reachable from op-dev](onprem-ad-ldap-reachable.md) — CoreDNS forwards usxpress.com, 636 LDAPS open from the argocd namespace; makes a zero-console Dex LDAP connector viable
 
+- [Explain simply, for delegation](explain-simply-for-delegation.md) — Doke assigns work and briefs people; answers must be short, decision-first, and end with who does what
+- [Transport failure is not a verdict](transport-failure-not-a-verdict.md) — a probe must abort on a connection/exec failure, never report it as a finding about the system under test; discriminate by exit code
+- [On-prem GitOps repo topology](onprem-gitops-repo-topology.md) — FOUR repos, two different branch models; RisingWave lives in iaac-risingwave-onprem, NOT the platform or cluster repo
+- [RW prod blocked on manifests path](rw-prod-blocked-on-manifests-path.md) — INFRA-1674: absent by design until iaac-risingwave-onprem gets manifests/op-usxpress-prod; op-prod's routes are dev copies

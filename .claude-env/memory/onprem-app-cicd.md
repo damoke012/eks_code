@@ -141,3 +141,50 @@ INFRA-1635 (point `PIPELINE_DIR` at the real DDL — mine).
 
 See [[adjacent-step-green-signals]] — "proven end to end" was a true statement about the step
 next to the one anyone cares about.
+
+## 2026-08-28 — op-dev is running a BRANCH, and master's Brand has never executed
+
+Live on op-dev (`risingwave`/`dev`): `brand_source_kafka`, `brand_mv_raw`, `brand_mv_flat`,
+`brand_mv_state`; **0 sinks**, 0 tables, 15 secrets. Those names exist in **zero files on
+`origin/master`** — master has `kafka_brand`/`mv_brand`/`mv_brand_state` and no `flat` view.
+The live names are on **`origin/f/driver`** (Timothy Preble, last commit **2026-04-28**,
+102 commits master lacks), which also carries `200-ActiveResource`, `300-Employee`,
+`400-Driver` — 44 SQL files vs master's Brand-only 3.
+
+**Disjoint halves:** `f/driver` has the working SQL but **no `build/apply.sh`, no
+`Dockerfile`, 1 deploy file, 1 workflow** — it ships via `deploy.ps1` from a laptop.
+`master` has the whole delivery path but SQL nobody has run. So making `f/driver` master
+would delete the delivery path; the fix is a **one-directory merge** (master keeps
+`build/`+`deploy/`+workflows, `pipelines/` comes from `f/driver`).
+
+⚠️ **Correction — "Tim hardcoded the credentials" is BACKWARDS.** `f/driver`:
+`sasl.password` 4/4 parameterised, `sasl.username` 4/4, `bootstrap.server` 4/4,
+`mongodb.url` 4/7, 69 `%PLACEHOLDER%`. `master`: `sasl.password` **0/4**, `mongodb.url`
+**0/4**, 55 placeholders. The literal `mongodb://root:abcd@…` and the live Confluent
+credentials are **master's rewrite**. It regressed parameterisation Tim already had.
+
+**Population claim:** across all 44 files on `f/driver` — **53 `DROP`, 0 `ALTER`.**
+Drop-and-recreate is the whole codebase's style, not a Brand quirk.
+
+`origin/f/tim` is **dead**: 2025-08-22, 0 unique commits, none of the live names.
+
+Consequence: "promote dev's ETL to QA via an image" does not do that — an image from
+master runs SQL that has never executed anywhere. Detail + traps in
+`wip/rw-etl-promotion/BRANCH-DIVERGENCE-2026-08-28.md`.
+See [[manifests-copied-across-branches]], [[adjacent-step-green-signals]].
+
+**Repo question settled 2026-08-28.** There are TWO GitHub repos for this work:
+`usxpressinc/risingwave-poc` (the original POC) and `variant-inc/risingwave-pipeline` (ours).
+Same repo, forked. `rev-list --left-right poc/master...origin/master` = **poc-only 0,
+variant-only 27** — the POC master is a **pure ancestor**, last real content 2025-09-11.
+It has none of the machinery (no `build/apply.sh`, no `Dockerfile`, no `smoke/`, 1 deploy
+file vs 8, 1 workflow vs 6). **`variant-inc/risingwave-pipeline` is canonical.**
+`f/driver` is the IDENTICAL commit `16f9374d` in both, so the merge loses nothing.
+⚠️ Tim's self-assigned "get master up to date" was aimed at the POC repo — which nothing
+builds from. Tim CONFIRMED `f/driver` is the most up-to-date and owns the merge.
+
+**Also 2026-08-28 — dev's Brand pipeline holds NINE rows** (`brand_mv_raw`=9,
+`brand_mv_state`=3). Replay cost on dev is nil; nobody has validated this pipeline at
+any real scale anywhere. And RisingWave reported **"high barrier latency"** on op-dev —
+`CREATE TABLE` wedged at 0.0% (job 130) and `CANCEL JOBS` could not complete. `RECOVER`
+is the documented fix but restarts every streaming job — Tim's call, not ours.
