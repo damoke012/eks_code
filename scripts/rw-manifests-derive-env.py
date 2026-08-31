@@ -41,6 +41,12 @@ def rules(src_env, dst_env, src_acct, dst_acct):
         (f"op-usxpress-{src_env}", f"op-usxpress-{dst_env}"),
         (f"op-{src_env}.usxpress.io", f"op-{dst_env}.usxpress.io"),
         (src_acct, dst_acct),
+        # Bare `op-qa` / `op-dev` / `op-prod` — the platform repo's BRANCH names, which
+        # appear in comments pointing at where the routes live. Must run last: by this
+        # point the hostname rule has already consumed every `op-<env>.usxpress.io`, so
+        # what remains is a branch reference. A stale one sends the next reader to the
+        # wrong branch, which is how copied manifests keep their provenance hidden.
+        (f"op-{src_env}", f"op-{dst_env}"),
     ]
 
 ENVISH = re.compile(
