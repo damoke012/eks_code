@@ -127,3 +127,72 @@ Same shape as the QA etcd-backup ExternalSecret: green sync, useless value.
   the greps were aimed at the wrong files (`locals` is in `secrets.tf`, the bucket is
   in `main.tf`). An empty grep is not evidence of absence — again.
 - **"There must be per-environment tfvars somewhere"** — there are none, deliberately.
+
+---
+
+# Confirmation run — 2026-08-31, `scripts/rw-prod-confirm.sh`
+
+Eight claims tested. Six held. Two changed the plan.
+
+## Confirmed
+
+- **op-usxpress-prod is `937464026810`** — reached via profiles `ops-controller` and `usx-prod`.
+- **Prod's OIDC issuer `d3rxit8f4yvshu` is registered**:
+  `arn:aws:iam::937464026810:oidc-provider/d3rxit8f4yvshu.cloudfront.net`.
+  The IRSA trust policy will resolve.
+- **QA's IRSA role is `op-usxpress-qa-risingwave`** — so `${var.cluster_name}-risingwave`
+  is the real convention and prod's will be `op-usxpress-prod-risingwave`.
+- **All five QA secrets exist** at `op-usxpress-qa/risingwave/*`.
+- **`dex_entra_client_secret` is absent from all of `deploy/terraform/`** — hand-created.
+- **`console_license_key` is created holding a literal placeholder**:
+  `jsonencode({ RW_LICENSE_KEY = "PLACEHOLDER_INJECT_REAL_LICENSE" })`, with
+  `lifecycle { ignore_changes = [secret_string] }`. Terraform creates it once and never
+  touches it again. Existence proves nothing; the real key goes in by hand afterwards.
+- **Prod DNS does not resolve**; QA's three names all answer with
+  `10.10.82.23`, `10.10.82.139`, `10.10.82.106`.
+
+## Changed the plan
+
+### 1. `786352483360` is the **playground** account
+
+Reached via profiles `infra-playground` and `playground`. It is not a typo for a prod
+account — it is a real account we own, for throwaway work. INFRA-1675 as written would
+have pointed the prod OIDC role ARN at the playground.
+
+That value came from my write-up. Worth sweeping other notes for it.
+
+### 2. QA already has a `dex_entra_client_secret` — the Entra pole may be much shorter
+
+`op-usxpress-qa/risingwave/dex_entra_client_secret` **exists**. Someone has already done
+the Entra work for QA. An app registration can carry more than one redirect URI, so prod
+may not need a new registration at all — only prod's callback added to the existing one,
+and the same client ID and secret reused.
+
+Untested. But the difference between "new app registration from identity" and "add a
+redirect URI to one that exists" is days.
+
+### 3. QA has **two** RisingWave buckets, and Terraform builds one
+
+    risingwave-state-op-usxpress-qa
+    risingwave-data-op-usxpress-qa
+
+`main.tf` creates a single bucket from `var.s3_bucket_prefix`. `rw-prod-prereqs.sh` only
+ever checked for `risingwave-state-op-usxpress-prod`, so it would have reported a
+complete prod build while `risingwave-data-op-usxpress-prod` was still missing.
+
+Which of the two Terraform owns, and where the other comes from, is not yet known.
+This is the "one sample is not a population" trap: the prereq script was written from
+one bucket name and would have passed on half the storage.
+
+## Also noted
+
+Account `937464026810` holds **both** the on-prem prod OIDC provider and the cloud prod
+EKS cluster's (`BF7BD0896246A3AA0A5DF5C9D8200E8A`). On-prem prod and cloud prod share
+an account.
+
+## Trap found in the check itself
+
+`rw-prod-confirm.sh`'s import-block count reported `MISMATCH 0` for a correct answer:
+`grep -c` prints `0` *and* exits 1 on no match, so `|| echo 0` appended a second zero and
+`"0\n0" != "0"`. Fixed. The check was right and its verdict was wrong — the same shape as
+the probe that reported UNSUPPORTED because psql was missing.

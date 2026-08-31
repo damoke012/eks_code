@@ -134,7 +134,8 @@ else
   info "if that is a literal placeholder, creating the secret does not make the console work"
 
   hr "bonus — are the import blocks gone on this branch?"
-  n=$(grep -c '^import {' "$REPO/deploy/terraform/secrets.tf" 2>/dev/null || echo 0)
+  # grep -c prints 0 AND exits 1 on no match, so `|| echo 0` would append a second 0.
+  n=$(grep -c '^import {' "$REPO/deploy/terraform/secrets.tf" 2>/dev/null); n=${n:-0}
   [ "$n" = "0" ] && ok "0 import blocks" || no "$n import blocks still present"
 fi
 
