@@ -47,3 +47,5 @@
 - [Transport failure is not a verdict](transport-failure-not-a-verdict.md) — a probe must abort on a connection/exec failure, never report it as a finding about the system under test; discriminate by exit code
 - [On-prem GitOps repo topology](onprem-gitops-repo-topology.md) — FOUR repos, two different branch models; RisingWave lives in iaac-risingwave-onprem, NOT the platform or cluster repo
 - [RW prod blocked on manifests path](rw-prod-blocked-on-manifests-path.md) — INFRA-1674: absent by design until iaac-risingwave-onprem gets manifests/op-usxpress-prod; op-prod's routes are dev copies
+- [RW prod Terraform via Octopus](risingwave-prod-terraform-via-octopus.md) — env-generic module, 100% Octopus variables, no tfvars; TfApply gate means green ≠ applied (proof = terraform_outputs.yml artifact); dex_entra_client_secret is NOT in TF
+- [TF import blocks block new envs](terraform-import-blocks-block-new-envs.md) — five bare `import` blocks in secrets.tf fail prod's first plan; delete them (state no-op for dev/QA)
