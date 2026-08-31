@@ -35,22 +35,43 @@ last commit **2026-04-28**, 102 commits master does not have). Also found on
 `f/driver` carries three pipelines master has never seen: `200-ActiveResource`,
 `300-Employee`, `400-Driver` (20 files).
 
-## Correction to an earlier claim
+## Correction to an earlier claim — and then a correction to THAT
 
-⚠️ We said "Tim hardcoded credentials in the SQL and we are abstracting them."
-**Backwards for these files.** Counted across `pipelines/*.rw|*.sql` (2026-08-28):
+⚠️ **First we said:** "Tim hardcoded credentials in the SQL and we are abstracting them."
+Measured by counting lines containing `%`, `f/driver` scored 4/4 parameterised on
+`sasl.password` and `master` scored 0/4, so we concluded master's rewrite had regressed
+Tim's work.
 
-| key | `f/driver` | `master` |
+⚠️ **That conclusion was WRONG, corrected 2026-08-31.** The measurement was bad: a `%`-count
+scores a **secret reference** as "literal" because it contains no `%`. Master's
+`pipelines/Brand/100-sources.rw` today reads:
+
+    properties.sasl.password = secret kafka_api_secret,
+    schema.registry.password = secret kafka_schema_registry_api_secret
+
+Idris removed the plaintext Confluent credentials on **2026-08-18 (INFRA-1637)** and moved
+them to RisingWave secret objects. That is a security improvement, not a regression.
+
+**What is actually true:** the two branches use **incompatible credential strategies**.
+
+| | `f/driver` (Tim) | `master` (Idris) |
 |---|---|---|
-| `sasl.password` | 4/4 parameterised | **0/4 — all literal** |
-| `sasl.username` | 4/4 parameterised | — |
-| `properties.bootstrap.server` | 4/4 parameterised | — |
-| `mongodb.url` | 4/7 parameterised | **0/4 — all literal** |
-| `%PLACEHOLDER%` total | **69** | 55 |
+| Kafka credentials | `'%KAFKA_SASL_PASSWORD%'` — substituted at apply time | `secret kafka_api_secret` — a RisingWave secret object |
+| Needs premium licence | no | **yes** |
+| Visible via `SHOW CREATE SOURCE` | **yes** | no |
 
-The literal `mongodb://root:abcd@rw-mongodb:27017/` and the live Confluent
-credentials are **master's rewrite**, not Tim's branch. The rewrite regressed
-parameterisation Tim already had.
+Tim's 44 files contain **zero** `secret <name>` references, so merging `f/driver` orphans all
+15 RisingWave secrets — and removes the licence from the critical path.
+
+**The one literal that IS still real:** `mongodb.url = 'mongodb://root:abcd@rw-mongodb:27017/'`
+in master's `pipelines/Brand/400-sink.rw` (lines 63 and 117), plus `collection.name =
+'demo.qa_brands'` — a QA-named collection that would ship to prod as-is. That file is
+currently in `EXCLUDE_RE` and is not applied.
+
+**The lesson worth keeping:** a proxy metric (`does the line contain %`) answered a different
+question than the one asked (`is the credential exposed`). See
+[[transport-failure-not-a-verdict]] — same family: the measurement was sound, it just was not
+measuring the claim.
 
 ## Population claim (not one sample)
 
