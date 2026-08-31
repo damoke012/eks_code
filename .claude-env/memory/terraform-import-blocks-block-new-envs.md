@@ -15,7 +15,7 @@ object that does not exist, Terraform fails the plan: `Cannot import non-existen
 object`. op-usxpress-prod (937464026810) has none of the five — verified 2026-08-31,
 8 of 8 prerequisites missing — so prod's first plan errors before creating anything.
 
-**Fix:** delete the five blocks. It is a state no-op for dev and QA (already adopted) and
+**Fix (done — PR variant-inc/iaac-risingwave-onprem#31, opened 2026-08-31, unmerged):** delete the five blocks. It is a state no-op for dev and QA (already adopted) and
 unblocks prod, which needs creation not adoption. The file's own comment already says
 "Remove these blocks after the first successful apply per environment" — it never happened.
 

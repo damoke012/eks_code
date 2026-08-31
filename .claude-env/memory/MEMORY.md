@@ -49,3 +49,6 @@
 - [RW prod blocked on manifests path](rw-prod-blocked-on-manifests-path.md) — INFRA-1674: absent by design until iaac-risingwave-onprem gets manifests/op-usxpress-prod; op-prod's routes are dev copies
 - [RW prod Terraform via Octopus](risingwave-prod-terraform-via-octopus.md) — env-generic module, 100% Octopus variables, no tfvars; TfApply gate means green ≠ applied (proof = terraform_outputs.yml artifact); dex_entra_client_secret is NOT in TF
 - [TF import blocks block new envs](terraform-import-blocks-block-new-envs.md) — five bare `import` blocks in secrets.tf fail prod's first plan; delete them (state no-op for dev/QA)
+- [On-prem ingress/DNS convention](onprem-ingress-dns-convention.md) — DNS is OURS and automatic: external-dns from VirtualService annotations, zone in network acct 155768531003, owner-id per cluster; targets are the three PLATFORM node IPs; Gateways shared-http (80/443) + tcp-passthrough (4567/5432); a copied VS fails SILENTLY
+- [RW Dex shares one Entra app reg](rw-dex-entra-shared-app-registration.md) — clientID e112d6ce across dev/QA/prod, only the redirect URI differs; a new env is a URI addition and the secret is a COPY, not an identity request
+- [A proxy is not the property](proxy-is-not-the-property.md) — four confident wrong answers from measuring something adjacent: %-counts, resource tags, grep without -P, the wrong CRD

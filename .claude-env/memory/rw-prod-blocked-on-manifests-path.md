@@ -44,3 +44,12 @@ because "QA has no in-cluster runner" is load-bearing in the CI/CD argument.
 
 `feat/op-prod-full-platform` on the cluster repo has **zero unique commits** — already merged,
 not a missing piece.
+
+
+## 2026-08-31 — a second prod gap, found while confirming DNS
+
+op-usxpress-prod has the `shared-http` Istio Gateway (80, 443) but **no `tcp-passthrough`**
+(4567, 5432), which op-usxpress-qa has. The prod `istio-ingressgateway` Service already
+exposes both ports, so only the Gateway resource is missing — `rw-sql` and `rw-postgres`
+would resolve, reach a platform node, and route nowhere. Lives in `iaac-talos-flux-platform`,
+`op-prod` branch, under `infrastructure/`. See [[onprem-ingress-dns-convention]].

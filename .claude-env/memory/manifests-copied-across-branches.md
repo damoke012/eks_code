@@ -104,3 +104,14 @@ are not portable between these clusters.
 (Gateways, Certificates, VirtualServices, ClusterIssuers). It does **not** cover values a
 module already templates per cluster. Check before predicting — calling it everywhere sends
 you to fix things that are correct.
+
+
+## 2026-08-31 — confirmed on the running prod cluster, not just in the repo
+
+`kubectl --context admin@op-usxpress-prod get virtualservice -A`:
+
+    argocd   argocd    [istio-ingress/shared-http]  [argocd.op-prod.usxpress.io]   correct
+    grafana  grafana   [istio-ingress/shared-http]  [grafana.op-dev.usxpress.io]   DEV HOSTNAME
+
+One file, not systemic — Argo CD's is right. But it is the copy pattern reaching live prod
+state. Deserves its own ticket; unrelated to RisingWave.

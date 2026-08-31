@@ -115,3 +115,20 @@ export KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml
 kubectl cluster-info | head -1     # must say 10.10.82.50 — READ it
 ```
 op-dev is **cert-based**: an `aws`/SSO error in the output means you are on an EKS context, not dev.
+
+
+## 2026-08-31 — fourth recurrence: `kubectl config get-contexts` returned NOTHING
+
+Not a wrong context — **no contexts at all**. Every cluster command failed with
+`context "op-usxpress-qa" does not exist` while `~/.kube/` held eleven kubeconfig files.
+The context names are not the cluster names:
+
+| Cluster | File | Context |
+|---|---|---|
+| op-usxpress-dev | `~/.kube/op-usxpress-dev-fresh.yaml` | (cert-based) |
+| op-usxpress-qa | `~/.kube/op-usxpress-qa.yaml` | `admin@op-usxpress-qa` |
+| op-usxpress-prod | `~/.kube/op-usxpress-prod.yaml` | `admin@op-usxpress-prod` |
+
+`scripts/onprem-prod-kubeconfig.sh ops-controller` rebuilt prod cleanly — 13 nodes,
+3 control plane + 10 workers. Set `KUBECONFIG` to the single file and pass `--context`;
+do not rely on a merged `~/.kube/config`.
