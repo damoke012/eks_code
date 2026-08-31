@@ -4,7 +4,7 @@ Idris — three things on INFRA-1675 and PR #18. The first one is my error.
 
 INFRA-1675 says prod = `786352483360`. It should be **`937464026810`** — that is op-usxpress-prod, confirmed against the account today. Dev `700736442855` and QA `527101283767` are both right.
 
-I have corrected the ticket. If you already wired `786352483360` into the workflows, that needs changing before it goes anywhere. And if `786352483360` is a real account we use for something else, tell me which — I want to know how it got into my notes.
+Please update the ticket description when you pick it up. If you already wired `786352483360` into the workflows, that needs changing before it goes anywhere. And if `786352483360` is a real account we use for something else, tell me which — I want to know how it got into my notes.
 
 **2. I cannot find the INFRA-1675 work — where does it live?**
 
