@@ -223,3 +223,43 @@ an account.
 `grep -c` prints `0` *and* exits 1 on no match, so `|| echo 0` appended a second zero and
 `"0\n0" != "0"`. Fixed. The check was right and its verdict was wrong — the same shape as
 the probe that reported UNSUPPORTED because psql was missing.
+
+---
+
+## The Entra long pole does not exist — confirmed 2026-08-31
+
+Dev and QA use **the same Entra app registration**:
+
+    manifests/op-usxpress-dev/risingwave-console.yaml:90  clientID: e112d6ce-cc60-4884-9898-8fcc5b78b0b1
+    manifests/op-usxpress-qa/risingwave-console.yaml:78   clientID: e112d6ce-cc60-4884-9898-8fcc5b78b0b1
+
+with only the redirect URI differing per cluster:
+
+    dev:  https://risingwave-dashboard.op-dev.usxpress.io/dex/callback
+    qa:   https://risingwave-dashboard.op-qa.usxpress.io/dex/callback
+
+Tenant `bbb5a66d-5c9f-482a-969a-a40304b6bc8d`.
+
+So prod is **a third redirect URI on the existing registration**, not a new one. And because
+a client secret belongs to the registration, prod's `dex_entra_client_secret` holds **the
+same value** as QA's — it is a copy, not a request.
+
+That removes an entire long pole. Revised: two external dependencies (DNS, licence), not
+three, and the licence only gates the console.
+
+**Caveats worth keeping:**
+- One registration serving all three environments means one compromised secret reaches prod.
+  Acceptable today because that is already true of dev and QA; worth raising separately, not
+  as a blocker on this stand-up.
+- If that registration is ever DX-managed, a DX deploy recreates it with a new client ID and
+  breaks all three clusters at once. Not verified either way.
+
+## Prod exposure is still unknown
+
+`kubectl get svc -A --field-selector spec.type=LoadBalancer` on op-usxpress-prod returns
+**nothing**. QA's three hostnames resolve to `10.10.82.23`, `10.10.82.139`, `10.10.82.106`
+— three addresses, which reads as node IPs rather than a single VIP.
+
+The route manifests are not in `iaac-risingwave-onprem`; they live in
+`iaac-talos-flux-platform` under `infrastructure/`, per-cluster branch. So the DNS request
+cannot be written until prod's actual ingress targets are known.
