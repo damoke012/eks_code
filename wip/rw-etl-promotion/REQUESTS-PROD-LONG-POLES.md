@@ -1,60 +1,87 @@
-# INFRA-1674 — the three requests to send today
+# INFRA-1674 — what actually needs someone else
 
-None of these depend on us. They are the schedule for RisingWave on op-usxpress-prod;
-everything else is a day or two of our own work that cannot start until they land.
+Revised 2026-08-31 after the confirmation run. **Two of the original three poles were
+not real.** Only DNS goes to another team; the licence gates the console alone.
+
+| Was | Now |
+|---|---|
+| DNS — networking | still networking, but now with exact targets |
+| Prod Entra app registration — identity, multi-day | **not needed.** dev and QA share registration `e112d6ce-cc60-4884-9898-8fcc5b78b0b1`; prod is a third redirect URI on it, and the client secret is the same value QA already holds |
+| RisingWave licence — Steve → Zach | unchanged, but console-only — it does not gate the stack |
 
 ---
 
-## 1 — DNS (networking)
+## The one request to send — DNS (networking)
 
-> We are standing RisingWave up on the on-prem prod cluster (op-usxpress-prod,
-> `10.10.82.52`) and need three A records pointing at the prod ingress, matching the
-> pattern already in place for dev and QA:
+> We are standing RisingWave up on the on-prem prod cluster (op-usxpress-prod) and need
+> three A records, each with the same three targets:
 >
->     risingwave-dashboard.op-prod.usxpress.io
->     rw-sql.op-prod.usxpress.io
->     rw-postgres.op-prod.usxpress.io
+>     risingwave-dashboard.op-prod.usxpress.io   ->  10.10.82.108, 10.10.82.110, 10.10.82.111
+>     rw-sql.op-prod.usxpress.io                 ->  10.10.82.108, 10.10.82.110, 10.10.82.111
+>     rw-postgres.op-prod.usxpress.io            ->  10.10.82.108, 10.10.82.110, 10.10.82.111
 >
-> Same targets and TTLs as the equivalent `op-qa.usxpress.io` records. None of the three
-> resolve today, which blocks the ingress routes from being wired.
+> Those three addresses are the prod cluster's platform worker nodes
+> (`talos-wk-op-prod-platform-1/-2/-3`), which is the same pattern as QA — where
+> `risingwave-dashboard.op-qa.usxpress.io` and its two siblings resolve to
+> `10.10.82.23`, `10.10.82.139`, `10.10.82.106`, the QA platform nodes.
+>
+> Same TTLs as the existing op-qa records. None of the three prod names resolve today.
 >
 > Ticket is INFRA-1674. What lead time should I plan for?
 
 ---
 
-## 2 — Prod Entra app registration (identity)
+## The licence — Steve, for Zach
 
-> RisingWave's console on op-usxpress-prod authenticates through Dex against Entra, the
-> same pattern already live on op-dev and op-qa. We need a **new app registration for the
-> prod environment** — the dev and QA ones cannot be reused, since the redirect URI is
-> per-cluster.
+> The RisingWave console licence has lapsed and we need a valid key for the prod
+> stand-up on op-usxpress-prod.
 >
-> What we need back:
->   * the client ID
->   * a client secret, which we will store at
->     `op-usxpress-prod/risingwave/dex_entra_client_secret` in Secrets Manager
->     (account 937464026810)
->   * the redirect URI registered as
->     `https://risingwave-dashboard.op-prod.usxpress.io/oauth2/callback`
+> Terraform creates the secret regardless — at
+> `op-usxpress-prod/risingwave/console_license_key` — but it writes a literal
+> placeholder (`PLACEHOLDER_INJECT_REAL_LICENSE`) and, because the resource carries
+> `ignore_changes`, never touches it again. So the secret existing proves nothing; the
+> real key goes in by hand afterwards.
 >
-> One thing worth flagging up front: our tenant does not emit a `groups` claim, so
-> authorisation has to key on **app roles**. Please mirror whatever role definitions the
-> op-qa registration carries, so the policy mapping transfers unchanged.
->
-> This one is on the critical path — Terraform builds five of our six secrets, and this
-> is the sixth. Ticket INFRA-1674.
+> This does not block the platform stack, only the console. If it is going to be weeks,
+> I will land the stack without the console and add it after. Ticket INFRA-1674.
 
 ---
 
-## 3 — RisingWave licence (Steve, for Zach)
+## Entra — ours, not a request
 
-> The RisingWave console licence has lapsed, and we need a valid key for the prod
-> stand-up on op-usxpress-prod. Could you pick this up with Zach?
->
-> Terraform will create the secret at
-> `op-usxpress-prod/risingwave/console_license_key` regardless, but it will hold a
-> placeholder — the console will come up and refuse to serve until a real key is in
-> there. So this does not block the platform stack, only the console.
->
-> Ticket INFRA-1674. Timeline would help; if it is going to be weeks, I will land the
-> stack without the console and add it after.
+Prod needs `https://risingwave-dashboard.op-prod.usxpress.io/dex/callback` added as a
+redirect URI on the **existing** registration `e112d6ce-cc60-4884-9898-8fcc5b78b0b1`
+(tenant `bbb5a66d-5c9f-482a-969a-a40304b6bc8d`). Dev and QA already share it; only the
+redirect URI differs per cluster.
+
+Prod's `dex_entra_client_secret` is then a **copy of QA's value**, since a client secret
+belongs to the registration, not the environment.
+
+Two things worth raising separately, neither blocking:
+- one registration across all three environments means one compromised secret reaches prod
+- if that registration is ever DX-managed, a DX deploy recreates it with a new client ID
+  and breaks all three clusters at once. Not verified either way.
+
+---
+
+## Found while confirming — two prod defects that are ours
+
+**1. Prod has no `tcp-passthrough` Gateway.**
+
+    op-usxpress-qa    istio-ingress/shared-http       80,443
+    op-usxpress-qa    istio-ingress/tcp-passthrough   4567,5432
+    op-usxpress-prod  istio-ingress/shared-http       80,443
+    op-usxpress-prod  (tcp-passthrough absent)
+
+The prod `istio-ingressgateway` Service already exposes 4567 and 5432. Only the Gateway
+resource is missing, so once DNS lands, `rw-sql` and `rw-postgres` would resolve, reach
+the node, and find nothing routing them. Lives in `iaac-talos-flux-platform`, `op-prod`
+branch, under `infrastructure/`.
+
+**2. Prod's Grafana VirtualService carries a dev hostname.**
+
+    grafana  virtualservice/grafana  ["istio-ingress/shared-http"]  ["grafana.op-dev.usxpress.io"]
+
+Live on the prod cluster. Argo CD's is correct (`argocd.op-prod.usxpress.io`), so this is
+one copied file rather than a systemic problem — but it is the dev-copy pattern showing up
+on the cluster and not just in the repo. Unrelated to RisingWave; worth its own ticket.
