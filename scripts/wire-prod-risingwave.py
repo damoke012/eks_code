@@ -16,6 +16,7 @@ secrets exist is exactly the failure the header warns about. Read-only without -
 """
 import argparse
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -30,6 +31,27 @@ NEW_NOTE = """# RisingWave: wired 2026-09-01 under INFRA-1674, once ./manifests/
 
 SECRETS = ["postgres", "root", "svc-reporting", "secret_store_private_key",
            "console_license_key", "dex_entra_client_secret"]
+
+
+def already_wired(src: str) -> bool:
+    """Is the risingwave-onprem Kustomization actually present?
+
+    A substring search finds the words in the header comment ("does not exist in
+    iaac-risingwave-onprem yet") and reports a file as wired when nothing is. Parse
+    the documents and look for the resource; fall back to an anchored match only if
+    the YAML will not load.
+    """
+    try:
+        import yaml
+        for doc in yaml.safe_load_all(src):
+            if not isinstance(doc, dict):
+                continue
+            if doc.get("kind") == "Kustomization" and \
+               doc.get("metadata", {}).get("name") == "risingwave-onprem":
+                return True
+        return False
+    except Exception:
+        return bool(re.search(r"^  name: risingwave-onprem$", src, re.MULTILINE))
 
 
 def check_prereqs(profile: str) -> bool:
@@ -85,7 +107,7 @@ def main() -> int:
 
     src = args.infra_yaml.read_text()
 
-    if "risingwave-onprem" in src:
+    if already_wired(src):
         print("  already wired — nothing to do")
         return 0
     if OLD_NOTE not in src:
