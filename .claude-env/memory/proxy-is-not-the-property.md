@@ -13,6 +13,7 @@ Four times now a confident wrong answer came from measuring a proxy instead of t
 | Which bucket did Terraform build? | AWS resource tags | "TF built the empty one" | creation dates + the IRSA policy's `Resource` list — the *untagged* bucket is TF's; the provider sets no `default_tags` |
 | Are there unguarded DROPs? | `git grep` without `-P` | "zero findings" | `grep -rPn` — the lookahead had been silently ignored |
 | Does op-prod have Istio Gateways? | `kubectl get gateway` | zero rows | `gateways.networking.istio.io` — it had resolved the Gateway API CRD instead |
+| Is RisingWave already wired into prod's infra.yaml? | substring `risingwave-onprem` | "already wired — nothing to do" | parsing the documents — the match was inside the header comment *"does not exist in iaac-risingwave-onprem yet"* |
 
 **Why:** every one of these produced a *clean, confident* result. Nothing errored. The proxy
 answered its own question correctly and the answer was attributed to a different question.
