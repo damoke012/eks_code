@@ -34,3 +34,24 @@ Uniform short lengths (every field 6 chars = `<real>`) or a `PLACEHOLDER`/`REAL`
 
 The check that answers it: `scripts/check-postgres-secret-usable.sh` — it authenticates,
 rather than reading a status field.
+
+**Third instance — 2026-09-01, op-usxpress-prod, and it was predicted in advance.**
+`rw-license-key` reported `SecretSynced True` within 4 minutes of the namespace existing.
+The value was the placeholder Terraform generates for `console_license_key`. The console
+rejected it at startup:
+
+```
+license verification failed: license must be a compact JWT
+```
+
+Blast radius beyond the console: `rw-bootstrap-service-accounts` completed every real
+step (groups, `svc_reporting` password sync from Secrets Manager, all grants) and then
+crashlooped on its last step, `relation "anclax.users" does not exist` — the console's
+own schema, which only exists once the console has started. One bad secret value took
+down a Job that has nothing to do with licensing.
+
+**How to apply:** a Terraform-generated secret is a PLACEHOLDER with a real-looking green
+sync. When a module creates a secret it cannot know the value of — a licence, a vendor
+token — record it as outstanding at apply time, not at first failure. And when a Job
+fails, read how far it got: this one's failure named a completely different subsystem.
+See [[risingwave-onprem]], [[flux-stale-dependency-cascade]].

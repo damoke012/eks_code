@@ -114,3 +114,29 @@ QA's bucket, and after correcting it the release still deployed its FROZEN snaps
 `iaac-talos-flux-cluster` master). **Still placeholder content:** `console_license_key`
 holds a generated value, not the real licence (Steve/Zach). A green ExternalSecret will
 not tell you that.
+
+## 2026-09-01 ~19:55 — RisingWave RUNNING on op-usxpress-prod; one blocker left
+
+PR variant-inc/iaac-talos-flux-cluster#38 merged. Flux applied
+`master@sha1:33efcd97`. `RisingWave/risingwave/risingwave` reports RUNNING=True,
+v2.8.2, PostgreSQL metastore + S3 state store. meta/compute/frontend/compactor,
+both ghostunnels and pg-postgresql all 1/1. All seven ExternalSecrets SecretSynced.
+`risingwave-routes` applied `op-prod@sha1:7f0d3b7`.
+
+**Blocker: the console licence.** `console_license_key` holds the value Terraform
+generated. The console rejects it — `license verification failed: license must be a
+compact JWT` — so `risingwave-console` crashloops, the `anclax` schema is never created,
+and `rw-bootstrap-service-accounts` crashloops on its final step
+(`relation "anclax.users" does not exist`) despite completing every group, user and
+grant successfully. ONE secret value, two red components.
+
+Owner: Steve/Zach. Until it lands, prod RisingWave is usable as a database and unusable
+through the console UI.
+
+**Worth checking first:** whether op-usxpress-qa's `console_license_key` already holds a
+real compact JWT. If it does, the same licence very likely covers prod and this unblocks
+today without waiting — verify entitlement before copying, do not assume.
+
+**Also still open:** prod's Entra redirect URI
+`https://risingwave-dashboard.op-prod.usxpress.io/dex/callback` on app registration
+`e112d6ce-cc60-4884-9898-8fcc5b78b0b1`, and a first COMPLETED Velero backup (~6h).
