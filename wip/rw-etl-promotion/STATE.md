@@ -133,9 +133,11 @@ grant successfully. ONE secret value, two red components.
 Owner: Steve/Zach. Until it lands, prod RisingWave is usable as a database and unusable
 through the console UI.
 
-**Worth checking first:** whether op-usxpress-qa's `console_license_key` already holds a
-real compact JWT. If it does, the same licence very likely covers prod and this unblocks
-today without waiting — verify entitlement before copying, do not assume.
+**CHECKED 2026-09-01 — there is nothing to copy.** QA's `console_license_key` holds the
+IDENTICAL 52-char placeholder JSON as prod (`{"R…`, one part; a real licence is a compact
+JWT — three parts, `eyJ`). So no environment has ever had a real console licence. The ask
+to Steve/Zach is ONE licence for the whole on-prem estate, not a prod key. Open: whether
+QA's console pod is actually running (op-qa unreachable at the time — VPN/SSO).
 
 **Also still open:** prod's Entra redirect URI
 `https://risingwave-dashboard.op-prod.usxpress.io/dex/callback` on app registration

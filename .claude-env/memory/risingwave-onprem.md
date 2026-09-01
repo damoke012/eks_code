@@ -162,3 +162,21 @@ substitution produced exactly those, which would fail on the first QA run.
 account id; never interpolate the namespace segment. Do not ask which namespace QA or prod
 should use — the answer is `risingwave`. Related: [[onprem-gitops-repo-topology]],
 [[rw-prod-blocked-on-manifests-path]].
+
+**2026-09-01 — the RisingWave Console licence has NEVER been real, in any environment.**
+`console_license_key` in BOTH `op-usxpress-qa` and `op-usxpress-prod` Secrets Manager
+holds the identical 52-character placeholder JSON that Terraform generates (`{"R…`,
+single part — a real licence is a compact JWT: three dot-separated parts, `eyJ` prefix).
+The prod console rejects it at startup with
+`license verification failed: license must be a compact JWT`.
+
+This corrects the standing assumption that prod merely needed a value QA already had.
+It is not a prod gap and there is nothing to copy — it is an outstanding vendor item for
+the whole on-prem estate. Ask Steve/Zach for ONE licence covering dev/QA/prod, not a
+prod-specific key.
+
+**Open question, answer when op-qa is reachable:** is QA's `risingwave-console` pod
+actually running? If it is, the licence is not required for QA's console version and only
+prod's is gated; if it is crashlooping too, it has been broken since QA stood up and
+nothing alerted, because the ExternalSecret is green either way
+([[eso-secretsynced-not-content-check]]).
