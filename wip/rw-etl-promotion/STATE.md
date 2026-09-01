@@ -26,6 +26,29 @@ append the GitRepository and three Kustomizations (`risingwave-operator`,
 It **refuses** until all six secrets, the IRSA role and the bucket exist. Verified
 refusing 2026-09-01 with 5 secrets + role + bucket missing.
 
+## Preflight — all green 2026-09-01
+
+| Gate | Result |
+|---|---|
+| Release built from current main | `0.5.4`, assembled 18:26, **package `0.5.4`** |
+| Production variables | 10, verified on read-back |
+| Lifecycle reaches production | `iaac-release` (Lifecycles-42) has a production phase |
+| `TfApply` armed for prod? | **No** — first prod deploy is plan-only |
+| Worker pool | `WORKER_POOL [production] = WorkerPools-1582` = `usxpress-production`, 2/2 healthy |
+
+**Do not promote release `0.5.3`.** It selects package `0.5.1` from 2026-08-12, which
+predates both the prod manifests and the import-block removal. Its version and package
+version differ — that inequality is the tell.
+
+**Why `0.5.4` had to be forced.** The releases are cut by `octo.yaml` on push, and the
+version comes from **conventional commit prefixes**. Both INFRA-1674 merges used
+`INFRA-1674: ...`, so no bump, no package, and the run still reported success plus
+"Create/Update Release complete" while updating `0.5.3` in place. `fix: remove the empty
+s3.tf` produced `0.5.4`. See [[conventional-commits-drive-releases]].
+
+The `dpl` deployment failures (branch pushes and 0.5.4) are `WorkerPools-286` having
+0/0 workers. Not ours, not related.
+
 ## The deploy
 
 Octopus project `iaac-risingwave-onprem`, new prod environment:
