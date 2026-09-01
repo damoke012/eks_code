@@ -43,3 +43,22 @@ test showed the proposed config change would have failed for every consumer
 failing call is nearly always possible; do it. See [[dx-entra-app-recreation]].
 
 Related: [[no-test-pods-in-prod]], [[eso-secretsynced-not-content-check]], [[octopus-green-but-no-apply]].
+
+**2026-09-01 — two probes in one script, both reporting absence that was false.**
+`rw-prod-status.sh` was written to answer "is RisingWave done on prod" and got two of
+eleven gates wrong in its first run:
+
+- `aws secretsmanager list-secrets --filters Key=name,Values=op-usxpress-prod/risingwave/`
+  returned **zero** minutes after the Terraform apply log printed all five secret ARNs.
+  The `name` filter tokenises its value; it does not prefix-match a slashed path. The
+  fix is `describe-secret --secret-id <exact name>` per secret — which the older
+  `wire-prod-risingwave.py` already did. A newer script regressed a solved problem.
+- The Gateway check was pinned to `-n istio-ingress` and reported `tcp-passthrough`
+  absent on a cluster where we had confirmed it live a day earlier. Searching all
+  namespaces found it.
+
+**How to apply:** when a fresh check disagrees with something already proven, suspect the
+check first — and before writing a new probe, look for an existing script that measures
+the same thing and copy its method. Both defects were "empty result from the wrong
+selector", which CLAUDE.md rule 5 already names. Neither survived contact with evidence
+we already had in hand. See [[proxy-is-not-the-property]].
