@@ -33,3 +33,26 @@ operator returns a small, clean, wrong answer. See [[adjacent-step-green-signals
 `risingwave-state-op-usxpress-qa`. Prod would need `risingwave-state-op-usxpress-prod`.
 
 Related: [[onprem-app-cicd]], [[manifests-copied-across-branches]], [[prod-standup]].
+
+
+## Two GitRepository sources per cluster — `flux-system` is NOT the platform source
+
+Verified on op-usxpress-prod 2026-08-31:
+
+| GitRepository | URL | Ref | Feeds |
+|---|---|---|---|
+| `flux-system` | `iaac-talos-flux-cluster` | branch `master` | the Kustomization definitions themselves |
+| `infra` | `iaac-talos-flux-platform` | branch `op-<env>` | **every `infrastructure/*` Kustomization** |
+| `gateway-api-upstream` | `kubernetes-sigs/gateway-api` | tag `v1.4.0` | CRDs |
+
+`flux reconcile source git flux-system` fetches the **cluster** repo. Kustomizations such as
+`istio-ingress` and `velero` have `sourceRef: infra`, so reconciling `flux-system` leaves them
+on their cached revision — and they still print
+`✔ applied revision op-prod@sha1:<old>`, which reads as success.
+
+That is the [[adjacent-step-green-signals]] shape in a tool's own output: a true statement
+about the object next to the one that mattered.
+
+**How to apply:** use `flux reconcile kustomization <name> --with-source`, which walks the
+Kustomization's own `sourceRef` and cannot pick the wrong repository. Confirm the revision
+actually moved; a reconcile that reports the same sha it started on has done nothing.

@@ -165,6 +165,12 @@ Two scripts live under `scripts/` to speed up Phase 3:
       an ApplicationSet's `repoURL` from `ssh://` to `https://` and took delivery down for 18
       hours. Check with `scripts/check-argocd-repo-credentials.sh` after any argocd-apps or
       argocd-config change.
+- [ ] **After a merge, did the revision actually move?** Each on-prem cluster has two
+      GitRepositories: `flux-system` (the cluster repo, `master`) and `infra` (the platform
+      repo, branch `op-<env>`). Every `infrastructure/*` Kustomization uses `infra`.
+      Reconciling `flux-system` leaves them on the cached revision and still prints
+      `✔ applied revision …<old sha>`. Use
+      `flux reconcile kustomization <name> --with-source` and confirm the sha changed.
 - [ ] **Did I measure the property, or something adjacent to it?** Four confident wrong
       answers this year came from a proxy: a `%VAR%` count standing in for "is this
       parameterised", resource **tags** standing in for "did Terraform build this"
