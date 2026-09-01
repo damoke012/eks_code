@@ -53,3 +53,4 @@
 - [RW Dex shares one Entra app reg](rw-dex-entra-shared-app-registration.md) — clientID e112d6ce across dev/QA/prod, only the redirect URI differs; a new env is a URI addition and the secret is a COPY, not an identity request
 - [A proxy is not the property](proxy-is-not-the-property.md) — four confident wrong answers from measuring something adjacent: %-counts, resource tags, grep without -P, the wrong CRD
 - [Kustomization enumerates resources](kustomization-enumerates-resources.md) — a file dropped into a Flux dir applies only if that dir's kustomization.yaml lists it; velero and risingwave-routes enumerate, istio-ingress does not
+- [Conventional commits drive releases](conventional-commits-drive-releases.md) — no `fix:`/`feat:` prefix = no version bump = no new package, and the workflow still goes green; check package version == release version
