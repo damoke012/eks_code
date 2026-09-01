@@ -37,9 +37,15 @@ SPACE_ID = "Spaces-2"
 PROJECT_SLUG = "iaac-risingwave-onprem"
 PROD_ENV_NAME = "production"
 APPLY = "--apply" in sys.argv
+# --fix also corrects the VALUE of names that are already production-scoped.
+FIX = "--fix" in sys.argv
 
 PROD_VARS = {
-    "S3_BUCKET":              "lazy-tf-state-425rbol87rmn6c7m",
+    # PROD account 937464026810. 425rbol87rmn6c7m is QA (527101283767) — it was
+    # copied in from setup-octopus-rw.py and the prod worker got 403 HeadObject
+    # on 2026-09-01 because it cannot read a QA-account bucket. Precedent for this
+    # value: wip/prod-standup/add-prod-vars.py TF_VAR_tf_state_bucket.
+    "S3_BUCKET":              "lazy-tf-state-ipp58n854uhpw13x",
     "TF_STATE_KEY":           "iaac/risingwave/op-usxpress-prod.tfstate",
     "AWS_DEFAULT_REGION":     "us-east-2",
     "TfDestroy":              "false",
@@ -55,7 +61,14 @@ PROD_VARS = {
 # check that would have caught op-prod's dev hostnames and dev worker IPs.
 FOREIGN = ["op-usxpress-qa", "op-usxpress-dev", "op-qa", "op-dev",
            "d2t7d36wmf0hbm", "d3a7wcnazdrd6p", "527101283767", "700736442855",
-           "786352483360"]
+           "786352483360",
+           # Bucket names carry an account without naming it: the account-id
+           # entries above do NOT match "lazy-tf-state-425rbol87rmn6c7m", which
+           # is why the QA bucket passed this gate into production scope.
+           "lazy-tf-state-425rbol87rmn6c7m",    # qa  527101283767
+           "lazy-tf-state-usx-qa",              # qa  527101283767
+           "lazy-tf-state-65v583i6my68y6x9",    # dev 700736442855
+           "lazy-tf-state-0k3nc997arlf7k1a"]    # cloud dev
 
 
 def load_api_key():
@@ -121,7 +134,10 @@ print(f"Lifecycle: {lc.get('Name')!r} includes production  ok")
 varset = api("GET", f"/api/{SPACE_ID}/variables/{varset_id}")
 existing = varset.get("Variables", [])
 
-already = {v["Name"] for v in existing
+# Keep the variable objects, not just their names: a name being present says
+# nothing about whether its value is right. S3_BUCKET was production-scoped and
+# wrong for a week under a "verified" read-back that only checked presence.
+current = {v["Name"]: v for v in existing
            if prod_id in ((v.get("Scope") or {}).get("Environment") or [])}
 
 # A TfApply already scoped to production means the next deploy applies with nobody
@@ -137,10 +153,19 @@ backup = Path(f"/tmp/octopus-rw-prod-backup-{ts}.json")
 backup.write_text(json.dumps({"project": project, "variables": varset}, indent=2))
 print(f"Backup:    {backup}\n")
 
-to_add = []
+to_add, to_fix, drift = [], [], []
 for name, value in PROD_VARS.items():
-    if name in already:
-        print(f"  skip (already production-scoped)  {name}")
+    if name in current:
+        have = current[name].get("Value")
+        if have == value:
+            print(f"  ok   {name:<26} = {value}")
+        elif FIX:
+            print(f"  FIX  {name:<26} {have!r} -> {value!r}")
+            current[name]["Value"] = value          # mutates the object inside `existing`
+            to_fix.append(name)
+        else:
+            print(f"  DRIFT {name:<25} is {have!r}, expected {value!r}")
+            drift.append(name)
         continue
     print(f"  ADD  {name:<26} = {value}")
     # Shape copied verbatim from the scripts that worked (setup-octopus-rw.py,
@@ -153,12 +178,17 @@ for name, value in PROD_VARS.items():
         "IsEditable": True, "IsSensitive": False, "Prompt": None, "Type": "String",
     })
 
-if not to_add:
-    print("\nNothing to add.")
+if drift:
+    sys.exit(f"\nABORT: {len(drift)} production-scoped variable(s) hold a different value "
+             f"than this script declares: {drift}\n"
+             "       Re-run with --fix --apply to correct them, or reconcile the script first.")
+
+if not to_add and not to_fix:
+    print("\nNothing to add or fix.")
     sys.exit(0)
 
 if not APPLY:
-    print(f"\nDry run — {len(to_add)} variables would be added. Pass --apply to write.")
+    print(f"\nDry run — would add {len(to_add)} and fix {len(to_fix)}. Pass --apply to write.")
     sys.exit(0)
 
 varset["Variables"] = existing + to_add
@@ -166,14 +196,17 @@ api("PUT", f"/api/{SPACE_ID}/variables/{varset_id}", varset)
 
 # Read it back. A 200 on the PUT is the write being accepted, not the values being there.
 after = api("GET", f"/api/{SPACE_ID}/variables/{varset_id}")
-landed = {v["Name"] for v in after.get("Variables", [])
+landed = {v["Name"]: v.get("Value") for v in after.get("Variables", [])
           if prod_id in ((v.get("Scope") or {}).get("Environment") or [])}
-missing = [v["Name"] for v in to_add if v["Name"] not in landed]
-if missing:
-    print(f"\nWARNING: PUT succeeded but these are not production-scoped on read-back: {missing}")
-else:
-    print(f"\nVerified: all {len(to_add)} are production-scoped on read-back.")
-print(f"Wrote {len(to_add)} production-scoped variables.")
+# Compare VALUES. Presence is a proxy for the property, and the proxy was green
+# while S3_BUCKET pointed production at the QA account's state bucket.
+wrong = [(n, landed.get(n), v) for n, v in PROD_VARS.items() if landed.get(n) != v]
+if wrong:
+    for n, got, want in wrong:
+        print(f"\n  MISMATCH {n}: read back {got!r}, expected {want!r}")
+    sys.exit("PUT succeeded but production scope does not hold the declared values.")
+print(f"\nVerified on read-back: all {len(PROD_VARS)} production-scoped values match.")
+print(f"Wrote {len(to_add)} new, corrected {len(to_fix)}.")
 print(f"Revert: PUT {backup} back to /api/{SPACE_ID}/variables/{varset_id}")
 print("\nNext: create a release, deploy to production, and READ THE PLAN.")
 print("Expect all creates and zero destroys. Any destroy = stop.")

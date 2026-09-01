@@ -27,3 +27,20 @@ not parameterisation — the file is. An empty result is only absence once the s
 resource kind are confirmed to resolve. When a proxy is the only thing available, say which
 proxy was used and what it cannot see. Related:
 [[eso-secretsynced-not-content-check]], [[merged-defect-authorizes-itself]].
+
+**Instance 5 — 2026-09-01, and the first inside a guard written for this class.**
+`setup-octopus-rw-prod.py` wrote QA's state bucket `lazy-tf-state-425rbol87rmn6c7m` into
+RisingWave's **production** scope. Two of my own checks passed over it:
+
+- the foreign-literal gate matched **account IDs** (`527101283767`) — but a bucket name
+  does not contain its account, so the QA bucket read as clean;
+- the post-write read-back matched **names present in production scope**, never values,
+  and printed "Verified: all 10 are production-scoped".
+
+Cost: prod deploy 0.5.6 died at `terraform init` with 403 HeadObject from the prod worker
+against a QA-account bucket. Prod's bucket is `lazy-tf-state-ipp58n854uhpw13x`.
+
+**How to apply:** when a value is an *identifier that resolves to something* — a bucket, an
+ARN, an issuer, a role name — the environment check must test what it resolves to, or list
+the other environments' identifiers literally. And a write-verify compares VALUES; confirming
+the key is present is the proxy, not the property. See [[terraform-state-bucket-is-per-account]].

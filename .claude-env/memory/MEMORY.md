@@ -54,3 +54,4 @@
 - [A proxy is not the property](proxy-is-not-the-property.md) — four confident wrong answers from measuring something adjacent: %-counts, resource tags, grep without -P, the wrong CRD
 - [Kustomization enumerates resources](kustomization-enumerates-resources.md) — a file dropped into a Flux dir applies only if that dir's kustomization.yaml lists it; velero and risingwave-routes enumerate, istio-ingress does not
 - [Conventional commits drive releases](conventional-commits-drive-releases.md) — no `fix:`/`feat:` prefix = no version bump = no new package, and the workflow still goes green; check package version == release version
+- [TF state bucket is per-account](terraform-state-bucket-is-per-account.md) — dev/QA/prod each have their own `lazy-tf-state-*`; a copied backend 403s on first state read, never at init

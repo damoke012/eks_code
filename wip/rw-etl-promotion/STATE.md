@@ -83,3 +83,12 @@ it is written only on the apply branch.
 - **Entra redirect URI** for prod's callback — console, not yet done.
 - **Revoke**: the Atlassian API token and both Confluent credential pairs. Still live.
 - **Job 130 wedged on op-dev** — needs Tim's call on `RECOVER`.
+
+## 2026-09-01 — release 0.5.6 deployed to production, FAILED at terraform init (403)
+
+Release `0.5.6` (channel `release`, pins package `0.5.5`) reached the production worker and
+died reading state: `S3_BUCKET` in production scope was **QA's** bucket
+`lazy-tf-state-425rbol87rmn6c7m`. Prod's is `lazy-tf-state-ipp58n854uhpw13x`. Plan-only run,
+nothing created. Full write-up + why two of my own checks passed over it:
+`PROD-DEPLOY-403-2026-09-01.md`. Fix is in `scripts/setup-octopus-rw-prod.py` (`--fix`).
+Release 0.5.6 is still good — re-deploy it after the variable is corrected.
