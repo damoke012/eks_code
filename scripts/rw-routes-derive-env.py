@@ -125,11 +125,19 @@ def main() -> int:
         print(f"\n  dry run — {len(pending)} files. Pass --write (on the {dst_ref} branch) to apply.")
         return 0
 
+    # The local branch NAME is not evidence — a fix/... branch off op-prod is correct
+    # and would fail a name check. What matters is which branch it tracks.
     branch = git(args.repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    if f"op-{args.dst}" not in branch:
-        print(f"\nABORT  working tree is on '{branch}', which is not a op-{args.dst} branch.",
+    upstream = git(args.repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
+    if not upstream:
+        print(f"\nABORT  '{branch}' tracks nothing, so the destination cannot be confirmed.\n"
+              f"       Branch from origin/op-{args.dst} and retry.", file=sys.stderr)
+        return 5
+    if not upstream.endswith(f"op-{args.dst}"):
+        print(f"\nABORT  '{branch}' tracks '{upstream}', not origin/op-{args.dst}.",
               file=sys.stderr)
         return 5
+    print(f"  branch      {branch} -> tracks {upstream}")
 
     for target, content in pending:
         target.parent.mkdir(parents=True, exist_ok=True)
