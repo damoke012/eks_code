@@ -55,3 +55,4 @@
 - [Kustomization enumerates resources](kustomization-enumerates-resources.md) — a file dropped into a Flux dir applies only if that dir's kustomization.yaml lists it; velero and risingwave-routes enumerate, istio-ingress does not
 - [Conventional commits drive releases](conventional-commits-drive-releases.md) — no `fix:`/`feat:` prefix = no version bump = no new package, and the workflow still goes green; check package version == release version
 - [TF state bucket is per-account](terraform-state-bucket-is-per-account.md) — dev/QA/prod each have their own `lazy-tf-state-*`; a copied backend 403s on first state read, never at init
+- [Octopus releases freeze variables](octopus-release-freezes-variables.md) — a release snapshots project variables at creation; correcting a variable never reaches an existing release until the snapshot is refreshed

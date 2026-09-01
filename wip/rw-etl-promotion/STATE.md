@@ -92,3 +92,25 @@ died reading state: `S3_BUCKET` in production scope was **QA's** bucket
 nothing created. Full write-up + why two of my own checks passed over it:
 `PROD-DEPLOY-403-2026-09-01.md`. Fix is in `scripts/setup-octopus-rw-prod.py` (`--fix`).
 Release 0.5.6 is still good — re-deploy it after the variable is corrected.
+
+## 2026-09-01 19:35 — PROD TERRAFORM APPLIED (INFRA-1674)
+
+Release `0.5.6` -> `production`, `TfApply=true` armed for the one run then disarmed.
+`Apply complete! Resources: 20 added, 0 changed, 0 destroyed.` Artifact
+`terraform_outputs.yml` uploaded — that, not the green task, is the proof it applied.
+
+Created in 937464026810 / us-east-2:
+- `arn:aws:iam::937464026810:role/op-usxpress-prod-risingwave` (IRSA, trust on
+  `d3rxit8f4yvshu.cloudfront.net`) + inline policy `risingwave-s3-access`
+- `s3://risingwave-state-op-usxpress-prod` — versioning, SSE, public-access-block on
+- five Secrets Manager secrets + versions under `op-usxpress-prod/risingwave/`:
+  `root`, `postgres`, `svc-reporting`, `secret_store_private_key`, `console_license_key`
+
+Two failed runs preceded it, both `403 HeadObject`: `S3_BUCKET` in production scope held
+QA's bucket, and after correcting it the release still deployed its FROZEN snapshot. See
+`PROD-DEPLOY-403-2026-09-01.md` and [[octopus-release-freezes-variables]].
+
+**Next:** wire Flux (`scripts/wire-prod-risingwave.py --write` -> PR to
+`iaac-talos-flux-cluster` master). **Still placeholder content:** `console_license_key`
+holds a generated value, not the real licence (Steve/Zach). A green ExternalSecret will
+not tell you that.
