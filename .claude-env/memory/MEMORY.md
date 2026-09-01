@@ -52,3 +52,4 @@
 - [On-prem ingress/DNS convention](onprem-ingress-dns-convention.md) — DNS is OURS and automatic: external-dns from VirtualService annotations, zone in network acct 155768531003, owner-id per cluster; targets are the three PLATFORM node IPs; Gateways shared-http (80/443) + tcp-passthrough (4567/5432); a copied VS fails SILENTLY
 - [RW Dex shares one Entra app reg](rw-dex-entra-shared-app-registration.md) — clientID e112d6ce across dev/QA/prod, only the redirect URI differs; a new env is a URI addition and the secret is a COPY, not an identity request
 - [A proxy is not the property](proxy-is-not-the-property.md) — four confident wrong answers from measuring something adjacent: %-counts, resource tags, grep without -P, the wrong CRD
+- [Kustomization enumerates resources](kustomization-enumerates-resources.md) — a file dropped into a Flux dir applies only if that dir's kustomization.yaml lists it; velero and risingwave-routes enumerate, istio-ingress does not

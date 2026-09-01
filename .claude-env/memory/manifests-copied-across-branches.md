@@ -115,3 +115,28 @@ you to fix things that are correct.
 
 One file, not systemic — Argo CD's is right. But it is the copy pattern reaching live prod
 state. Deserves its own ticket; unrelated to RisingWave.
+
+
+## 2026-08-31 — the tenth instance, and what finally makes it findable
+
+op-prod's entire `infrastructure/risingwave-routes/` was a verbatim dev copy: dev hostnames
+on four VirtualServices and both Certificates, dev's seven worker addresses in every
+external-dns target. op-qa was the ninth (INFRA-1645, 2026-08-20). Neither showed as broken.
+
+**Why this class stays invisible:** external-dns runs `--policy=sync` but keys ownership on
+`--txt-owner-id` in a DynamoDB registry. A route publishing another environment's hostname is
+**skipped** — no error, no event, no record, and no conflict with the cluster that does own
+it. The manifest is green, the Kustomization is green, and the hostname simply does not exist.
+
+`scripts/onprem-dns-claims.sh dev qa prod` now flags both halves: a hostname belonging to
+another environment, and a target IP that is not a node of the cluster claiming it. That is
+the check that turns this class from invisible into a one-line report.
+
+**Deriving beats patching.** Rewriting prod's files from op-qa's *corrected* copies inherited
+the INFRA-1645 fix and its explanation; patching prod's dev copies in place would have
+inherited neither. But deriving carries the source's **prose** too — the generated prod files
+initially claimed "Corrected for op-usxpress-qa", "Ninth instance", "the same three
+addresses". Correct configuration, false documentation. Rewrite the comments in the same pass,
+or the next reader is misled by a file that is otherwise right.
+
+See [[onprem-ingress-dns-convention]], [[proxy-is-not-the-property]].
