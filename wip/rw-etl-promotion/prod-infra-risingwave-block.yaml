@@ -1,0 +1,163 @@
+---
+# ==============================================================================
+# RisingWave platform layer — INFRA-1674. Mirrors the op-usxpress-qa wiring
+# (clusters/op-usxpress-qa/flux-system/infra.yaml), which itself mirrors dev.
+#
+# Shared `flux-system` credential, not a per-repo deploy key — dev and QA both
+# prove the org-scoped token reads this repo.
+#
+# prune: false on `risingwave-onprem` is protect-RW insurance: Flux may create
+# and update in the risingwave namespace but can NEVER delete there.
+#
+# Compute sizing below is copied from op-usxpress-qa deliberately. Prod carries
+# no RisingWave traffic yet, so any larger number would be a guess nobody could
+# later justify. Size it against real load once the pipeline runs here, and
+# treat these values as a starting point, not a prod standard.
+# ==============================================================================
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: iaac-risingwave-onprem
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  ref:
+    branch: main
+  url: https://github.com/variant-inc/iaac-risingwave-onprem.git
+  secretRef:
+    name: flux-system
+---
+# Operator first: installs CRDs + controller so the RisingWave CR can be applied.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: risingwave-operator
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./manifests/op-usxpress-prod/operator
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: iaac-risingwave-onprem
+  dependsOn:
+    - name: cert-manager
+  wait: true
+  timeout: 10m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: risingwave-onprem
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./manifests/op-usxpress-prod
+  prune: false
+  sourceRef:
+    kind: GitRepository
+    name: iaac-risingwave-onprem
+  patches:
+    - target:
+        group: risingwave.risingwavelabs.com
+        version: v1alpha1
+        kind: RisingWave
+        name: risingwave
+        namespace: risingwave
+      patch: |
+        - op: replace
+          path: /spec/components/compute/nodeGroups/0/template/spec/resources/requests/cpu
+          value: 250m
+        - op: replace
+          path: /spec/components/compute/nodeGroups/0/template/spec/resources/requests/memory
+          value: 512Mi
+        - op: replace
+          path: /spec/components/compute/nodeGroups/0/template/spec/resources/limits/cpu
+          value: "1"
+        - op: replace
+          path: /spec/components/compute/nodeGroups/0/template/spec/resources/limits/memory
+          value: 1Gi
+        - op: add
+          path: /spec/components/meta/nodeGroups/0/template/spec/env/-
+          value:
+            name: RW_SECRET_STORE_PRIVATE_KEY_HEX
+            valueFrom:
+              secretKeyRef:
+                name: rw-secret-store-private-key
+                key: RW_SECRET_STORE_PRIVATE_KEY_HEX
+        - op: add
+          path: /spec/components/frontend/nodeGroups/0/template/spec/env
+          value:
+            - name: RW_SECRET_STORE_PRIVATE_KEY_HEX
+              valueFrom:
+                secretKeyRef:
+                  name: rw-secret-store-private-key
+                  key: RW_SECRET_STORE_PRIVATE_KEY_HEX
+        - op: replace
+          path: /spec/stateStore
+          value:
+            dataDirectory: hummock
+            s3:
+              bucket: risingwave-state-op-usxpress-prod
+              credentials:
+                accessKeyRef: AccessKeyID
+                secretAccessKeyRef: SecretAccessKey
+                useServiceAccount: true
+              region: us-east-2
+    - target:
+        group: helm.toolkit.fluxcd.io
+        kind: HelmRelease
+        name: postgres
+        namespace: risingwave
+      patch: |
+        - op: replace
+          path: /spec/chart/spec/sourceRef/namespace
+          value: risingwave
+        - op: replace
+          path: /spec/values/auth/existingSecret
+          value: pg-credentials
+    - target:
+        group: helm.toolkit.fluxcd.io
+        kind: HelmRelease
+        name: prometheus
+        namespace: risingwave
+      patch: |
+        - op: replace
+          path: /spec/chart/spec/sourceRef/namespace
+          value: risingwave
+        - op: add
+          path: /spec/values/prometheus-node-exporter
+          value:
+            enabled: false
+  dependsOn:
+    - name: risingwave-operator
+    - name: external-secrets
+  healthCheckExprs:
+    - apiVersion: risingwave.risingwavelabs.com/v1alpha1
+      kind: RisingWave
+      current: status.conditions.filter(c, c.type == 'Running').exists(c, c.status == 'True')
+      inProgress: status.conditions.filter(c, c.type == 'Upgrading').exists(c, c.status == 'True')
+      failed: status.conditions.filter(c, c.type == 'Running').exists(c, c.status == 'False')
+  wait: true
+  timeout: 10m0s
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: risingwave-routes
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: istio-ingress
+    - name: cert-manager-issuers
+  interval: 10m0s
+  retryInterval: 5m0s
+  path: ./infrastructure/risingwave-routes
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  wait: true
+  timeout: 10m0s
