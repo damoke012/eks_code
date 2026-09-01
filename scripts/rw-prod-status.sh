@@ -45,11 +45,22 @@ if command -v aws >/dev/null 2>&1 && aws sts get-caller-identity --profile ops-c
       && ok "IRSA role $role" || no "IAM role ${CLUSTER}-risingwave absent"
     aws s3api head-bucket --bucket "risingwave-state-${CLUSTER}" --profile ops-controller >/dev/null 2>&1 \
       && ok "bucket risingwave-state-${CLUSTER}" || no "bucket risingwave-state-${CLUSTER} absent"
-    n=$(aws secretsmanager list-secrets --profile ops-controller \
-          --filters Key=name,Values="${CLUSTER}/risingwave/" \
-          --query 'length(SecretList)' --output text 2>/dev/null)
-    [ "${n:-0}" -ge 5 ] && ok "$n secrets under ${CLUSTER}/risingwave/" \
-                        || no "only ${n:-0} secrets under ${CLUSTER}/risingwave/ (want 5)"
+    # describe-secret by exact name, one per secret. `list-secrets --filters
+    # Key=name,Values=op-usxpress-prod/risingwave/` returns ZERO here: the filter
+    # tokenises its value and does not prefix-match a slashed path, so it reported
+    # all five absent on 2026-09-01 minutes after the apply log printed their ARNs.
+    # wire-prod-risingwave.py already used describe-secret; this now matches it.
+    for sname in root postgres svc-reporting secret_store_private_key console_license_key dex_entra_client_secret; do
+      out=$(aws secretsmanager describe-secret --secret-id "${CLUSTER}/risingwave/${sname}" \
+              --profile ops-controller --query 'Name' --output text 2>&1)
+      if [ $? -eq 0 ] && [ -n "$out" ] && [ "$out" != "None" ]; then
+        ok "secret $out"
+      elif printf '%s' "$out" | grep -q "ResourceNotFoundException"; then
+        no "secret ${CLUSTER}/risingwave/${sname} absent"
+      else
+        huh "secret ${CLUSTER}/risingwave/${sname}: ${out}"
+      fi
+    done
   fi
 else
   huh "no usable ops-controller AWS session — re-run after 'aws sso login --profile ops-controller'"
@@ -110,9 +121,12 @@ else
 fi
 
 gate "6. Ingress — Gateways, VirtualServices, and DNS that resolves"
+# Search ALL namespaces and report where it lives. Pinning istio-ingress reported
+# both Gateways absent on 2026-09-01 against a cluster we had confirmed carries
+# tcp-passthrough — an empty result from the wrong selector, not an absence.
 for g in shared-http tcp-passthrough; do
-  "$K" op-prod -- -n istio-ingress get gateway "$g" >/dev/null 2>&1 \
-    && ok "Gateway $g" || no "Gateway $g absent"
+  hit=$("$K" op-prod -- get gateway.networking.istio.io -A --no-headers 2>/dev/null | awk -v g="$g" '$2==g {print $1}')
+  [ -n "$hit" ] && ok "Gateway $g in namespace $hit" || no "Gateway $g absent in every namespace"
 done
 vs=$("$K" op-prod -- -n "$NS" get virtualservice -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.hosts[*]}{"\n"}{end}' 2>/dev/null)
 if [ -z "$vs" ]; then
