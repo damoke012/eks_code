@@ -20,7 +20,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-BASE = "https://usxpress.octopus.app"
+BASE = "https://octopus.usxpress.io"
 
 
 def load_api_key():
