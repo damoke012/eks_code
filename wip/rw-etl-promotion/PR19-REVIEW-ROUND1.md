@@ -49,3 +49,28 @@ Good work, and thank you for pulling the rename out. Everything I raised is addr
 - Test-plan items 3 and 4 are still unchecked. Item 4 in particular (`.sql` refused when `POSTGRES_SERVER` is empty) is the one I would most like to see actually run, rather than reasoned about.
 
 Once the `RW_NS` mapping is in, I am happy for this to merge.
+
+---
+
+## Round 2 — `a2876651` — APPROVED 2026-09-01
+
+`RW_NS` mapped per environment in `pipeline.yaml` and `user-access-deploy.yaml`
+(dev → `risingwave-2`, qa and prod → `risingwave`), declared in each `validate` job's
+`outputs:` block (`pipeline.yaml:31`, `user-access-deploy.yaml:64`) and consumed as
+`needs.validate.outputs.rw_ns`.
+
+The outputs declaration was the specific thing checked. Without it the expression
+resolves to empty and the secret id becomes `op-usxpress-qa//postgres` — an empty path
+segment that fails looking like a missing secret rather than a wiring bug. Declared in
+both.
+
+One commit, no new files, +5 net. No scope creep.
+
+**Outcome:** approved. Outstanding, neither blocking: test-plan item 4 (`.sql` refused
+when `POSTGRES_SERVER` is empty), and #18, whose workflow half is now redundant.
+
+**Reviewer error worth keeping:** Round 1 asked "which namespace should QA and prod read
+from?" as an open question. It was not open — `risingwave-2` is dev-only and never
+promoted. The evidence was already in hand (dev has both, QA has only `risingwave`) and
+was still framed as a decision. Corrected by an addendum on the PR, and the rule is now
+in `risingwave-onprem` memory and the `pr-review-rw` skill so it is not re-derived.
