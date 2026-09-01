@@ -35,3 +35,24 @@ Related: Octopus reads `TF_VAR_*` (env.auto.tfvars), NOT `-var-file`, so committ
 `deploy/terraform/envs/qa.tfvars` changes nothing at deploy time. Also open: the post-apply Flux bootstrap
 step fails on an empty variable (`rm: missing operand`) — harmless while Flux is already bootstrapped, fatal
 for rebuild-to-validate. See [[onprem-deploy-via-octopus]], [[onprem-human-access-model]], [[prod-standup]].
+
+
+## Writing a variable: the shape Octopus requires (2026-09-01)
+
+A `PUT /api/{space}/variables/{varsetId}` answers **HTTP 500 "Object reference not set to
+an instance of an object"** if a variable object omits `Id` or `Type`. It is a null
+reference in Octopus, not a permissions or payload-size problem, and the message says
+nothing about the missing field.
+
+The shape that works — used by `setup-octopus-rw.py` and `add-prod-vars.py`:
+
+    {"Id": "", "Name": name, "Value": value, "Description": "...",
+     "Scope": {"Environment": [env_id]},
+     "IsEditable": True, "IsSensitive": False, "Prompt": None, "Type": "String"}
+
+The PUT replaces the whole variable set, so a 500 leaves nothing written — but read the
+set back afterwards regardless: a 200 is the write being accepted, not the values being
+present.
+
+`scripts/setup-octopus-rw-prod.py` does the read-back and refuses if `TfApply` is already
+scoped to the target environment.

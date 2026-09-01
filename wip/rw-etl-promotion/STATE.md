@@ -1,7 +1,11 @@
 # INFRA-1674 — RisingWave on op-usxpress-prod — state at 2026-09-01
 
-**One action remains: the Octopus prod deploy of `iaac-risingwave-onprem`.**
+**One action remains: create a release and deploy to `production`.**
 Everything else is merged, live, or staged behind it.
+
+Octopus prod variables written and verified 2026-09-01 — 10 production-scoped entries on
+`Projects-10241`. `TfApply` deliberately NOT among them, so the first prod deploy is
+plan-only on its own.
 
 ## Done and live
 
