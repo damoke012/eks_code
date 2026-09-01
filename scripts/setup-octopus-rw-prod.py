@@ -143,9 +143,15 @@ for name, value in PROD_VARS.items():
         print(f"  skip (already production-scoped)  {name}")
         continue
     print(f"  ADD  {name:<26} = {value}")
-    to_add.append({"Name": name, "Value": value, "IsSensitive": False,
-                   "IsEditable": True, "Scope": {"Environment": [prod_id]},
-                   "Prompt": None})
+    # Shape copied verbatim from the scripts that worked (setup-octopus-rw.py,
+    # add-prod-vars.py). Omitting "Id" or "Type" makes Octopus answer the PUT with
+    # HTTP 500 "Object reference not set to an instance of an object".
+    to_add.append({
+        "Id": "", "Name": name, "Value": value,
+        "Description": "RisingWave prod deploy (INFRA-1674)",
+        "Scope": {"Environment": [prod_id]},
+        "IsEditable": True, "IsSensitive": False, "Prompt": None, "Type": "String",
+    })
 
 if not to_add:
     print("\nNothing to add.")
@@ -157,7 +163,17 @@ if not APPLY:
 
 varset["Variables"] = existing + to_add
 api("PUT", f"/api/{SPACE_ID}/variables/{varset_id}", varset)
-print(f"\nWrote {len(to_add)} production-scoped variables.")
+
+# Read it back. A 200 on the PUT is the write being accepted, not the values being there.
+after = api("GET", f"/api/{SPACE_ID}/variables/{varset_id}")
+landed = {v["Name"] for v in after.get("Variables", [])
+          if prod_id in ((v.get("Scope") or {}).get("Environment") or [])}
+missing = [v["Name"] for v in to_add if v["Name"] not in landed]
+if missing:
+    print(f"\nWARNING: PUT succeeded but these are not production-scoped on read-back: {missing}")
+else:
+    print(f"\nVerified: all {len(to_add)} are production-scoped on read-back.")
+print(f"Wrote {len(to_add)} production-scoped variables.")
 print(f"Revert: PUT {backup} back to /api/{SPACE_ID}/variables/{varset_id}")
 print("\nNext: create a release, deploy to production, and READ THE PLAN.")
 print("Expect all creates and zero destroys. Any destroy = stop.")
