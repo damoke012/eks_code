@@ -163,7 +163,10 @@ account id; never interpolate the namespace segment. Do not ask which namespace 
 should use — the answer is `risingwave`. Related: [[onprem-gitops-repo-topology]],
 [[rw-prod-blocked-on-manifests-path]].
 
-**2026-09-01 — the RisingWave Console licence has NEVER been real, in any environment.**
+**2026-09-01 — no environment currently holds a real Console licence.**
+(Corrected in place: an earlier line here said it had "NEVER been real anywhere". The
+evidence shows only that both hold the placeholder NOW —
+`REQUESTS-PROD-LONG-POLES.md` records the licence as *lapsed*, i.e. there was one once.)
 `console_license_key` in BOTH `op-usxpress-qa` and `op-usxpress-prod` Secrets Manager
 holds the identical 52-character placeholder JSON that Terraform generates (`{"R…`,
 single part — a real licence is a compact JWT: three dot-separated parts, `eyJ` prefix).
@@ -180,3 +183,20 @@ actually running? If it is, the licence is not required for QA's console version
 prod's is gated; if it is crashlooping too, it has been broken since QA stood up and
 nothing alerted, because the ExternalSecret is green either way
 ([[eso-secretsynced-not-content-check]]).
+
+**Two different consumers of one key — do not conflate them.**
+1. **`CREATE SECRET`**, the premium SQL feature. Deliberately OFF the critical path per
+   `WRITEUP-FOR-IDRIS-2026-08-31.md` §4: ship apply-time substitution, convert later.
+   Tim's 44 SQL files use zero `secret <name>` references. That decision is untouched by
+   the console failure.
+2. **The Console binary**, which refuses to start without a compact JWT.
+
+The placeholder is the literal `PLACEHOLDER_INJECT_REAL_LICENSE` — 31 chars, inside
+`{"RW_LICENSE_KEY": ...}` (52 chars of JSON), written by Terraform with `ignore_changes`
+so it is never touched again.
+
+**Correction to "console-only":** the console failing ALSO leaves
+`rw-bootstrap-service-accounts` in permanent CrashLoopBackOff — it completes every group,
+user and grant, then dies reconciling console UI ownership against `anclax.users`, a
+schema only the console creates. The users and grants DO get applied; what you get is a
+permanently red Job, not a missing service account.
