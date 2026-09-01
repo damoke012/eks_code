@@ -108,6 +108,14 @@ def report(space, slug, want_vars):
             print(f"      present  {name:<26} [{scopes_of(v, env_by_id)}] = {val}")
 
     try:
+        rels = api(f"/api/{space}/projects/{project['Id']}/releases?take=10")["Items"]
+        print("\n  recent releases (created by the octo.yaml push, not by hand):")
+        for r in rels:
+            print(f"      {r['Version']:<46} {r.get('Assembled','')[:16]}")
+    except Exception as e:
+        print(f"\n  (releases unavailable: {e})")
+
+    try:
         dashboard = api(f"/api/{space}/progression/{project['Id']}")
         print("\n  most recent deployment per environment:")
         seen = {}
