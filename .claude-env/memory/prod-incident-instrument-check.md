@@ -62,3 +62,20 @@ check first — and before writing a new probe, look for an existing script that
 the same thing and copy its method. Both defects were "empty result from the wrong
 selector", which CLAUDE.md rule 5 already names. Neither survived contact with evidence
 we already had in hand. See [[proxy-is-not-the-property]].
+
+**Same script, third defect, same day — the unpinned region.**
+`aws secretsmanager describe-secret` without `--region` reported all six prod secrets
+`ResourceNotFoundException` while `wire-prod-risingwave.py`, which passes
+`--region us-east-2`, confirmed all six present seconds later on the same machine with
+the same profile.
+
+**ResourceNotFoundException is region-scoped.** It means "not in the region this call
+went to", never "does not exist". Discriminating it from a transport error — which the
+script did correctly — is not enough if the region itself is wrong: the call succeeds,
+the answer is authoritative, and it is about the wrong place.
+
+**How to apply:** CLAUDE.md rule 2 says pin the environment with an explicit flag; for
+AWS that is `--profile` **and** `--region` on every regional call. A command that could
+hit more than one region is a bug even when it works. Three defects in one new checker
+(tokenising filter, wrong namespace, unpinned region) all produced confident false
+absences — which is why a new probe disagreeing with proven evidence is the suspect.

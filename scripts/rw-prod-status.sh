@@ -17,6 +17,13 @@ K="$SCRIPT_DIR/onprem-kubectl.sh"
 NS=risingwave          # QA and prod are always `risingwave`; risingwave-2 is dev-only.
 CLUSTER=op-usxpress-prod
 ACCT=937464026810
+# Pin the region on every regional call. Secrets Manager answers
+# ResourceNotFoundException for a secret that exists in ANOTHER region, which
+# is indistinguishable from "absent" unless you pinned the region. Omitting it
+# reported all six prod secrets missing on 2026-09-01 while
+# wire-prod-risingwave.py -- which passes --region -- confirmed all six ok
+# seconds later on the same machine, same profile. CLAUDE.md rule 2.
+REGION=us-east-2
 
 pass=0; fail=0; unknown=0
 gate() { printf '\n== %s\n' "$*"; }
@@ -43,7 +50,8 @@ if command -v aws >/dev/null 2>&1 && aws sts get-caller-identity --profile ops-c
     role=$(aws iam get-role --role-name "${CLUSTER}-risingwave" --profile ops-controller \
              --query 'Role.Arn' --output text 2>/dev/null) \
       && ok "IRSA role $role" || no "IAM role ${CLUSTER}-risingwave absent"
-    aws s3api head-bucket --bucket "risingwave-state-${CLUSTER}" --profile ops-controller >/dev/null 2>&1 \
+    aws s3api head-bucket --bucket "risingwave-state-${CLUSTER}" \
+      --profile ops-controller --region "$REGION" >/dev/null 2>&1 \
       && ok "bucket risingwave-state-${CLUSTER}" || no "bucket risingwave-state-${CLUSTER} absent"
     # describe-secret by exact name, one per secret. `list-secrets --filters
     # Key=name,Values=op-usxpress-prod/risingwave/` returns ZERO here: the filter
@@ -52,11 +60,11 @@ if command -v aws >/dev/null 2>&1 && aws sts get-caller-identity --profile ops-c
     # wire-prod-risingwave.py already used describe-secret; this now matches it.
     for sname in root postgres svc-reporting secret_store_private_key console_license_key dex_entra_client_secret; do
       out=$(aws secretsmanager describe-secret --secret-id "${CLUSTER}/risingwave/${sname}" \
-              --profile ops-controller --query 'Name' --output text 2>&1)
+              --profile ops-controller --region "$REGION" --query 'Name' --output text 2>&1)
       if [ $? -eq 0 ] && [ -n "$out" ] && [ "$out" != "None" ]; then
         ok "secret $out"
       elif printf '%s' "$out" | grep -q "ResourceNotFoundException"; then
-        no "secret ${CLUSTER}/risingwave/${sname} absent"
+        no "secret ${CLUSTER}/risingwave/${sname} absent in $REGION"
       else
         huh "secret ${CLUSTER}/risingwave/${sname}: ${out}"
       fi
