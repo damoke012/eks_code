@@ -25,7 +25,12 @@ import sys
 ROUTES = "infrastructure/risingwave-routes"
 ARGOCD_VS = "infrastructure/argocd-config/virtualservice-argocd.yaml"
 TARGET_KEY = "external-dns.alpha.kubernetes.io/target"
-TARGET_RE = re.compile(rf'({re.escape(TARGET_KEY)}:\s*)"([^"]*)"')
+# The value may be quoted or bare — QA quotes it, prod does not. Requiring quotes
+# made the script report "carries no target" for a file that plainly has one.
+TARGET_RE = re.compile(
+    rf'({re.escape(TARGET_KEY)}:[ \t]*)"?([^"\n]+?)"?[ \t]*$',
+    re.MULTILINE,
+)
 
 
 def git(repo, *args):
@@ -97,7 +102,7 @@ def main() -> int:
 
         out = body.replace(f"op-{args.src}", f"op-{args.dst}")
         subs = body.count(f"op-{args.src}")
-        out, n = TARGET_RE.subn(lambda mm: f'{mm.group(1)}"{dst_target}"', out)
+        out, n = TARGET_RE.subn(lambda mm: f'{mm.group(1)}"{dst_target}"', out)  # always emit quoted
 
         # Anything still naming another environment is a value neither rule reached.
         for other in ("dev", "qa", "prod"):
