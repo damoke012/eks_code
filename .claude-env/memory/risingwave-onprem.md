@@ -136,3 +136,29 @@ Fix (all on branch `fix/qa-review` → PR #23, commit 047e712, + Octopus API):
 - **`aws_profile` landmine**: `main.tf` provider had `profile = var.aws_profile` with no default → fails on the Octopus worker (role auth, no named profile). Fixed: `variables.tf` `default = null` + provider `profile = var.aws_profile != "" ? var.aws_profile : null`. Local runs still pass `-var aws_profile=usx-qa`.
 - Octopus project (via `wip/qa-cluster-standup/octopus-qa-env-setup/setup-octopus-rw.py --apply`): lifecycle `Lifecycles-22`→`Lifecycles-42` (iaac-release, has qa=`Environments-602`), + 11 QA-scoped vars. Backup `/tmp/octopus-rw-backup-*.json`.
 ⚠️ **`TfApply=true` is QA-scoped** — a QA deploy applies for real, no plan gate. First deploy: merge #23→#22→main FIRST (don't deploy an unmerged branch), then watch the Octopus task log to confirm deploy.ps1 runs + TF_VAR_* land + worker role authenticates. First apply = 20 creates / 0 destroys (proven locally). Diff tool: `inspect-octopus-projects.py`.
+
+
+## `risingwave-2` is DEV-ONLY. It is never promoted. (stated 2026-09-01)
+
+`risingwave-2` exists on op-usxpress-dev only, for our own platform work. It is **not** a
+second environment tier and it does **not** follow dev -> QA -> prod. QA and prod have
+`risingwave` and nothing else.
+
+Verified in Secrets Manager 2026-09-01:
+
+| | `<env>/risingwave/*` | `<env>/risingwave-2/*` |
+|---|---|---|
+| dev `700736442855` | EXISTS | EXISTS |
+| qa `527101283767` | EXISTS | **absent** |
+| prod `937464026810` | absent (Terraform not yet run) | **absent** |
+
+**Why:** any change that parameterises a `risingwave-2` path by environment is wrong on its
+face — `op-usxpress-qa/risingwave-2/...` and `op-usxpress-prod/risingwave-2/...` are not
+values that should ever be constructed. In `risingwave-pipeline` PR #19 an `${ENV}`
+substitution produced exactly those, which would fail on the first QA run.
+
+**How to apply:** when a workflow or manifest names a RisingWave namespace, dev may be
+`risingwave-2`; **QA and prod are always `risingwave`**. Map it per environment alongside the
+account id; never interpolate the namespace segment. Do not ask which namespace QA or prod
+should use — the answer is `risingwave`. Related: [[onprem-gitops-repo-topology]],
+[[rw-prod-blocked-on-manifests-path]].

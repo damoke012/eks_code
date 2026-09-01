@@ -45,6 +45,12 @@ neither was stale — both describe dev and neither said so. On **op-qa** and **
 applies. Check `kubectl get ns <ns> -o jsonpath='{.metadata.labels}'` for the managing
 Kustomization before assuming an owner, and scope every ownership claim to a named cluster.
 
+**`risingwave-2` is dev-only.** It is our own platform work and is never promoted. QA and
+prod have `risingwave` and nothing else — confirmed in Secrets Manager 2026-09-01. Any change
+that builds a `risingwave-2` path from an environment variable is wrong on its face; map the
+namespace per environment, never interpolate it. Do not raise "which namespace should QA use"
+as an open question.
+
 | Target ns (op-dev) | Tim coord required? |
 |---|---|
 | `risingwave` (Tim's) | ✅ Yes |

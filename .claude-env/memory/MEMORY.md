@@ -5,7 +5,7 @@
 - [QA cluster stand-up](qa-cluster-standup.md) — INFRA-1585 / epic INFRA-1560, deliberate Prod-standard mirror of Dev
 - [Deploy via Octopus only](onprem-deploy-via-octopus.md) — iaac-talos deployed through Octopus ONLY; never local terraform apply
 - [QA vs Dev delta](qa-vs-dev-delta.md) — accounts, DNS, node pools, CP sizing differences
-- [RisingWave on-prem](risingwave-onprem.md) — risingwave (Idris) + risingwave-2 (Tim) namespaces; Phase 1 handoff done
+- [RisingWave on-prem](risingwave-onprem.md) — risingwave + risingwave-2 namespaces; **risingwave-2 is DEV-ONLY, never promoted — QA/prod are always `risingwave`**
 - [On-prem networking/ingress](onprem-networking-ingress.md) — Phase 1 INFRA-1494 CLOSED 2026-06-01; May 29 networking/CySec call decisions
 - [Entra secret rotation](entra-secret-rotation.md) — ACTIVE: 11 app-reg secrets expiring Jul–Aug 2026; rotate in-use, confirm all before cleanup
 - [Argo CD on-prem (INFRA-1622)](pr73-argocd-repo-sync-review.md) — ✅ dev+QA stack complete; ✅ dev route live 2026-08-24 (argocd.op-dev.usxpress.io, 200); configs.cm.url was the chart default everywhere; SSO still needs a provider + policy.csv
