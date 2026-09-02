@@ -111,3 +111,42 @@ install's `server.secretkey` had to survive); QA and prod use their own labelled
 
 **The only thing left for INFRA-1639 is a human sign-in by an APPLICATION-TEAM member.**
 No script can establish it, and everything verified so far is platform-admin access.
+
+**2026-09-02 — access is now managed by GROUP, three tiers, and `app-operator` exists.**
+Per-user assignment was never the design; it happened because the app team's group object
+ID was an open ask on Idris and never arrived. Now:
+
+| Group | Object ID | App role | Members |
+|---|---|---|---|
+| `usx-cloud-admin` | b9a1ff74-efa1-4b20-be8a-8706a5ab2636 | `platform-admin` (10f51b4f-7354-5a04-bb89-e80d2769e69d) | pre-existing |
+| `usx-argocd-operator` | 984faf3e-e280-490e-8ff4-a71101a73a95 | `app-operator` (19e6754e-43dc-58c2-a431-5b15b133d672) | Timothy Preble, Pujit Koirala |
+| `usx-argocd-viewer` | 6bd52028-9105-4bdf-a39a-0d31a57ae53b | `app-viewer` (86486897-edd4-537d-b04f-805d6aeff583) | Jenni Ray |
+
+`app-operator` = read + logs + sync **on all three clusters including prod** + `action/*`
+(the Restart button) + resource-level delete. Doke's call 2026-09-02, a deliberate
+widening of `app-viewer`, which stays read-only with sync on dev/QA only.
+Built by `scripts/entra-argocd-access-groups.sh` and
+`scripts/pr-argocd-rbac-operator.sh`.
+
+**⚠️ Idris holds `app-viewer`, NOT `platform-admin`.** Read off the assignments
+2026-09-02. If he is meant to be an admin, add him to `usx-cloud-admin`; that is very
+likely why he was assigning people individually.
+
+**Two gates, not one, and they are independent.**
+1. `appRoleAssignmentRequired: true` — the person must hold an app role. Group membership
+   satisfies it.
+2. **Admin consent.** User consent is disabled tenant-wide, so the first sign-in by anyone
+   who is not already consented lands on `login.microsoftonline.com/<tenant>/Consent/Request`
+   — "Request sent, your admin has been notified". Pujit hit this on 2026-09-02. The fix is
+   **tenant-wide consent once** on the registration, not per-request approval, or every new
+   person repeats it. Needs Cloud Application Administrator or above — a higher bar than the
+   app-registration write we already have.
+
+**The `groups` optional claim carries an empty `additionalProperties`.** That is the field
+`emit_as_roles` would occupy. Printed in full for the first time 2026-09-02. Not worth
+chasing now that roles work, but it is the loose end behind the missing groups claim.
+
+**Directory names are not guessable.** "Tim Wolfe" and "Jenny Ray" were both wrong — the
+real users are **Timothy Preble** `tpreble@usxpress.com` and **Jenni Ray** `jlray@usxpress.com`.
+Resolve a UPN with `scripts/entra-argocd-access-groups.sh --find <surname>` before scripting
+anyone's access. See [[identity-names-do-not-cross-systems]].
