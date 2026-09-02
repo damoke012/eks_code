@@ -44,3 +44,24 @@ against a QA-account bucket. Prod's bucket is `lazy-tf-state-ipp58n854uhpw13x`.
 ARN, an issuer, a role name — the environment check must test what it resolves to, or list
 the other environments' identifiers literally. And a write-verify compares VALUES; confirming
 the key is present is the proxy, not the property. See [[terraform-state-bucket-is-per-account]].
+
+**Instance 6 — 2026-09-02. A PR description is a proxy for its diff.**
+Reviewed Idris's `risingwave-pipeline` PR #21 from the PR page and raised two blockers that
+the diff did not support:
+
+- "a placeholder digest is being merged into the production overlay" — came from the PR
+  body's **Follow-up / rollout prerequisites** list ("Replace the production placeholder
+  digest through the normal promotion flow"). That list describes work *not in the PR*. The
+  diff touches no digest at all.
+- "four blockers were answered into gitignored files" — the body listed them as rollout
+  prerequisites, which is the honest disposition, not a claim of completion.
+
+Meanwhile the diff's actual headline was invisible from the page: both overlays moved
+`PIPELINE_DIR` from `/pipeline/smoke` to `/pipeline/pipelines`, making a
+script-hardening PR the **first real cutover on QA and prod at once**. Two lines in a
+ConfigMap, +2/-1 per file, and the file list alone did not show it.
+
+**How to apply:** a PR title, body, summary and file-name list are all proxies. `gh pr diff`
+is the property, it is one command, and no finding gets raised before it has been read. A
+follow-up list is not a change list — the two live in the same body and read alike.
+See [[adjacent-step-green-signals]].
