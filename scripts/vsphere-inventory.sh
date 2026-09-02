@@ -78,70 +78,120 @@ if [ "${#VMS[@]}" -eq 0 ]; then
 fi
 echo "  ${#VMS[@]} VMs"
 
-TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
-printf 'Name,Path,PowerState,vCPU,MemoryGB,ProvisionedGB,GuestOS,IP\n' > "$TMP"
+WORK="$(mktemp -d)"
+TMP="$WORK/inventory.csv"
+trap 'rm -rf "$WORK"' EXIT
 
-for p in "${VMS[@]}"; do
-  json=$(govc vm.info -json "$p" 2>/dev/null) || continue
-  python3 - "$p" >> "$TMP" <<'PY' <<<"$json"
-import json, sys
-path = sys.argv[1]
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-vms = d.get("virtualMachines") or d.get("VirtualMachines") or []
-for vm in vms:
-    s = vm.get("summary") or vm.get("Summary") or {}
-    cfg = s.get("config") or s.get("Config") or {}
-    rt = s.get("runtime") or s.get("Runtime") or {}
-    g = s.get("guest") or s.get("Guest") or {}
-    st = s.get("storage") or s.get("Storage") or {}
-    committed = (st.get("committed") or st.get("Committed") or 0)
-    uncommitted = (st.get("uncommitted") or st.get("Uncommitted") or 0)
-    prov = round((committed + uncommitted) / (1024**3), 1)
-    row = [
-        cfg.get("name") or cfg.get("Name") or "",
-        path,
-        rt.get("powerState") or rt.get("PowerState") or "",
-        str(cfg.get("numCpu") or cfg.get("NumCpu") or ""),
-        str(round((cfg.get("memorySizeMB") or cfg.get("MemorySizeMB") or 0) / 1024, 1)),
-        str(prov),
-        (cfg.get("guestFullName") or cfg.get("GuestFullName") or "").replace(",", ";"),
-        g.get("ipAddress") or g.get("IpAddress") or "",
-    ]
-    print(",".join('"%s"' % c.replace('"', "'") for c in row))
-PY
+# The inventory path (which folder a VM lives in) comes from `find`, not from vm.info —
+# vm.info reports the DATASTORE path. Join the two on VM name, which is the last segment.
+printf '%s\n' "${VMS[@]}" > "$WORK/paths.txt"
+
+# One govc call per VM meant 383 round trips. vm.info takes many paths at once; batch it.
+: > "$WORK/vms.json"
+BATCH=60
+i=0
+while [ $i -lt ${#VMS[@]} ]; do
+  chunk=("${VMS[@]:i:BATCH}")
+  if ! govc vm.info -json "${chunk[@]}" >> "$WORK/vms.json" 2>"$WORK/err.txt"; then
+    echo "!! govc vm.info failed on a batch starting at index $i:" >&2
+    sed 's/^/   /' "$WORK/err.txt" >&2
+    exit 3
+  fi
+  i=$(( i + BATCH ))
+  printf '\r  fetched %d/%d' "$(( i < ${#VMS[@]} ? i : ${#VMS[@]} ))" "${#VMS[@]}"
 done
+echo
 
-rows=$(( $(wc -l < "$TMP") - 1 ))
-if [ "$rows" -lt 1 ]; then
-  echo "!! found ${#VMS[@]} VM paths but parsed 0 of them — govc's JSON shape has changed." >&2
-  echo "!! Check with: govc vm.info -json '${VMS[0]}' | head -40" >&2
-  exit 3
-fi
+# Write the parser to a FILE. `python3 - <<'PY' <<<"$json"` has two stdin redirections;
+# the here-string wins, so Python reads the JSON as its own source and dies on `null`.
+cat > "$WORK/parse.py" <<'PY'
+import csv, json, sys
+from pathlib import Path
 
-python3 - "$TMP" <<'PY'
-import csv, sys
-rows = list(csv.DictReader(open(sys.argv[1], newline="")))
-def num(r, k):
-    try: return float(r[k] or 0)
-    except ValueError: return 0.0
-on  = [r for r in rows if r["PowerState"] == "poweredOn"]
+work = Path(sys.argv[1])
+by_name = {}
+for line in (work / "paths.txt").read_text().splitlines():
+    line = line.strip()
+    if line:
+        by_name[line.rsplit("/", 1)[-1]] = line
+
+def g(d, *keys):
+    """vm.info -json capitalises differently across govc versions."""
+    for k in keys:
+        if isinstance(d, dict) and k in d and d[k] is not None:
+            return d[k]
+    return None
+
+# Concatenated JSON documents, one per batch.
+docs, dec, buf = [], json.JSONDecoder(), (work / "vms.json").read_text()
+idx = 0
+while idx < len(buf):
+    while idx < len(buf) and buf[idx] in " \t\r\n":
+        idx += 1
+    if idx >= len(buf):
+        break
+    obj, idx = dec.raw_decode(buf, idx)
+    docs.append(obj)
+
+rows = []
+for d in docs:
+    for vm in (g(d, "virtualMachines", "VirtualMachines") or []):
+        s = g(vm, "summary", "Summary") or {}
+        cfg = g(s, "config", "Config") or {}
+        rt = g(s, "runtime", "Runtime") or {}
+        gu = g(s, "guest", "Guest") or {}
+        st = g(s, "storage", "Storage") or {}
+        name = g(cfg, "name", "Name") or ""
+        prov = ((g(st, "committed", "Committed") or 0) +
+                (g(st, "uncommitted", "Uncommitted") or 0)) / (1024 ** 3)
+        rows.append({
+            "Name": name,
+            "Path": by_name.get(name, ""),
+            "PowerState": g(rt, "powerState", "PowerState") or "",
+            "vCPU": g(cfg, "numCpu", "NumCpu") or 0,
+            "MemoryGB": round((g(cfg, "memorySizeMB", "MemorySizeMB") or 0) / 1024, 1),
+            "ProvisionedGB": round(prov, 1),
+            "GuestOS": (g(cfg, "guestFullName", "GuestFullName") or "").replace(",", ";"),
+            "IP": g(gu, "ipAddress", "IpAddress") or "",
+        })
+
+if not rows:
+    sys.exit("!! parsed 0 VMs from govc output — its JSON shape has changed.\n"
+             "!! Check with: govc vm.info -json <one-vm-path> | head -40")
+
+with (work / "inventory.csv").open("w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+    w.writeheader()
+    w.writerows(rows)
+
+def total(k):
+    return sum(float(r[k] or 0) for r in rows)
+
+on = [r for r in rows if r["PowerState"] == "poweredOn"]
 off = [r for r in rows if r["PowerState"] != "poweredOn"]
-print(f"\n  {len(rows)} VMs · {sum(num(r,'vCPU') for r in rows):.0f} vCPU · "
-      f"{sum(num(r,'MemoryGB') for r in rows):.0f} GB RAM · "
-      f"{sum(num(r,'ProvisionedGB') for r in rows)/1024:.2f} TB provisioned")
+print(f"\n  {len(rows)} VMs · {total('vCPU'):.0f} vCPU · {total('MemoryGB'):.0f} GB RAM · "
+      f"{total('ProvisionedGB')/1024:.2f} TB provisioned")
 print(f"  powered on: {len(on)}   powered off: {len(off)}")
+
+talos = [r for r in rows if "talos" in r["Name"].lower() or "/TalosD1/" in r["Path"]]
+if talos:
+    tv = sum(float(r["vCPU"] or 0) for r in talos)
+    tm = sum(float(r["MemoryGB"] or 0) for r in talos)
+    td = sum(float(r["ProvisionedGB"] or 0) for r in talos)
+    print(f"\n  Of which Talos-looking: {len(talos)} VMs · {tv:.0f} vCPU · {tm:.0f} GB · "
+          f"{td/1024:.2f} TB")
+    print("  (name/folder heuristic only — talos-vm-reconcile.py decides ownership from state)")
+
 if off:
-    # Powered-off VMs still consume storage. They are the cheapest thing to reclaim
-    # and the easiest to overlook in a CPU/RAM conversation.
-    gb = sum(num(r,'ProvisionedGB') for r in off)
-    print(f"\n  Powered OFF but still holding {gb/1024:.2f} TB:")
-    for r in sorted(off, key=lambda r: -num(r,'ProvisionedGB')):
-        print(f"    {r['Name']:<38} {num(r,'ProvisionedGB'):>8.1f} GB   {r['Path']}")
+    # A powered-off VM costs nothing in a vCPU count and everything in a storage bill.
+    print(f"\n  Powered OFF but still holding {sum(float(r['ProvisionedGB'] or 0) for r in off)/1024:.2f} TB:")
+    for r in sorted(off, key=lambda r: -float(r["ProvisionedGB"] or 0))[:25]:
+        print(f"    {r['Name']:<40} {float(r['ProvisionedGB'] or 0):>8.1f} GB   {r['Path']}")
+    if len(off) > 25:
+        print(f"    ... and {len(off) - 25} more, all in the CSV")
 PY
+
+python3 "$WORK/parse.py" "$WORK" || exit 3
 
 if [ -n "$CSV" ]; then
   cp "$TMP" "$CSV"
