@@ -41,10 +41,13 @@ if [ "$1" = "--members" ]; then
   # is a SyntaxError, and it silently cost us the two facts that decide everything here:
   # whether the group is security-enabled (only those can hold an app role) and whether it
   # is synced from on-prem AD (which decides who can add members).
-  IFS=$'\t' read -r gname gidout gsec gmail gsync gdesc < <(
-    az ad group show --group "$gid" \
-      --query "[displayName,id,securityEnabled,mailEnabled,onPremisesSyncEnabled,description]" \
-      -o tsv 2>/dev/null)
+  # One query per field. A --query returning an array prints one element PER LINE under
+  # -o tsv, so `read` took only the first and reported every other field as empty — which
+  # read as "not a security group" when nothing had actually been measured.
+  g() { az ad group show --group "$gid" --query "$1" -o tsv 2>/dev/null; }
+  gname=$(g displayName); gidout=$(g id)
+  gsec=$(g securityEnabled); gmail=$(g mailEnabled)
+  gsync=$(g onPremisesSyncEnabled); gdesc=$(g description)
   echo
   echo "  $gname  ($gidout)"
   if [ "$gsync" = "True" ]; then
@@ -117,10 +120,9 @@ echo
 echo "== detail on the shared groups (who can add members?)"
 while read -r gid; do
   [ -n "$gid" ] || continue
-  IFS=$'\t' read -r gname gidout gsec gmail gsync gdesc < <(
-    az ad group show --group "$gid" \
-      --query "[displayName,id,securityEnabled,mailEnabled,onPremisesSyncEnabled,description]" \
-      -o tsv 2>/dev/null)
+  g() { az ad group show --group "$gid" --query "$1" -o tsv 2>/dev/null; }
+  gname=$(g displayName); gidout=$(g id)
+  gsec=$(g securityEnabled); gsync=$(g onPremisesSyncEnabled)
   echo "   $gname"
   echo "     id        $gidout"
   echo "     security  $gsec   synced-from-AD  ${gsync:-False}"
