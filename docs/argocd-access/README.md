@@ -40,6 +40,54 @@ Entra deep-links, for when you want to look rather than run a command.
 | The app roles themselves | https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/AppRoles/appId/42dc0c33-4c56-47a5-b207-d119272997aa |
 | Consent state | https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Permissions/objectId/b20084ae-9f13-4ca7-961c-b05f023fa2c2/appId/42dc0c33-4c56-47a5-b207-d119272997aa |
 
+### Clicking there instead
+
+All four start at `portal.azure.com` -> **Microsoft Entra ID**.
+
+**Give someone access** — the only path you need regularly:
+
+```
+Entra ID -> Groups -> All groups
+  -> search: usx-argocd-operator
+  -> click the group name
+  -> Members
+  -> + Add members -> type their name -> Select
+```
+
+**See which group holds which tier:**
+
+```
+Entra ID -> Enterprise applications -> All applications
+  -> clear the "Application ID starts with" filter chip
+  -> search: Argo CD On-Prem
+  -> Users and groups
+```
+
+That filter chip is applied by default in some views and will hide the app from a search
+that is otherwise correct. The search also matches display names from the **start** only.
+
+**See the role definitions:**
+
+```
+Entra ID -> App registrations -> All applications
+  -> search: Argo CD On-Prem
+  -> App roles
+```
+
+**App registrations and Enterprise applications are the same app in two blades**, and the
+distinction matters: the registration is where roles are *defined*, the enterprise
+application is where they are *assigned*. Looking for one in the other is the usual reason
+someone concludes the app does not exist.
+
+**Consent state:**
+
+```
+Entra ID -> Enterprise applications -> All applications -> Argo CD On-Prem
+  -> Security -> Permissions
+```
+
+The *Granted for* column should read **All users**.
+
 The **Users and groups** page is the readable summary: three rows, each a group, with a
 *Role assigned* column carrying `platform-admin`, `app-operator` or `app-viewer`.
 
