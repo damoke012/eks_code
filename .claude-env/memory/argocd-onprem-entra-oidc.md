@@ -168,5 +168,12 @@ merged, synced green, and left Argo CD with a credential object carrying no key.
 remote property exists before landing any ExternalSecret
 ([[eso-secretsynced-not-content-check]]).
 
-**Still open:** tenant-wide admin consent (the only thing blocking Pujit); merging the four
-PRs; and adding Idris to `usx-cloud-admin` if he is meant to be an admin.
+**✅ ALL FOUR MERGED AND LIVE ON PROD 2026-09-02.** `op-prod` moved
+`7f0d3b7` → `b0cd4c4`; `argocd-rbac-cm` carries all five `p, role:app-operator` lines plus
+`g, app-operator, role:app-operator`; `argocd-repo-risingwave-pipeline` holds a real
+`-----BEGIN OPENSSH PRIVATE KEY-----`. Deploy key `argocd-op-usxpress-prod` (id 162114773,
+read-only) added to `variant-inc/risingwave-pipeline`, beside the QA one from 2026-08-20.
+
+**Still open:** tenant-wide admin consent — the ONLY thing now blocking Pujit — and adding
+Idris to `usx-cloud-admin` if he is meant to be an admin. `role:app-operator` remains
+unexercised until a real person signs in; that sign-in is INFRA-1639's acceptance test.
