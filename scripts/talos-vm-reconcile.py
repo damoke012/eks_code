@@ -120,21 +120,28 @@ def main():
                     help="use Terraform state only (e.g. off VPN)")
     args = ap.parse_args()
 
-    managed, errors, node_only = {}, [], {}
+    # Two failure classes, deliberately not pooled:
+    #   fatal    — a state file did not load. The 'ours' list is then incomplete and
+    #              its missing VMs are indistinguishable from unmanaged ones.
+    #   degraded — a cluster was unreachable. Classification is unaffected (it reads
+    #              state); only the drift check for that cluster is lost.
+    # Treating the second as fatal blocked a safe run on 2026-09-02 purely because
+    # op-qa was off-VPN, while all three state files had loaded cleanly.
+    managed, fatal, degraded, node_only = {}, [], [], {}
 
     for c in CLUSTERS:
         acct, err = preflight(c["profile"], c["account"])
         if err:
-            errors.append(f"{c['env']}: {err}")
+            fatal.append(f"{c['env']}: {err}")
             continue
         state, err = load_state(c)
         if err:
-            errors.append(f"{c['env']}: {err}")
+            fatal.append(f"{c['env']}: {err}")
             continue
         vms = vms_from_state(state)
         if not vms:
-            errors.append(f"{c['env']}: state read OK but contains no vsphere_virtual_machine "
-                          "— refusing to treat that as 'this cluster owns nothing'")
+            fatal.append(f"{c['env']}: state read OK but contains no vsphere_virtual_machine "
+                         "— refusing to treat that as 'this cluster owns nothing'")
             continue
         for n, v in vms.items():
             v["env"] = c["env"]
@@ -147,22 +154,31 @@ def main():
         nodes, nerr = cluster_nodes(c["ctx"])
         if nerr:
             print(f"   (cluster unreachable: {nerr})")
-            errors.append(f"{c['env']}: cluster unreachable — {nerr}")
+            degraded.append(f"{c['env']}: drift NOT checked — cluster unreachable ({nerr})")
             continue
         extra = [n for n in nodes if n not in vms]
         print(f" · {len(nodes)} nodes live" + (f" · {len(extra)} NOT in state" if extra else ""))
         for n in extra:
             node_only[n] = c["env"]
 
-    # An incomplete picture cannot safely say what is unmanaged. Stop here.
-    if errors:
-        print("\n!! INCOMPLETE — one or more sources did not load:\n")
-        for e in errors:
+    # An incomplete OWNERSHIP picture cannot safely say what is unmanaged. Stop here.
+    if fatal:
+        print("\n!! INCOMPLETE — Terraform state did not load for every cluster:\n")
+        for e in fatal:
             print(f"   {e}")
         print("\n   Refusing to classify. A VM missing from a state file this run could not\n"
               "   read is indistinguishable from a VM nobody manages, and the two have very\n"
               "   different consequences. Fix the sources above and re-run.")
         sys.exit(3)
+
+    # A missing cluster costs us the drift check for that cluster and nothing else.
+    if degraded:
+        print("\n   PARTIAL — ownership is complete, drift checking is not:")
+        for e in degraded:
+            print(f"     {e}")
+        print("     A VM that is in one of these clusters but not in its Terraform state\n"
+              "     would not be reported below. That is drift, not an orphan, and it is the\n"
+              "     one thing this run cannot see. Re-run on the VPN before acting on drift.")
 
     tc = sum(v["cpus"] or 0 for v in managed.values())
     tm = sum(v["mem_gb"] or 0 for v in managed.values())
