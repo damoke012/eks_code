@@ -35,6 +35,23 @@ done
 
 [ -d "$REPO/.git" ] || { echo "!! not a git repo: $REPO   (set REPO=)" >&2; exit 2; }
 cd "$REPO"
+
+# Refuse on a dirty tree instead of dying mid-branch. The sibling viewer script silently
+# ran `git checkout HEAD -- infrastructure`, which DISCARDS local edits; in a repo whose
+# kustomization.yaml files enumerate resources, a discarded edit can drop a manifest from
+# delivery without anything looking wrong. Deciding what to do with someone's unfinished
+# work is not this script's call.
+DIRTY=$(git status --porcelain -- infrastructure 2>/dev/null)
+if [ -n "$DIRTY" ]; then
+  echo "!! uncommitted changes under infrastructure/ in $REPO:" >&2
+  echo "$DIRTY" | sed 's/^/     /' >&2
+  echo "!! ABORTING. Look at them before choosing:" >&2
+  echo "     git -C $REPO diff -- infrastructure" >&2
+  echo "   then either keep them:   git -C $REPO stash push -m 'wip'" >&2
+  echo "   or discard them:         git -C $REPO checkout -- infrastructure" >&2
+  exit 3
+fi
+
 git fetch -q origin
 
 BRANCHES="op-dev op-qa op-prod"
