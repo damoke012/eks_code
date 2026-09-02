@@ -174,6 +174,25 @@ remote property exists before landing any ExternalSecret
 `-----BEGIN OPENSSH PRIVATE KEY-----`. Deploy key `argocd-op-usxpress-prod` (id 162114773,
 read-only) added to `variant-inc/risingwave-pipeline`, beside the QA one from 2026-08-20.
 
-**Still open:** tenant-wide admin consent — the ONLY thing now blocking Pujit — and adding
-Idris to `usx-cloud-admin` if he is meant to be an admin. `role:app-operator` remains
-unexercised until a real person signs in; that sign-in is INFRA-1639's acceptance test.
+**✅ TENANT-WIDE CONSENT GRANTED 2026-09-02**, `consentType: AllPrincipals`, scope
+`openid profile email`, verified on read-back. No user will see the consent screen again.
+
+**⚠️ `az ad app permission admin-consent` DID NOTHING and exited 0.** It grants what the
+registration declares in `requiredResourceAccess`; this app declares none — `openid profile
+email` are implicit — so there was nothing for it to grant. The grants stayed
+`consentType: Principal` (two individuals). The working route is a direct Graph POST to
+`/v1.0/oauth2PermissionGrants` with `consentType: AllPrincipals`, `clientId` = the SP
+(`b20084ae-…`), `resourceId` = the Microsoft Graph SP in this tenant
+(`7477eb4c-c47e-433d-986d-bfbfc207fded`). **Always read the grants back** — silence from
+that CLI command is not success.
+
+**Idris is admin via a group Doke owns.** `usx-cloud-admin` has NO owners listed and Doke
+cannot add members to it ("Insufficient privileges") — creating a group makes you its owner,
+which is why the new ones worked. So `usx-argocd-admin`
+(**6c23655c-8080-4991-a67f-293cfb0a597b**) was created, Idris added, and assigned to
+`platform-admin`. Two groups now map to that role value; `policy.csv` needs no change
+because the token carries the role, not the group.
+
+**Still open:** `role:app-operator` is unexercised until a real person signs in. That
+sign-in is INFRA-1639's acceptance test. Idris's and Pujit's redundant per-user
+assignments can be removed once group login is proven.

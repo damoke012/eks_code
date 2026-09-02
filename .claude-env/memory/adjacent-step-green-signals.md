@@ -58,3 +58,15 @@ about, and structurally incapable of finding the one bug it existed for. The onl
 surfaced is that it was pointed at a namespace where the answer was already known by an
 independent method. **A check nobody has seen fail is a hypothesis.** Validate every new check
 against a defect you have already confirmed some other way, before trusting it anywhere.
+
+**2026-09-02 — `az ad app permission admin-consent` exits 0 having granted nothing.**
+It consents to whatever the registration lists in `requiredResourceAccess`. An app that
+declares none — because `openid profile email` are implicit — gives the command nothing to
+do, so it succeeds silently and the grants stay `consentType: Principal`. Every user keeps
+hitting the consent screen while the command that was supposed to fix it reported success.
+Read `/servicePrincipals/<id>/oauth2PermissionGrants` back and look for `AllPrincipals`;
+the tenant-wide grant can be created directly with a Graph POST.
+
+Fourth instance in one day of the same shape — a variable snapshot, a region-less secret
+probe, a no-op string replace, and now this. **A command that prints nothing on success
+prints nothing on no-op either.**
