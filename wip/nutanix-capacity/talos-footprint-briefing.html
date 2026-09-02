@@ -157,8 +157,8 @@
   <p class="lede">Jon Griffin counts 47 Talos VMs on 8/27, up from 21 on 6/19. All 26 of those
   VMs are two planned environment builds — 13 each. The number worth discussing is not the
   growth; it is the 11-VM baseline that predates it.</p>
-  <p class="meta">Prepared by Dare Oke · 2026-09-02 · figures from codified cluster sizing
-  (<code>iaac-talos</code> tfvars), to be reconciled against Jon's 8/27 inventory</p>
+  <p class="meta">Prepared by Dare Oke · 2026-09-02 · our figures read from live Terraform state
+  on 2026-09-02; Jon's from his 8/27 Nutanix inventory</p>
 </header>
 
 <section>
@@ -171,10 +171,10 @@
     exactly +13. A Talos cluster is 13 VMs. We built QA in July and Production at the end of
     July, so that changes could stop being tested in production. That programme is complete —
     there is no third build queued.</p>
-    <p><strong>2. Roughly 11 VMs are unexplained by our clusters.</strong> Our three environments
-    account for 36 of the 47. The other 11 predate the June count and are not in the current
+    <p><strong>2. Eleven VMs are unexplained by our clusters.</strong> Terraform state says we
+    manage exactly 36 of the 47 — 282 vCPU and 660 GB of the 314 and 704 Jon counts. The other 11 predate the June count and are not in the current
     Terraform. Finding and removing them is the first thing I will do with Jon's spreadsheet.</p>
-    <p><strong>3. Storage is the forecast risk, not CPU.</strong> We have reserved about 11 TB
+    <p><strong>3. Storage is the forecast risk, not CPU.</strong> We have reserved 10.79 TB
     and filled 2.7 TB. That gap fills over time with no new VMs at all.</p>
   </div>
 </section>
@@ -187,9 +187,9 @@
   </div>
   <div class="stats">
     <div class="stat"><p class="stat-l">VMs observed</p><p class="num">47</p><p class="stat-s">8/27, Jon's count</p></div>
-    <div class="stat is-ok"><p class="stat-l">Accounted for</p><p class="num">36</p><p class="stat-s">dev 10 · QA 13 · prod 13</p></div>
-    <div class="stat is-gap"><p class="stat-l">Unaccounted</p><p class="num">11</p><p class="stat-s">≈26 vCPU · ≈52 GB</p></div>
-    <div class="stat"><p class="stat-l">Storage reserved</p><p class="num">11.1 TB</p><p class="stat-s">2.7 TB in use today</p></div>
+    <div class="stat is-ok"><p class="stat-l">Accounted for</p><p class="num">36</p><p class="stat-s">282 vCPU · 660 GB · from Terraform state</p></div>
+    <div class="stat is-gap"><p class="stat-l">Unaccounted</p><p class="num">11</p><p class="stat-s">32 vCPU · 44 GB unexplained</p></div>
+    <div class="stat"><p class="stat-l">Storage reserved</p><p class="num">10.79 TB</p><p class="stat-s">2.7 TB in use today</p></div>
   </div>
 </section>
 
@@ -249,8 +249,9 @@
   <div class="head">
     <p class="eyebrow">What each environment costs</p>
     <h2>Per-environment footprint</h2>
-    <p class="q">From the committed cluster sizing, not from a live inventory — this is what
-    we asked Nutanix for.</p>
+    <p class="q">Totals read from the three Terraform state files on 2026-09-02. Per-row
+    figures are from the committed sizing and differ from the totals by about 2% —
+    the state is the authority.</p>
   </div>
   <div class="tablewrap">
     <table>
@@ -261,8 +262,8 @@
         <tr><td>op-usxpress-dev</td><td>10</td><td>40</td><td>108 GB</td><td>0.85 TB</td><td class="sub">3 control + 7 flat workers</td></tr>
         <tr><td>op-usxpress-qa</td><td>13</td><td>124</td><td>272 GB</td><td>5.1 TB</td><td class="sub">3 control + 2 system + 3 platform + 5 application</td></tr>
         <tr><td>op-usxpress-prod</td><td>13</td><td>124</td><td>272 GB</td><td>5.1 TB</td><td class="sub">identical to QA by design</td></tr>
-        <tr class="total"><td>Accounted for</td><td>36</td><td>288</td><td>652 GB</td><td>11.1 TB</td><td class="sub">our three clusters</td></tr>
-        <tr class="gap"><td>Unaccounted</td><td>11</td><td>≈26</td><td>≈52 GB</td><td>unknown</td><td class="sub">to identify from Jon's inventory</td></tr>
+        <tr class="total"><td>Accounted for</td><td>36</td><td>282</td><td>660 GB</td><td>10.79 TB</td><td class="sub">read from Terraform state, 2026-09-02</td></tr>
+        <tr class="gap"><td>Unaccounted</td><td>11</td><td>32</td><td>44 GB</td><td>unknown</td><td class="sub">to identify from Jon's inventory</td></tr>
         <tr class="total"><td>Jon's 8/27 count</td><td>47</td><td>314</td><td>704 GB</td><td>2.7 TB <span class="sub">in use</span></td><td class="sub">reported</td></tr>
       </tbody>
     </table>
@@ -277,24 +278,24 @@
 <section>
   <div class="head">
     <p class="eyebrow">The forecast risk</p>
-    <h2>Reserved 11.1 TB, using 2.7 TB</h2>
+    <h2>Reserved 10.79 TB, using 2.7 TB</h2>
   </div>
   <figure>
-    <svg viewBox="0 0 720 168" role="img" aria-label="Storage reserved for the three Talos clusters is 11.1 terabytes; 2.7 terabytes is consumed today, about one quarter of the reservation.">
+    <svg viewBox="0 0 720 168" role="img" aria-label="Storage reserved for the three Talos clusters is 10.79 terabytes; 2.7 terabytes is consumed today, about one quarter of the reservation.">
       <g font-family="Archivo, sans-serif" font-size="12.5" font-weight="600" fill="currentColor">
         <text x="0" y="34">Reserved</text>
         <text x="0" y="106">In use today</text>
       </g>
       <rect x="108" y="18" width="560" height="26" fill="var(--accent)" opacity=".22"></rect>
       <rect x="108" y="18" width="560" height="26" fill="none" stroke="var(--accent)" stroke-width="1.5"></rect>
-      <text x="676" y="36" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="currentColor" text-anchor="start">11.1 TB</text>
+      <text x="676" y="36" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="currentColor" text-anchor="start">10.79 TB</text>
 
       <rect x="108" y="90" width="137" height="26" fill="var(--accent)"></rect>
       <text x="253" y="108" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="currentColor">2.7 TB</text>
 
       <line x1="108" y1="132" x2="668" y2="132" stroke="currentColor" stroke-width="1" opacity=".3"></line>
       <line x1="245" y1="126" x2="245" y2="138" stroke="currentColor" stroke-width="1" opacity=".3"></line>
-      <text x="390" y="152" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" opacity=".65" text-anchor="middle">8.4 TB of headroom already committed — it fills without anyone adding a VM</text>
+      <text x="390" y="152" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" opacity=".65" text-anchor="middle">8.1 TB of headroom already committed — it fills without anyone adding a VM</text>
     </svg>
     <figcaption>Thin provisioning means the reservation is the bill we have already agreed to;
     consumption is what we pay today. Storage can grow roughly fourfold with the VM count
@@ -323,7 +324,7 @@
         Terraform apply — a known failure we have hit and documented before. Needs Jon's
         spreadsheet with VM names to confirm before anything is powered off — the method is
         set out under <em>Method</em> below and the tooling is written and read-only.</p>
-        <p class="lever-n">≈26 vCPU · ≈52 GB · disk to be measured</p>
+        <p class="lever-n">32 vCPU · 44 GB · disk to be measured</p>
       </div>
     </li>
     <li>
@@ -369,7 +370,7 @@
     <table>
       <thead><tr><th>If this happens</th><th>VMs</th><th>vCPU</th><th>RAM</th><th>Disk reserved</th></tr></thead>
       <tbody>
-        <tr><td>Nothing changes</td><td>+0</td><td>+0</td><td>+0</td><td class="sub" style="text-align:right">fills toward 11.1 TB</td></tr>
+        <tr><td>Nothing changes</td><td>+0</td><td>+0</td><td>+0</td><td class="sub" style="text-align:right">fills toward 10.79 TB</td></tr>
         <tr><td>One more application node</td><td>+1</td><td>+16</td><td>+32 GB</td><td>+0.8 TB</td></tr>
         <tr><td>A DR or second production cluster</td><td>+13</td><td>+124</td><td>+272 GB</td><td>+5.1 TB</td></tr>
         <tr><td>Bare-metal cluster (bm-dev exists)</td><td>+13</td><td>+124</td><td>+272 GB</td><td>+5.1 TB</td></tr>
@@ -398,7 +399,7 @@
       off on a Friday to free up room, any more than you can remove three cylinders from an
       engine. The unit we add or remove is the whole cluster.</p></div>
     <div class="say"><span class="tag">Why the disk number will keep climbing</span>
-      <p>We reserved about 11 terabytes and have filled under 3. The reservation is a bill we
+      <p>We reserved nearly eleven terabytes and have filled under three. The reservation is a bill we
       already agreed to; the usage is what we pay today. That gap closes on its own.</p></div>
     <div class="say"><span class="tag">Where the capacity actually goes</span>
       <p>Two thirds of every cluster is one pool of five machines that the applications
@@ -475,10 +476,11 @@
   <div class="caveat col">
     <h2>What this document does not claim</h2>
     <ul>
-      <li>The per-environment figures come from the committed cluster configuration
-      (<code>iaac-talos</code> tfvars), not from a live vCenter or Nutanix query. They are what
-      we asked for; Jon's inventory is what exists. Any disagreement between the two is itself
-      a finding.</li>
+      <li>The totals — 36 VMs, 282 vCPU, 660 GB, 10.79 TB — are read from the three live
+      Terraform state files. The per-environment rows are still from the committed sizing and
+      sit within about 2% of them; treat the state figures as the authority where they differ.
+      Neither is a vCenter query: they are what Terraform manages, and Jon's inventory is what
+      exists. Disagreement between the two is itself a finding.</li>
       <li>The 11-VM gap is <em>47 minus 36</em>. It is a number to go and investigate, not an
       identified list of machines to power off.</li>
       <li>Disk figures are provisioned capacity. Control-plane disk is taken as 100 GB in

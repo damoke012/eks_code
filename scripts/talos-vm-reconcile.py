@@ -183,6 +183,18 @@ def main():
     tc = sum(v["cpus"] or 0 for v in managed.values())
     tm = sum(v["mem_gb"] or 0 for v in managed.values())
     td = sum(v["disk_gb"] or 0 for v in managed.values())
+
+    # Per-environment subtotals: the capacity conversation is held per environment, and
+    # "QA is sized like production" is only checkable if the two are shown side by side.
+    print("\n  Per environment, from state:")
+    for c in CLUSTERS:
+        vs = [v for v in managed.values() if v["env"] == c["env"]]
+        if not vs:
+            continue
+        print(f"    {c['env']:<20} {len(vs):>3} VMs  "
+              f"{sum(v['cpus'] or 0 for v in vs):>4} vCPU  "
+              f"{sum(v['mem_gb'] or 0 for v in vs):>7.0f} GB RAM  "
+              f"{sum(v['disk_gb'] or 0 for v in vs)/1024:>6.2f} TB reserved")
     print(f"\n  OURS: {len(managed)} VMs · {tc} vCPU · {tm:.0f} GB RAM · {td/1024:.2f} TB disk reserved")
     if node_only:
         print(f"\n  In a cluster but NOT in Terraform state ({len(node_only)}) — drift, do NOT delete:")
