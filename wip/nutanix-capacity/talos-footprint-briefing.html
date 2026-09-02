@@ -1,0 +1,496 @@
+<title>Talos Footprint on Nutanix Prod</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --ground:#f4f6f8; --surface:#ffffff; --surface-2:#eef1f5;
+    --ink:#16202b; --ink-2:#425263; --ink-3:#6b7b8c;
+    --rule:#d6dde5; --rule-strong:#b8c3ce;
+    --accent:#1d5b79; --accent-soft:#e2edf3;
+    --planned:#2f7d5f; --planned-soft:#e2efe9;
+    --gap:#b4531f; --gap-soft:#f6e8de;
+    --dev:#7a8a99;
+    --shadow:0 1px 2px rgba(22,32,43,.06), 0 8px 24px -16px rgba(22,32,43,.28);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#101820; --surface:#18222c; --surface-2:#1f2b37;
+      --ink:#e6edf3; --ink-2:#adbccb; --ink-3:#7f909f;
+      --rule:#2c3a48; --rule-strong:#3d4e5e;
+      --accent:#6fb3d2; --accent-soft:#1b3444;
+      --planned:#63bd97; --planned-soft:#17322a;
+      --gap:#e08b52; --gap-soft:#3a2417;
+      --dev:#8fa0af;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#101820; --surface:#18222c; --surface-2:#1f2b37;
+    --ink:#e6edf3; --ink-2:#adbccb; --ink-3:#7f909f;
+    --rule:#2c3a48; --rule-strong:#3d4e5e;
+    --accent:#6fb3d2; --accent-soft:#1b3444;
+    --planned:#63bd97; --planned-soft:#17322a;
+    --gap:#e08b52; --gap-soft:#3a2417;
+    --dev:#8fa0af;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:17px; line-height:1.62; margin:0;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:48px 28px 96px;
+        display:flex; flex-direction:column; gap:44px}
+  .col{max-width:66ch}
+
+  h1,h2,h3,.eyebrow,.num,th,.tag,.stat-l{font-family:Archivo, "Helvetica Neue", Arial, sans-serif}
+  h1{font-size:2.45rem; line-height:1.1; font-weight:700; margin:0 0 10px;
+     letter-spacing:-.02em; text-wrap:balance}
+  h2{font-size:1.32rem; font-weight:600; margin:0 0 6px; letter-spacing:-.01em; text-wrap:balance}
+  h3{font-size:1.02rem; font-weight:600; margin:26px 0 6px; color:var(--ink)}
+  p{margin:0 0 14px}
+  .col p:last-child{margin-bottom:0}
+  strong{font-weight:600}
+  em{font-style:italic; color:var(--ink-2)}
+
+  .eyebrow{font-size:.7rem; font-weight:600; letter-spacing:.13em; text-transform:uppercase;
+           color:var(--accent); margin:0 0 10px}
+  .lede{font-size:1.12rem; color:var(--ink-2); margin:0}
+  .meta{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:.76rem;
+        color:var(--ink-3); letter-spacing:.02em; margin:14px 0 0}
+
+  header{border-bottom:2px solid var(--rule-strong); padding-bottom:26px}
+
+  section{display:flex; flex-direction:column; gap:18px}
+  .head{display:flex; flex-direction:column; gap:2px; max-width:66ch}
+  .head .q{font-size:.82rem; color:var(--ink-3); font-family:Archivo,sans-serif; font-weight:500}
+
+  /* headline claim */
+  .claim{background:var(--surface); border:1px solid var(--rule);
+         border-left:4px solid var(--accent); border-radius:3px;
+         padding:22px 26px; box-shadow:var(--shadow)}
+  .claim p{margin:0 0 10px} .claim p:last-child{margin:0}
+
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(178px,1fr)); gap:1px;
+         background:var(--rule); border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+  .stat{background:var(--surface); padding:16px 18px}
+  .stat-l{font-size:.68rem; text-transform:uppercase; letter-spacing:.1em;
+          color:var(--ink-3); font-weight:600; margin:0 0 6px}
+  .num{font-family:"IBM Plex Mono",monospace; font-size:1.62rem; font-weight:600;
+       font-variant-numeric:tabular-nums; letter-spacing:-.02em; line-height:1.1}
+  .stat-s{font-size:.8rem; color:var(--ink-3); margin:4px 0 0; font-family:Archivo,sans-serif}
+  .is-gap .num{color:var(--gap)}
+  .is-ok .num{color:var(--planned)}
+
+  figure{margin:0; background:var(--surface); border:1px solid var(--rule);
+         border-radius:3px; padding:22px 24px 18px; box-shadow:var(--shadow)}
+  figcaption{font-family:Archivo,sans-serif; font-size:.82rem; color:var(--ink-2);
+             margin-top:14px; padding-top:12px; border-top:1px solid var(--rule)}
+  svg{display:block; width:100%; height:auto; max-width:100%}
+  .legend{display:flex; flex-wrap:wrap; gap:16px; margin-top:12px;
+          font-family:Archivo,sans-serif; font-size:.78rem; color:var(--ink-2)}
+  .key{display:inline-flex; align-items:center; gap:7px}
+  .sw{width:11px; height:11px; border-radius:2px; display:inline-block}
+
+  .tablewrap{overflow-x:auto; border:1px solid var(--rule); border-radius:3px; background:var(--surface)}
+  table{border-collapse:collapse; width:100%; min-width:640px; font-size:.9rem}
+  th{font-size:.68rem; text-transform:uppercase; letter-spacing:.09em; font-weight:600;
+     color:var(--ink-3); text-align:right; padding:12px 16px;
+     border-bottom:1px solid var(--rule-strong); background:var(--surface-2); white-space:nowrap}
+  th:first-child{text-align:left}
+  td{padding:11px 16px; border-bottom:1px solid var(--rule); text-align:right;
+     font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:.86rem}
+  td:first-child{text-align:left; font-family:Archivo,sans-serif; font-size:.9rem; white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tr.total td{font-weight:600; background:var(--surface-2); border-top:1px solid var(--rule-strong)}
+  tr.gap td{color:var(--gap)}
+  tr.gap td:first-child{font-weight:600}
+  .sub{color:var(--ink-3); font-size:.78rem; font-family:Archivo,sans-serif}
+
+  ol.levers{list-style:none; counter-reset:l; padding:0; margin:0;
+            display:flex; flex-direction:column; gap:1px; background:var(--rule);
+            border:1px solid var(--rule); border-radius:3px; overflow:hidden}
+  ol.levers li{counter-increment:l; background:var(--surface); padding:18px 22px;
+               display:grid; grid-template-columns:34px 1fr; gap:14px; align-items:start}
+  ol.levers li::before{content:counter(l); font-family:"IBM Plex Mono",monospace;
+    font-size:.9rem; font-weight:600; color:var(--accent); background:var(--accent-soft);
+    width:28px; height:28px; border-radius:50%; display:grid; place-items:center; margin-top:2px}
+  .lever-h{font-family:Archivo,sans-serif; font-weight:600; font-size:1rem; margin:0 0 4px}
+  .lever-n{font-family:"IBM Plex Mono",monospace; font-size:.82rem; color:var(--planned);
+           font-variant-numeric:tabular-nums; margin:6px 0 0; font-weight:500}
+  .lever-n.none{color:var(--ink-3)}
+  ol.levers p{margin:0; font-size:.94rem; color:var(--ink-2)}
+
+  .says{display:flex; flex-direction:column; gap:14px}
+  .say{background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+       padding:16px 20px}
+  .say .tag{font-size:.66rem; text-transform:uppercase; letter-spacing:.1em;
+            color:var(--ink-3); font-weight:600; display:block; margin-bottom:6px}
+  .say p{margin:0; font-size:1rem}
+
+  ul.plain{margin:0; padding-left:1.15em}
+  ul.plain li{margin-bottom:9px}
+  ul.plain li:last-child{margin-bottom:0}
+
+  .caveat{background:var(--surface-2); border:1px solid var(--rule); border-radius:3px;
+          padding:20px 24px}
+  .caveat h2{font-size:1.02rem}
+  .caveat ul{margin:10px 0 0; padding-left:1.15em; font-size:.94rem; color:var(--ink-2)}
+  .caveat li{margin-bottom:7px}
+  code{font-family:"IBM Plex Mono",monospace; font-size:.86em;
+       background:var(--surface-2); padding:1px 5px; border-radius:2px; color:var(--ink)}
+  .claim code, .caveat code{background:var(--ground)}
+
+  @media (max-width:640px){
+    body{font-size:16px} h1{font-size:1.95rem} .wrap{padding:32px 18px 64px; gap:36px}
+    ol.levers li{grid-template-columns:1fr; gap:8px}
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">Capacity briefing · US Xpress platform</p>
+  <h1>Talos Footprint on Nutanix Prod</h1>
+  <p class="lede">Jon Griffin counts 47 Talos VMs on 8/27, up from 21 on 6/19. All 26 of those
+  VMs are two planned environment builds — 13 each. The number worth discussing is not the
+  growth; it is the 11-VM baseline that predates it.</p>
+  <p class="meta">Prepared by Dare Oke · 2026-09-02 · figures from codified cluster sizing
+  (<code>iaac-talos</code> tfvars), to be reconciled against Jon's 8/27 inventory</p>
+</header>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">The short version</p>
+    <h2>Three things to land in the room</h2>
+  </div>
+  <div class="claim col">
+    <p><strong>1. The growth was planned and is finished.</strong> 21 → 34 → 47 is two steps of
+    exactly +13. A Talos cluster is 13 VMs. We built QA in July and Production at the end of
+    July, so that changes could stop being tested in production. That programme is complete —
+    there is no third build queued.</p>
+    <p><strong>2. Roughly 11 VMs are unexplained by our clusters.</strong> Our three environments
+    account for 36 of the 47. The other 11 predate the June count and are not in the current
+    Terraform. Finding and removing them is the first thing I will do with Jon's spreadsheet.</p>
+    <p><strong>3. Storage is the forecast risk, not CPU.</strong> We have reserved about 11 TB
+    and filled 2.7 TB. That gap fills over time with no new VMs at all.</p>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">Where the numbers land</p>
+    <h2>Observed against accounted-for</h2>
+    <p class="q">Jon's 8/27 figures, next to what our three clusters are configured to consume.</p>
+  </div>
+  <div class="stats">
+    <div class="stat"><p class="stat-l">VMs observed</p><p class="num">47</p><p class="stat-s">8/27, Jon's count</p></div>
+    <div class="stat is-ok"><p class="stat-l">Accounted for</p><p class="num">36</p><p class="stat-s">dev 10 · QA 13 · prod 13</p></div>
+    <div class="stat is-gap"><p class="stat-l">Unaccounted</p><p class="num">11</p><p class="stat-s">≈26 vCPU · ≈52 GB</p></div>
+    <div class="stat"><p class="stat-l">Storage reserved</p><p class="num">11.1 TB</p><p class="stat-s">2.7 TB in use today</p></div>
+  </div>
+</section>
+
+<section>
+  <figure>
+    <svg viewBox="0 0 720 300" role="img" aria-label="Talos VM count on Nutanix Prod rising from 21 on 19 June to 34 on 10 July to 47 on 27 August, in two increments of exactly thirteen VMs corresponding to the QA and Production cluster builds.">
+      <line x1="60" y1="230" x2="690" y2="230" stroke="currentColor" stroke-width="1" opacity=".35"></line>
+      <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" opacity=".55" text-anchor="end">
+        <text x="52" y="234">0</text>
+        <text x="52" y="139">25</text>
+        <text x="52" y="44">50</text>
+      </g>
+      <line x1="60" y1="135" x2="690" y2="135" stroke="currentColor" stroke-width="1" opacity=".12"></line>
+      <line x1="60" y1="40" x2="690" y2="40" stroke="currentColor" stroke-width="1" opacity=".12"></line>
+
+      <!-- 19 Jun: 21 -->
+      <rect x="90" y="192" width="130" height="38" fill="var(--dev)"></rect>
+      <rect x="90" y="150" width="130" height="42" fill="var(--gap)"></rect>
+      <text x="155" y="141" text-anchor="middle" font-family="Archivo, sans-serif" font-size="19" font-weight="700" fill="currentColor">21</text>
+
+      <!-- 10 Jul: 34 -->
+      <rect x="300" y="192" width="130" height="38" fill="var(--dev)"></rect>
+      <rect x="300" y="143" width="130" height="49" fill="var(--planned)"></rect>
+      <rect x="300" y="101" width="130" height="42" fill="var(--gap)"></rect>
+      <text x="365" y="92" text-anchor="middle" font-family="Archivo, sans-serif" font-size="19" font-weight="700" fill="currentColor">34</text>
+
+      <!-- 27 Aug: 47 -->
+      <rect x="510" y="192" width="130" height="38" fill="var(--dev)"></rect>
+      <rect x="510" y="143" width="130" height="49" fill="var(--planned)"></rect>
+      <rect x="510" y="93" width="130" height="50" fill="var(--accent)"></rect>
+      <rect x="510" y="51" width="130" height="42" fill="var(--gap)"></rect>
+      <text x="575" y="42" text-anchor="middle" font-family="Archivo, sans-serif" font-size="19" font-weight="700" fill="currentColor">47</text>
+
+      <g font-family="Archivo, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">
+        <text x="155" y="252" font-weight="600">19 Jun</text>
+        <text x="365" y="252" font-weight="600">10 Jul</text>
+        <text x="575" y="252" font-weight="600">27 Aug</text>
+      </g>
+      <g font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" opacity=".62" text-anchor="middle">
+        <text x="260" y="278">+13 — QA cluster</text>
+        <text x="470" y="278">+13 — Production cluster</text>
+      </g>
+    </svg>
+    <div class="legend">
+      <span class="key"><span class="sw" style="background:var(--dev)"></span>Dev cluster — 10</span>
+      <span class="key"><span class="sw" style="background:var(--planned)"></span>QA cluster — 13</span>
+      <span class="key"><span class="sw" style="background:var(--accent)"></span>Production cluster — 13</span>
+      <span class="key"><span class="sw" style="background:var(--gap)"></span>Unaccounted — 11</span>
+    </div>
+    <figcaption>Every VM added since June belongs to one of two deliberate cluster builds.
+    The orange band is constant across all three counts: it was there before the growth and
+    is not part of it.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">What each environment costs</p>
+    <h2>Per-environment footprint</h2>
+    <p class="q">From the committed cluster sizing, not from a live inventory — this is what
+    we asked Nutanix for.</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Environment</th><th>VMs</th><th>vCPU</th><th>RAM</th><th>Disk reserved</th><th>Shape</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>op-usxpress-dev</td><td>10</td><td>40</td><td>108 GB</td><td>0.85 TB</td><td class="sub">3 control + 7 flat workers</td></tr>
+        <tr><td>op-usxpress-qa</td><td>13</td><td>124</td><td>272 GB</td><td>5.1 TB</td><td class="sub">3 control + 2 system + 3 platform + 5 application</td></tr>
+        <tr><td>op-usxpress-prod</td><td>13</td><td>124</td><td>272 GB</td><td>5.1 TB</td><td class="sub">identical to QA by design</td></tr>
+        <tr class="total"><td>Accounted for</td><td>36</td><td>288</td><td>652 GB</td><td>11.1 TB</td><td class="sub">our three clusters</td></tr>
+        <tr class="gap"><td>Unaccounted</td><td>11</td><td>≈26</td><td>≈52 GB</td><td>unknown</td><td class="sub">to identify from Jon's inventory</td></tr>
+        <tr class="total"><td>Jon's 8/27 count</td><td>47</td><td>314</td><td>704 GB</td><td>2.7 TB <span class="sub">in use</span></td><td class="sub">reported</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col">
+    <p>The application pool is the whole story. Five nodes at 16 vCPU, 32 GB and 800 GB each
+    make up <strong>65% of the vCPU, 59% of the RAM and 78% of the disk</strong> of a cluster.
+    Everything else — control plane, system, platform — is rounding by comparison.</p>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">The forecast risk</p>
+    <h2>Reserved 11.1 TB, using 2.7 TB</h2>
+  </div>
+  <figure>
+    <svg viewBox="0 0 720 168" role="img" aria-label="Storage reserved for the three Talos clusters is 11.1 terabytes; 2.7 terabytes is consumed today, about one quarter of the reservation.">
+      <g font-family="Archivo, sans-serif" font-size="12.5" font-weight="600" fill="currentColor">
+        <text x="0" y="34">Reserved</text>
+        <text x="0" y="106">In use today</text>
+      </g>
+      <rect x="108" y="18" width="560" height="26" fill="var(--accent)" opacity=".22"></rect>
+      <rect x="108" y="18" width="560" height="26" fill="none" stroke="var(--accent)" stroke-width="1.5"></rect>
+      <text x="676" y="36" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="currentColor" text-anchor="start">11.1 TB</text>
+
+      <rect x="108" y="90" width="137" height="26" fill="var(--accent)"></rect>
+      <text x="253" y="108" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="currentColor">2.7 TB</text>
+
+      <line x1="108" y1="132" x2="668" y2="132" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+      <line x1="245" y1="126" x2="245" y2="138" stroke="currentColor" stroke-width="1" opacity=".3"></line>
+      <text x="390" y="152" font-family="Archivo, sans-serif" font-size="11.5" fill="currentColor" opacity=".65" text-anchor="middle">8.4 TB of headroom already committed — it fills without anyone adding a VM</text>
+    </svg>
+    <figcaption>Thin provisioning means the reservation is the bill we have already agreed to;
+    consumption is what we pay today. Storage can grow roughly fourfold with the VM count
+    completely flat.</figcaption>
+  </figure>
+  <div class="col">
+    <p>This is the number I would watch, not CPU. A Kubernetes cluster reserves its disk up
+    front and fills it as logs, container images, database volumes and the Ceph storage layer
+    accumulate. Nothing has to change for 2.7 TB to become 5, then 8.</p>
+    <p>The application pool's Ceph disks — 500 GB per node, 2.5 TB per cluster — are the
+    largest single contributor and the one most likely to fill quietly.</p>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">What we can give back</p>
+    <h2>Four levers, biggest first</h2>
+  </div>
+  <ol class="levers">
+    <li>
+      <div>
+        <p class="lever-h">Identify and destroy the 11 unaccounted VMs</p>
+        <p>They predate the June count and are not in the current Terraform. Likely candidates
+        are the original <code>dpl2</code> development cluster and VMs orphaned by a partial
+        Terraform apply — a known failure we have hit and documented before. Needs Jon's
+        spreadsheet with VM names to confirm before anything is powered off — the method is
+        set out under <em>Method</em> below and the tooling is written and read-only.</p>
+        <p class="lever-n">≈26 vCPU · ≈52 GB · disk to be measured</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <p class="lever-h">Right-size QA's application pool</p>
+        <p>QA is a deliberate mirror of production, which is why it is the same size. But it
+        carries no production traffic and no production data volume. Cutting its application
+        nodes from five to three, or halving their memory, is the single biggest saving
+        available and costs us only the fidelity of load testing.</p>
+        <p class="lever-n">up to 32 vCPU · 64 GB · 1.6 TB reserved</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <p class="lever-h">Trim the dev cluster</p>
+        <p>Dev still runs seven flat workers at 12 GB from before the three-pool design. It is
+        the least loaded of the three and the safest to shrink.</p>
+        <p class="lever-n">≈8 vCPU · ≈24 GB · 0.2 TB reserved</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <p class="lever-h">The Risk Server</p>
+        <p>Not a Talos VM and not mine, but it is on the same balance sheet and Jon has raised
+        it twice. 4 vCPU, 32 GB and over 3 TB of disk sitting powered on. It needs an owner to
+        say yes, not an engineer to say how.</p>
+        <p class="lever-n">4 vCPU · 32 GB · 3+ TB — needs a decision, not work</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">How the footprint grows from here</p>
+    <h2>The unit of growth is a cluster, not a VM</h2>
+  </div>
+  <div class="col">
+    <p>Talos clusters do not grow one machine at a time. They come in fixed shapes, and that
+    makes forecasting unusually clean:</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>If this happens</th><th>VMs</th><th>vCPU</th><th>RAM</th><th>Disk reserved</th></tr></thead>
+      <tbody>
+        <tr><td>Nothing changes</td><td>+0</td><td>+0</td><td>+0</td><td class="sub" style="text-align:right">fills toward 11.1 TB</td></tr>
+        <tr><td>One more application node</td><td>+1</td><td>+16</td><td>+32 GB</td><td>+0.8 TB</td></tr>
+        <tr><td>A DR or second production cluster</td><td>+13</td><td>+124</td><td>+272 GB</td><td>+5.1 TB</td></tr>
+        <tr><td>Bare-metal cluster (bm-dev exists)</td><td>+13</td><td>+124</td><td>+272 GB</td><td>+5.1 TB</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col">
+    <p>No further environment builds are planned. Growth from here should come from
+    applications landing inside the clusters we already have — which is exactly what the
+    application pool was sized for, and why it looks oversized while it is still filling up.</p>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">Saying it without the jargon</p>
+    <h2>Lines you can use in the room</h2>
+  </div>
+  <div class="says">
+    <div class="say"><span class="tag">Why three of everything</span>
+      <p>We build the same platform three times on purpose — a workbench, a dress rehearsal,
+      and the live stage. Before July we had only the workbench and the live stage, which
+      meant changes were rehearsed in production. QA is what stopped that.</p></div>
+    <div class="say"><span class="tag">Why a cluster is not 13 servers</span>
+      <p>A cluster is 13 machines that only function as a set. You cannot power three of them
+      off on a Friday to free up room, any more than you can remove three cylinders from an
+      engine. The unit we add or remove is the whole cluster.</p></div>
+    <div class="say"><span class="tag">Why the disk number will keep climbing</span>
+      <p>We reserved about 11 terabytes and have filled under 3. The reservation is a bill we
+      already agreed to; the usage is what we pay today. That gap closes on its own.</p></div>
+    <div class="say"><span class="tag">Where the capacity actually goes</span>
+      <p>Two thirds of every cluster is one pool of five machines that the applications
+      themselves run on. The plumbing is cheap. The tenants are what cost.</p></div>
+    <div class="say"><span class="tag">What we are asking for</span>
+      <p>Not more capacity. We want to give some back — starting with eleven machines nobody
+      has claimed, and a test environment that is sized like production without carrying
+      production's load.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">Before we can commit to numbers</p>
+    <h2>Three questions for Jon</h2>
+  </div>
+  <div class="col">
+    <ul class="plain">
+      <li><strong>Is 314 vCPU allocated, or measured?</strong> This changes the conversation
+      entirely. Kubernetes reserves generously and runs lightly; if that figure is what we
+      asked for rather than what we are burning, actual utilisation may be a fraction of it.
+      I would rather be judged on what we consume than on what we reserved.</li>
+      <li><strong>Is 2.7 TB consumed or provisioned?</strong> Our reservations total about
+      11 TB, so 2.7 reads as consumption. Worth confirming, because the forecast turns on it.</li>
+      <li><strong>Can I have the VM names from the spreadsheet?</strong> The eleven unaccounted
+      machines are arithmetic right now, not an inventory. With names I can match them against
+      Terraform state in a morning and tell you exactly what is safe to remove.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <p class="eyebrow">Method</p>
+    <h2>How we tell ours from everything else</h2>
+    <p class="q">So the list we bring back is defensible, and nothing gets powered off on
+    an assumption.</p>
+  </div>
+  <div class="col">
+    <p>A VM is <strong>ours</strong> if Terraform is tracking it. That is the record that
+    decides what gets rebuilt, resized or destroyed by the pipeline, so it is the only
+    definition that means anything operationally. We read it from the three cluster state
+    files — one per AWS account, since each environment keeps its own — and cross-check
+    against the machines actually registered in each live cluster.</p>
+    <p>Two independent sources matter here. A VM present in a cluster but absent from
+    Terraform is <em>drift</em>, not an orphan: something we depend on that the pipeline has
+    lost track of. Deleting one of those would take a working cluster down. They come out of
+    the report in their own bucket, flagged as do-not-touch.</p>
+    <p>Everything in Jon's inventory that appears in neither is a <strong>candidate</strong>,
+    and the word is doing work. "Not in our Terraform" is not the same as "nobody's" — it
+    needs an owner to confirm before anything is powered off.</p>
+    <h3>The failure this is built to avoid</h3>
+    <p>If one state file cannot be read — an expired SSO session, a wrong profile, a bucket in
+    the wrong account — a naive script reports that cluster's thirteen VMs as unmanaged. They
+    look exactly like orphans. Acting on that would destroy a production cluster.</p>
+    <p>So the tool refuses to classify anything unless every source loads: three credentialed
+    sessions verified against their expected account numbers, three state files parsed, and a
+    non-empty VM list from each. An incomplete picture exits with an error instead of a
+    tidy-looking answer. It also prints which spreadsheet column it read names from, because a
+    silently mismatched column classifies the entire fleet as "not ours".</p>
+    <p>We hit precisely this class of error twice in the last week — a probe reporting five
+    production secrets as missing minutes after they were created, because the region was not
+    pinned. The stakes here are higher, so the guard is louder.</p>
+    <h3>Running it</h3>
+    <p><code>python3 scripts/talos-vm-reconcile.py</code> prints what we manage, with the
+    vCPU, memory and disk each VM reserves. <code>--diff &lt;inventory.csv&gt;</code> classifies
+    Jon's export into <em>ours</em>, <em>not ours</em>, and <em>in Terraform but not in the
+    inventory</em> — that last bucket catching VMs the pipeline thinks it owns that no longer
+    exist. The script only reads; it emits no destroy commands, by design.</p>
+  </div>
+</section>
+
+<section>
+  <div class="caveat col">
+    <h2>What this document does not claim</h2>
+    <ul>
+      <li>The per-environment figures come from the committed cluster configuration
+      (<code>iaac-talos</code> tfvars), not from a live vCenter or Nutanix query. They are what
+      we asked for; Jon's inventory is what exists. Any disagreement between the two is itself
+      a finding.</li>
+      <li>The 11-VM gap is <em>47 minus 36</em>. It is a number to go and investigate, not an
+      identified list of machines to power off.</li>
+      <li>Disk figures are provisioned capacity. Control-plane disk is taken as 100 GB in
+      QA and production and 50 GB in dev; if that is wrong the storage totals move, though
+      not by much — the application pool dominates either way.</li>
+      <li>The savings in the levers section are ceilings, not commitments. Each needs a change
+      through the deployment pipeline and a window.</li>
+      <li>We cannot query vSphere directly — <code>govc</code> is not installed on the platform
+      workstation. The inventory side of the comparison depends on Jon's export, which is why
+      the VM names are the one thing we need from him before the list of eleven becomes real.</li>
+    </ul>
+  </div>
+</section>
+
+</div>
