@@ -27,6 +27,31 @@ Last verified 2026-09-02.
 Operator and viewer are scoped to the `apps` AppProject. They see their own Applications
 and nothing else on the cluster.
 
+## Where this lives in the portal
+
+Entra deep-links, for when you want to look rather than run a command.
+
+| What | Link |
+|---|---|
+| **Add someone** — `usx-argocd-admin` members | https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/6c23655c-8080-4991-a67f-293cfb0a597b |
+| **Add someone** — `usx-argocd-operator` members | https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/984faf3e-e280-490e-8ff4-a71101a73a95 |
+| **Add someone** — `usx-argocd-viewer` members | https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/6bd52028-9105-4bdf-a39a-0d31a57ae53b |
+| Which group holds which tier | https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Users/objectId/b20084ae-9f13-4ca7-961c-b05f023fa2c2/appId/42dc0c33-4c56-47a5-b207-d119272997aa |
+| The app roles themselves | https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/AppRoles/appId/42dc0c33-4c56-47a5-b207-d119272997aa |
+| Consent state | https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Permissions/objectId/b20084ae-9f13-4ca7-961c-b05f023fa2c2/appId/42dc0c33-4c56-47a5-b207-d119272997aa |
+
+The **Users and groups** page is the readable summary: three rows, each a group, with a
+*Role assigned* column carrying `platform-admin`, `app-operator` or `app-viewer`.
+
+The consent page should show `openid profile email` granted for **All users**. A person's
+name there instead means only that person consented, and everyone else still hits the
+approval screen.
+
+**What the portal cannot show you is what a tier is allowed to do.** The app role is only a
+label; the verbs behind it (sync, restart, delete a pod) are `policy.csv` in the platform
+Git repo. Widening a tier is a PR — `scripts/pr-argocd-rbac-operator.sh` is the worked
+example — never a portal edit.
+
 ## Granting access
 
 ```bash
