@@ -155,10 +155,10 @@
   <p class="eyebrow">Capacity briefing · US Xpress platform</p>
   <h1>Talos Footprint on Nutanix Prod</h1>
   <p class="lede">Jon Griffin counts 47 Talos VMs on 8/27, up from 21 on 6/19. All 26 of those
-  VMs are two planned environment builds — 13 each. The number worth discussing is not the
-  growth; it is the 11-VM baseline that predates it.</p>
-  <p class="meta">Prepared by Dare Oke · 2026-09-02 · our figures read from live Terraform state
-  on 2026-09-02; Jon's from his 8/27 Nutanix inventory</p>
+  VMs are two planned environment builds — 13 each. The other 11 are two dead clusters,
+  <code>dpl</code> and <code>jbtest</code>, now identified by name and ready to remove.</p>
+  <p class="meta">Prepared by Dare Oke · 2026-09-02 · Terraform state and a full vCenter
+  inventory read the same day; 383 VMs enumerated on <code>usxd1vmvcntrapp</code></p>
 </header>
 
 <section>
@@ -174,8 +174,9 @@
     <p><strong>2. Eleven VMs are unexplained by our clusters.</strong> Terraform state says we
     manage exactly 36 of the 47 — 282 vCPU and 660 GB of the 314 and 704 Jon counts. The other 11 predate the June count and are not in the current
     Terraform. Finding and removing them is the first thing I will do with Jon's spreadsheet.</p>
-    <p><strong>3. Storage is the forecast risk, not CPU.</strong> We have reserved 10.79 TB
-    and filled 2.7 TB. That gap fills over time with no new VMs at all.</p>
+    <p><strong>3. Talos is 3% of the storage on that cluster.</strong> The vCenter holds 383 VMs
+    and 366 TB provisioned. Talos is 10.98 TB of it. Four database VMs alone hold 88 TB — eight
+    times the entire Talos estate. Storage is worth discussing; it is not a Talos conversation.</p>
   </div>
 </section>
 
@@ -188,8 +189,8 @@
   <div class="stats">
     <div class="stat"><p class="stat-l">VMs observed</p><p class="num">47</p><p class="stat-s">8/27, Jon's count</p></div>
     <div class="stat is-ok"><p class="stat-l">Accounted for</p><p class="num">36</p><p class="stat-s">282 vCPU · 660 GB · from Terraform state</p></div>
-    <div class="stat is-gap"><p class="stat-l">Unaccounted</p><p class="num">11</p><p class="stat-s">32 vCPU · 44 GB unexplained</p></div>
-    <div class="stat"><p class="stat-l">Storage reserved</p><p class="num">10.79 TB</p><p class="stat-s">2.7 TB in use today</p></div>
+    <div class="stat is-gap"><p class="stat-l">Dead clusters</p><p class="num">11</p><p class="stat-s">dpl + jbtest · 32 vCPU · 44 GB</p></div>
+    <div class="stat"><p class="stat-l">Talos share of estate</p><p class="num">3.0%</p><p class="stat-s">10.98 of 366 TB provisioned</p></div>
   </div>
 </section>
 
@@ -263,8 +264,9 @@
         <tr><td>op-usxpress-qa</td><td>13</td><td>124</td><td>272 GB</td><td>5.1 TB</td><td class="sub">3 control + 2 system + 3 platform + 5 application</td></tr>
         <tr><td>op-usxpress-prod</td><td>13</td><td>124</td><td>272 GB</td><td>5.1 TB</td><td class="sub">identical to QA by design</td></tr>
         <tr class="total"><td>Accounted for</td><td>36</td><td>282</td><td>660 GB</td><td>10.79 TB</td><td class="sub">read from Terraform state, 2026-09-02</td></tr>
-        <tr class="gap"><td>Unaccounted</td><td>11</td><td>32</td><td>44 GB</td><td>unknown</td><td class="sub">to identify from Jon's inventory</td></tr>
-        <tr class="total"><td>Jon's 8/27 count</td><td>47</td><td>314</td><td>704 GB</td><td>2.7 TB <span class="sub">in use</span></td><td class="sub">reported</td></tr>
+        <tr class="gap"><td>dpl (abandoned)</td><td>5</td><td>14</td><td>20 GB</td><td>0.10 TB</td><td class="sub">3 control + 2 workers, powered on</td></tr>
+        <tr class="gap"><td>jbtest (abandoned)</td><td>6</td><td>18</td><td>24 GB</td><td>0.09 TB</td><td class="sub">3 control + 3 workers, powered on</td></tr>
+        <tr class="total"><td>All Talos VMs</td><td>47</td><td>314</td><td>704 GB</td><td>10.98 TB</td><td class="sub">matches Jon's 8/27 count exactly</td></tr>
       </tbody>
     </table>
   </div>
@@ -312,19 +314,55 @@
 
 <section>
   <div class="head">
+    <p class="eyebrow">Context we did not have before today</p>
+    <h2>Talos against the rest of the vCenter</h2>
+    <p class="q">A full inventory of <code>usxd1vmvcntrapp</code> — 383 VMs — read on 2026-09-02.</p>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th></th><th>VMs</th><th>vCPU</th><th>RAM</th><th>Provisioned</th></tr></thead>
+      <tbody>
+        <tr><td>Whole vCenter</td><td>383</td><td>2,162</td><td>8,122 GB</td><td>366.09 TB</td></tr>
+        <tr><td>All Talos</td><td>47</td><td>314</td><td>704 GB</td><td>10.98 TB</td></tr>
+        <tr class="total"><td>Talos share</td><td>12.3%</td><td>14.5%</td><td>8.7%</td><td>3.0%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="col">
+    <p>Talos is a real share of the <em>compute</em> — 14.5% of vCPU is worth being able to
+    justify, and we can. It is a rounding error in <em>storage</em>.</p>
+    <p>For scale: <code>USXD2VMDBPSAQA</code> alone is provisioned 27.7 TB, and the three
+    <code>USXD1VMDBPSA*P</code> database servers a further 63 TB between them. Those four VMs
+    hold eight times the entire Talos estate.</p>
+    <h3>34 powered-off VMs are holding 26.2 TB</h3>
+    <p>The largest single reclaim on the cluster, and it is not ours. Three Cetaris database
+    servers suffixed <code>_Off_08_27_26</code> hold 14.4 TB between them; a fourth,
+    <code>USXDBCTRQ_Off_06_24_26</code>, another 4.3 TB. They are already powered off — the
+    decision to shut them down has been taken and the disk was never released.</p>
+    <p>That is 19 TB against the 190 GB the two dead Talos clusters occupy. Both are worth
+    doing; only one of them moves the storage number.</p>
+    <h3>The Risk Server, confirmed</h3>
+    <p><code>USXD1RSK</code> — powered on, 4 vCPU, 34 GB RAM, 3.02 TB provisioned. Jon's
+    recollection was accurate. It still needs an owner to say yes.</p>
+  </div>
+</section>
+
+<section>
+  <div class="head">
     <p class="eyebrow">What we can give back</p>
     <h2>Four levers, biggest first</h2>
   </div>
   <ol class="levers">
     <li>
       <div>
-        <p class="lever-h">Identify and destroy the 11 unaccounted VMs</p>
-        <p>They predate the June count and are not in the current Terraform. Likely candidates
-        are the original <code>dpl2</code> development cluster and VMs orphaned by a partial
-        Terraform apply — a known failure we have hit and documented before. Needs Jon's
-        spreadsheet with VM names to confirm before anything is powered off — the method is
-        set out under <em>Method</em> below and the tooling is written and read-only.</p>
-        <p class="lever-n">32 vCPU · 44 GB · disk to be measured</p>
+        <p class="lever-h">Destroy the dpl and jbtest clusters — identified, ours, dead</p>
+        <p>Eleven VMs: <code>talos-cp-dpl-1/2/3</code>, <code>talos-wk-dpl-1/2</code>,
+        <code>talos-cp-jbtest-1/2/3</code> and <code>talos-wk-jbtest-1/2/3</code>. All powered
+        on, none in any Terraform state. <code>dpl</code> is the original development cluster
+        that <code>op-usxpress-dev</code> replaced; <code>jbtest</code> is a test build that
+        was never torn down. These are the clearest reclaim on the list because they are
+        unambiguously platform VMs — no other team to consult.</p>
+        <p class="lever-n">32 vCPU · 44 GB · 190 GB — ready to schedule</p>
       </div>
     </li>
     <li>
@@ -424,9 +462,10 @@
       I would rather be judged on what we consume than on what we reserved.</li>
       <li><strong>Is 2.7 TB consumed or provisioned?</strong> Our reservations total about
       11 TB, so 2.7 reads as consumption. Worth confirming, because the forecast turns on it.</li>
-      <li><strong>Can I have the VM names from the spreadsheet?</strong> The eleven unaccounted
-      machines are arithmetic right now, not an inventory. With names I can match them against
-      Terraform state in a morning and tell you exactly what is safe to remove.</li>
+      <li><strong>Who owns the powered-off Cetaris servers?</strong> The
+      <code>_Off_08_27_26</code> and <code>_Off_06_24_26</code> sets hold 19 TB between them
+      and are already shut down. Releasing that disk is worth roughly a hundred times what the
+      dead Talos clusters are, and it needs a retention decision rather than engineering work.</li>
     </ul>
   </div>
 </section>
@@ -481,16 +520,21 @@
       sit within about 2% of them; treat the state figures as the authority where they differ.
       Neither is a vCenter query: they are what Terraform manages, and Jon's inventory is what
       exists. Disagreement between the two is itself a finding.</li>
-      <li>The 11-VM gap is <em>47 minus 36</em>. It is a number to go and investigate, not an
-      identified list of machines to power off.</li>
+      <li>The eleven are now named, not inferred. They carry exactly 32 vCPU and 44 GB, which
+      matches the gap to the vCPU and to the gigabyte. That is a closed reconciliation, but
+      confirm nothing else depends on <code>jbtest</code> before it is destroyed — its name
+      suggests an individual owner rather than the platform.</li>
       <li>Disk figures are provisioned capacity. Control-plane disk is taken as 100 GB in
       QA and production and 50 GB in dev; if that is wrong the storage totals move, though
       not by much — the application pool dominates either way.</li>
       <li>The savings in the levers section are ceilings, not commitments. Each needs a change
       through the deployment pipeline and a window.</li>
-      <li>We cannot query vSphere directly — <code>govc</code> is not installed on the platform
-      workstation. The inventory side of the comparison depends on Jon's export, which is why
-      the VM names are the one thing we need from him before the list of eleven becomes real.</li>
+      <li>The vCenter inventory was read with <code>govc</code> as <code>doke@usxpress.com</code>
+      on 2026-09-02 and covers what that account can see — 383 VMs. A VM outside that visibility
+      would not appear. The Talos totals it produced match Jon's 8/27 figures exactly, which is
+      good corroboration that the two views cover the same estate.</li>
+      <li>Provisioned figures are what each VM has been allocated. Actual consumption on the
+      datastores will be lower, and the 2.7 TB Jon quotes for Talos is consistent with that.</li>
     </ul>
   </div>
 </section>
