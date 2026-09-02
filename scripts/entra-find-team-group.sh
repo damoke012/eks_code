@@ -37,17 +37,24 @@ if [ "$1" = "--members" ]; then
   if ! gid=$(az ad group show --group "$G" --query id -o tsv 2>"$WORK/e"); then
     echo "!! cannot resolve group '$G': $(tail -1 "$WORK/e")" >&2; exit 3
   fi
-  az ad group show --group "$gid" \
-    --query "{name:displayName,id:id,security:securityEnabled,mail:mailEnabled,synced:onPremisesSyncEnabled,desc:description}" \
-    -o json | python3 -c '
-import json,sys
-g=json.load(sys.stdin)
-print(f"\n{g[\"name\"]}  ({g[\"id\"]})")
-print("  managed in", "on-prem AD -- membership changes go through AD, not Entra"
-      if g.get("synced") else "Entra (cloud-only)")
-print(f"  security={g.get(\"security\")}  mail={g.get(\"mail\")}")
-if g.get("desc"): print(f"  {g[\"desc\"]}")
-'
+  # Plain tsv, formatted in bash. A python heredoc with escaped quotes inside an f-string
+  # is a SyntaxError, and it silently cost us the two facts that decide everything here:
+  # whether the group is security-enabled (only those can hold an app role) and whether it
+  # is synced from on-prem AD (which decides who can add members).
+  IFS=$'\t' read -r gname gidout gsec gmail gsync gdesc < <(
+    az ad group show --group "$gid" \
+      --query "[displayName,id,securityEnabled,mailEnabled,onPremisesSyncEnabled,description]" \
+      -o tsv 2>/dev/null)
+  echo
+  echo "  $gname  ($gidout)"
+  if [ "$gsync" = "True" ]; then
+    echo "    managed   on-prem AD — membership changes go through AD, NOT Entra"
+  else
+    echo "    managed   Entra (cloud-only) — you can add members directly"
+  fi
+  echo "    security  $gsec        (only a security-enabled group can hold an app role)"
+  echo "    mail      $gmail"
+  [ -n "${gdesc:-}" ] && [ "$gdesc" != "None" ] && echo "    desc      $gdesc"
   echo
   echo "  members:"
   az ad group member list --group "$gid" \
@@ -110,17 +117,13 @@ echo
 echo "== detail on the shared groups (who can add members?)"
 while read -r gid; do
   [ -n "$gid" ] || continue
-  az ad group show --group "$gid" \
-    --query "{name:displayName,id:id,security:securityEnabled,mail:mailEnabled,synced:onPremisesSyncEnabled,desc:description}" \
-    -o json 2>/dev/null | python3 -c '
-import json,sys
-g=json.load(sys.stdin)
-src = "on-prem AD (edit in AD, not Entra)" if g.get("synced") else "cloud-only (edit in Entra)"
-print(f"   {g[\"name\"]}")
-print(f"     id       {g[\"id\"]}")
-print(f"     managed  {src}")
-if g.get("desc"): print(f"     desc     {g[\"desc\"]}")
-'
+  IFS=$'\t' read -r gname gidout gsec gmail gsync gdesc < <(
+    az ad group show --group "$gid" \
+      --query "[displayName,id,securityEnabled,mailEnabled,onPremisesSyncEnabled,description]" \
+      -o tsv 2>/dev/null)
+  echo "   $gname"
+  echo "     id        $gidout"
+  echo "     security  $gsec   synced-from-AD  ${gsync:-False}"
 done < "$WORK/common.txt"
 
 echo
