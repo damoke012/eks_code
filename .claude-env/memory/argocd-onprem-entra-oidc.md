@@ -150,3 +150,23 @@ chasing now that roles work, but it is the loose end behind the missing groups c
 real users are **Timothy Preble** `tpreble@usxpress.com` and **Jenni Ray** `jlray@usxpress.com`.
 Resolve a UPN with `scripts/entra-argocd-access-groups.sh --find <surname>` before scripting
 anyone's access. See [[identity-names-do-not-cross-systems]].
+
+**2026-09-02 close-out — four PRs open, one secret written.**
+- `variant-inc/iaac-talos-flux-platform` **#144** (op-prod) repo SSH ExternalSecret,
+  **#145/#146/#147** `role:app-operator` on op-dev/op-qa/op-prod, scoped to project `apps`.
+- `repo.risingwave-pipeline.sshPrivateKey` **written** to `op-usxpress-prod/platform/argocd`
+  2026-09-02 by `scripts/argocd-repo-deploy-key.sh --write`, verified by content, both
+  pre-existing properties (`admin.password`, `admin.passwordMtime`) intact. **That record
+  holds the Argo admin password and `put-secret-value` replaces the whole document** — only
+  ever merge into it.
+- Public half `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINv2YLLN860FtxCgI9sXUbPw98EjAkp61wlknLOiVfRD`
+  must be added as a **read-only deploy key** on `variant-inc/risingwave-pipeline`.
+
+**PR #144 was inert when written.** The ExternalSecret referenced a property that did not
+exist — the record held only `admin.password` and `admin.passwordMtime`. It would have
+merged, synced green, and left Argo CD with a credential object carrying no key. Check the
+remote property exists before landing any ExternalSecret
+([[eso-secretsynced-not-content-check]]).
+
+**Still open:** tenant-wide admin consent (the only thing blocking Pujit); merging the four
+PRs; and adding Idris to `usx-cloud-admin` if he is meant to be an admin.
