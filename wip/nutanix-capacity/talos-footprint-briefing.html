@@ -171,9 +171,12 @@
     exactly +13. A Talos cluster is 13 VMs. We built QA in July and Production at the end of
     July, so that changes could stop being tested in production. That programme is complete —
     there is no third build queued.</p>
-    <p><strong>2. Eleven VMs are unexplained by our clusters.</strong> Terraform state says we
-    manage exactly 36 of the 47 — 282 vCPU and 660 GB of the 314 and 704 Jon counts. The other 11 predate the June count and are not in the current
-    Terraform. Finding and removing them is the first thing I will do with Jon's spreadsheet.</p>
+    <p><strong>2. The other eleven are two abandoned clusters, and we can name them.</strong>
+    Terraform state says we manage exactly 36 of the 47 — 282 vCPU and 660 GB of Jon's 314 and
+    704. The remaining eleven are <code>talos-*-dpl-*</code> (5 VMs) and
+    <code>talos-*-jbtest-*</code> (6 VMs): all powered on, in no Terraform state, carrying
+    exactly 32 vCPU and 44 GB. That is the gap to the vCPU and to the gigabyte. The
+    reconciliation closes with nothing left over.</p>
     <p><strong>3. Talos is 3% of the storage on that cluster.</strong> The vCenter holds 383 VMs
     and 366 TB provisioned. Talos is 10.98 TB of it. Four database VMs alone hold 88 TB — eight
     times the entire Talos estate. Storage is worth discussing; it is not a Talos conversation.</p>
