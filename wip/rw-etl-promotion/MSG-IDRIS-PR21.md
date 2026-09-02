@@ -1,44 +1,60 @@
-Round 1 on 7fd05d7 — reviewed from the PR page, diff not yet read.
+Round 1 on 7fd05d7 — full diff read.
 
-Good call on EXCLUDE_RE with /pipeline/pipelines as the stable root — that is the
-option I argued for, and keeping the exclusions explicit in the overlay records the
-decision where the next person will find it. The runtime validation before any database
-connection is the right control in the right place; it is the one of my five blockers
-that genuinely needed code rather than prose.
+The apply.sh work is good and it fixes the blocker it set out to fix. I checked the order
+rather than taking the description: the CREATE TABLE pipeline_applied block moved below the
+missing-variable check, so nothing opens a connection until validation passes. Replacing the
+:? fail-fast with collected validation is a better failure too — you get every missing
+variable at once instead of one per run. And EXCLUDE_RE with /pipeline/pipelines as the
+stable root is the option I argued for; the regex is properly anchored on both sides, which
+is the part these usually get wrong.
 
-The follow-up list is honest and I would rather have it than a PR claiming more than it
-does. It covers four of the five: the Terraform-owned secret records, the Flux/Argo
-ownership boundary, the Brand Avro schema-registry mappings, and pipeline_applied backup.
+I am not approving it as one PR, for one reason above all the others.
 
-Three things before I approve.
+1. This PR performs the first real cutover, on QA and prod, in the same commit.
 
-1. The production overlay carries a placeholder digest. Merged to master, that is the
-   same shape as PLACEHOLDER_INJECT_REAL_LICENSE, which synced green on op-usxpress-prod
-   yesterday, was rejected by the console, and crashlooped rw-bootstrap-service-accounts,
-   a Job with nothing to do with licensing. It is inert only while nothing reconciles it,
-   and creating the Argo Application that would reconcile it is item 3 on your own list.
-   Either land it with a real digest, or split the prod overlay out of this PR and hold it
-   until promotion supplies one.
+   PIPELINE_DIR: /pipeline/smoke  ->  /pipeline/pipelines
 
-2. You note kustomize rendering was not run, and six checks passed. Those are only both
-   true if the checks do not render overlays. Two overlays changed here and rendering is
-   the cheapest check there is. Please paste kustomize build for both, and tell me whether
-   any of the six renders them — if none does, that is a CI gap and I will raise it
-   separately rather than hold this PR for it.
+   in both overlays. Until now both environments have been running the smoke payload — that
+   is what "the path is proven on QA" has meant since 20 August. This changes what actually
+   executes against RisingWave in production, and it arrives inside a PR whose title, body
+   and other three files are about hardening a script.
 
-3. Rollback. It is not in the diff and not on the follow-up list, and it is the only one
-   of the five with no disposition. pipeline_applied records each file's SHA-256, skips
-   unchanged files and refuses changed ones, so reverting the overlay to a previous digest
-   gives the old container pointed at a RisingWave that already carries the new objects.
-   Say plainly that the pipeline is forward-only, and give the break-glass path for objects
-   a bad apply created — the CI guardrail blocks DROP, which is exactly the tension that
-   needs a named approver.
+   The change may well be right. Please split the two overlay files into their own PR, QA
+   first, with the cutover named in the title. I will review that one on its own terms.
 
-One smaller thing: bash -n proves the file parses, not that the assertion fires. Please run
-apply.sh once with a required variable unset and once with it set to the empty string, and
-show a non-zero exit naming the variable in both cases. Empty is the one that gets missed,
-and it is the case that actually occurs — when a remoteRef property is absent from the AWS
-record, ESO still reports SecretSynced and the key is simply missing from the Secret, which
-reaches the container as an empty variable rather than an unset one.
+2. The exclusion set is narrower than the one we agreed on 26 August. That list had seven
+   entries; this has four plus one file. Missing: 900-user-access, 001-secrets-mongodb,
+   400-sink. Also `shared/scripts` where we had a bare `scripts`. Either those directories
+   are gone, or they are now in scope for a production apply — and 300-transform.sql is
+   excluded by exact path with no reason recorded. Please list every directory under
+   pipelines/ and mark each in scope or excluded with a reason. The exclusion list is a
+   decision record; that is the whole argument for preferring it over PIPELINE_DIR.
 
-I will do a line-by-line pass on the diff next and come back with Round 2.
+3. pipeline_applied stores the hash of the template, not of the rendered SQL. The sha is
+   taken from $f before the %VARIABLE% substitution runs. So changing a variable's value in
+   the ConfigMap or the Secret leaves the file's sha identical, the file is skipped, the new
+   value is never applied, and the Job goes green. Rendering is new in this PR and the key
+   that decides whether to apply did not move with it. Hash the rendered content instead —
+   one line, and it makes a variable change a real change.
+
+4. Excluding everything exits 0. The empty check now sits after the exclusion loop and still
+   prints "no .sql or .rw files under ${PIPELINE_DIR}". A typo in EXCLUDE_RE — an unescaped
+   dot, a stray pipe producing an empty alternative — gives you a Job that applies nothing,
+   claims the directory is empty and turns the sync green. Count before and after, and fail
+   when the set was non-empty before exclusion and empty after. That is a configuration
+   error, not a no-op, and finding 2 means that regex is going to be edited.
+
+Two smaller ones. README now links PIPELINE_ARCHITECTURE.md and IMPLEMENTATION_CHECKLIST.md
+and the same commit adds both to .gitignore — two links on master that resolve to nothing
+for anyone but you. If those documents answer the secrets, Flux-boundary and backup items,
+they belong in the repo. And .gitignore has no trailing newline, so the next entry appended
+will join the last line.
+
+Still outstanding from the architecture review, and not in the diff or the follow-up list:
+rollback. The pipeline is forward-only — pipeline_applied refuses changed files, so reverting
+to a previous digest gives the old container pointed at a RisingWave that already carries the
+new objects. Say that plainly somewhere, and give the break-glass path for objects a bad
+apply created, noting the CI guardrail blocks DROP.
+
+Your follow-up list is honest and I would rather have it than a PR claiming more than it
+does. Four of the five are on it with the right mechanisms named.
