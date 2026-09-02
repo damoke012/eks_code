@@ -86,14 +86,15 @@ case "$MODE" in
   --define)
     ADMIN_ID=$(role_id platform-admin)
     VIEWER_ID=$(role_id app-viewer)
+    OPERATOR_ID=$(role_id app-operator)
     TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
     # Preserve anything already defined -- --app-roles REPLACES the list wholesale,
     # the same shape as --web-redirect-uris, which is why the cloud fleet's app was
     # left alone in the first place.
     az ad app show --id "$APP_ID" --query appRoles --output json > "$TMP"
-    python3 - "$TMP" "$ADMIN_ID" "$VIEWER_ID" <<'PY'
+    python3 - "$TMP" "$ADMIN_ID" "$VIEWER_ID" "$OPERATOR_ID" <<'PY'
 import json, sys
-path, admin_id, viewer_id = sys.argv[1:4]
+path, admin_id, viewer_id, operator_id = sys.argv[1:5]
 roles = json.load(open(path)) or []
 want = {
   "platform-admin": {
@@ -107,6 +108,15 @@ want = {
     "displayName": "Argo CD application viewer",
     "value": "app-viewer",
     "description": "Read-only view of one AppProject, plus sync on dev and QA. Maps to role:app-viewer.",
+  },
+  # Added 2026-09-02 (Doke's call): the application team operates its own pipeline on
+  # every environment, production included. app-viewer stays read-only for people who
+  # only need visibility.
+  "app-operator": {
+    "id": operator_id, "isEnabled": True, "allowedMemberTypes": ["User"],
+    "displayName": "Argo CD application operator",
+    "value": "app-operator",
+    "description": "One AppProject: read, logs, sync and pod restart on dev, QA AND prod. Maps to role:app-operator.",
   },
 }
 by_value = {r.get("value"): r for r in roles}
