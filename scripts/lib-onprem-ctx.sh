@@ -51,25 +51,48 @@ onprem_resolve_ctx() {
     return 2
   fi
 
-  kc=$(printf '%s' "$found" | head -1 | cut -d'|' -f1)
-  ctx=$(printf '%s' "$found" | head -1 | cut -d'|' -f2)
-  [ "$n" -eq 1 ] || echo "   ($n candidates for $cluster; using $(basename "$kc") / $ctx)" >&2
+  # TRY EVERY CANDIDATE, not just the first. op-qa has two: an SSO context and a
+  # break-glass cert one. Taking head -1 meant an expired 8-hour SSO session reported the
+  # whole cluster unreachable while a working kubeconfig sat second in the list -- a false
+  # UNKNOWN, which is indistinguishable from "RisingWave is not deployed there".
+  # Every assertion below still runs on whichever candidate is used: nothing is relaxed,
+  # the search is just no longer abandoned after one miss.
+  #
+  # `while read ... <<< "$found"`, NOT a pipe: a piped while is a subshell and the
+  # assignments below would be discarded (2026-09-03, twice in one day).
+  local why=""
+  while IFS='|' read -r kc ctx; do
+    [ -n "$kc" ] || continue
+    srv=$(kubectl --kubeconfig="$kc" --context="$ctx" config view --minify \
+            -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null)
+    if [ "$srv" != "https://$endpoint:6443" ]; then
+      why="$why
+   $(basename "$kc") / $ctx -> $srv, not https://$endpoint:6443"
+      continue
+    fi
+    node=$(kubectl --kubeconfig="$kc" --context="$ctx" get nodes \
+             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "$node" ]; then
+      why="$why
+   $(basename "$kc") / $ctx -> cannot reach (expired SSO session, or VPN)"
+      continue
+    fi
+    case "$node" in
+      *"$cluster"*) : ;;
+      *) why="$why
+   $(basename "$kc") / $ctx -> live node '$node' does not carry '$cluster'"
+         continue ;;
+    esac
 
-  srv=$(kubectl --kubeconfig="$kc" --context="$ctx" config view --minify \
-          -o jsonpath='{.clusters[0].cluster.server}')
-  [ "$srv" = "https://$endpoint:6443" ] || {
-    echo "!! context '$ctx' resolves to $srv, not https://$endpoint:6443. Refusing." >&2
-    return 2; }
+    [ "$n" -eq 1 ] || echo "   ($n candidates for $cluster; using $(basename "$kc") / $ctx)" >&2
+    ONPREM_KC="$kc"; ONPREM_CTX="$ctx"; ONPREM_NODE="$node"; ONPREM_ENDPOINT="$endpoint"
+    export ONPREM_KC ONPREM_CTX ONPREM_NODE ONPREM_ENDPOINT
+    return 0
+  done <<< "$found"
 
-  node=$(kubectl --kubeconfig="$kc" --context="$ctx" get nodes \
-           -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || {
-    echo "!! cannot reach $endpoint ($cluster). VPN? SSO session?" >&2; return 2; }
-  case "$node" in
-    *"$cluster"*) : ;;
-    *) echo "!! live node '$node' does not carry '$cluster'. Wrong cluster. Refusing." >&2
-       return 2 ;;
+  echo "!! no usable context for $cluster ($n tried):$why" >&2
+  case "$cluster" in
+    op-qa) echo "   op-qa cluster access is AWS SSO, valid 8 hours: aws sso login --profile op-qa" >&2 ;;
   esac
-
-  ONPREM_KC="$kc"; ONPREM_CTX="$ctx"; ONPREM_NODE="$node"; ONPREM_ENDPOINT="$endpoint"
-  export ONPREM_KC ONPREM_CTX ONPREM_NODE ONPREM_ENDPOINT
+  return 2
 }

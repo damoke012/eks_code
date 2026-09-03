@@ -125,5 +125,6 @@ section "12. Do the gates themselves still work?"
 # namespace on 2026-09-03. This replays recorded kubectl output through it, both directions.
 bash scripts/rw-prod-status.test.sh || findings=$((findings+1))
 bash scripts/rw-fleet-licence-status.test.sh || findings=$((findings+1))
+bash scripts/lib-onprem-ctx.test.sh || findings=$((findings+1))
 
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
