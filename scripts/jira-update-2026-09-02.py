@@ -152,7 +152,31 @@ def adf(text):
              for p in text.split("\n\n") if p.strip()]}
 
 
+def preflight():
+    """Prove the token works before any call that matters.
+
+    Jira answers an unauthorised issue read with 404 "does not exist" and an
+    unauthorised create with 400 "target project doesn't exist". Both read as
+    permission problems rather than auth ones, so a bad token looks exactly like
+    a missing ticket. Second occurrence: 2026-08-20 (eleven failed calls) and
+    2026-09-03 (nine), both from a placeholder token pasted out of an instruction.
+    close-sprint3-tickets.py has carried this check since the first one."""
+    s, r = api("GET", "/rest/api/3/myself")
+    if s != 200:
+        tok = os.environ.get("ATLASSIAN_TOKEN", "")
+        print(f"!! cannot authenticate to {BASE} as {EMAIL}  (HTTP {s})")
+        if len(tok) < 20 or tok.startswith("<"):
+            print(f"   ATLASSIAN_TOKEN looks wrong: {len(tok)} characters.")
+            print("   Set it without putting it in shell history:")
+            print("     read -rsp 'Atlassian API token: ' ATLASSIAN_TOKEN; export ATLASSIAN_TOKEN; echo")
+        else:
+            print("   Plausible length, so it may be expired or revoked.")
+            print("   Mint a new one: https://id.atlassian.com/manage-profile/security/api-tokens")
+        sys.exit(1)
+    print(f"authenticated as {r.get('displayName')} <{r.get('emailAddress', EMAIL)}>")
+
 print(f"{'EXECUTING' if GO else 'DRY RUN'} — {EMAIL} @ {BASE}\n")
+preflight()
 
 print("== comments")
 for key, body in COMMENTS.items():

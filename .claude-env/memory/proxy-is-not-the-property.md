@@ -1,11 +1,11 @@
 ---
 name: proxy-is-not-the-property
-description: The recurring self-inflicted error — measuring something adjacent to the property in question and reporting the proxy's answer as the property's; four instances, each reversed by one direct check
+description: The recurring self-inflicted error — measuring something adjacent to the property in question and reporting the proxy's answer as the property's; seven instances, each reversed by one direct check
 metadata:
   type: feedback
 ---
 
-Four times now a confident wrong answer came from measuring a proxy instead of the thing:
+Seven times now a confident wrong answer has come from measuring a proxy instead of the thing:
 
 | Question | Proxy used | Verdict | Direct check that reversed it |
 |---|---|---|---|
@@ -65,3 +65,15 @@ ConfigMap, +2/-1 per file, and the file list alone did not show it.
 is the property, it is one command, and no finding gets raised before it has been read. A
 follow-up list is not a change list — the two live in the same body and read alike.
 See [[adjacent-step-green-signals]].
+
+**Instance 7 — 2026-09-03. A committed script is a proxy for the action it performs.**
+Reported the INFRA board's state from the repo's own records: the scripts existed, were
+committed, and commit `c8db76d` is titled *"record 2026-09-02 on the INFRA board: three
+comments, one new ticket"*. The board had none of it — both scripts had only ever been run
+dry. INFRA-1674's last comment was 08-31, and Jira held no record that RisingWave was live
+on prod. The commit message asserts the write; only the board witnesses it.
+
+**How to apply:** a script, a commit, a commit message and a `wip/` write-up are all proxies
+for a side effect on a remote system. Read the remote. For Jira that is one read-only
+command (`scripts/list-open-tickets.py`, `check-sprint-membership.py`), and it is what
+separates "we filed that ticket" from "we drafted that ticket".

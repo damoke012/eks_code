@@ -100,7 +100,24 @@ def active_sprint():
     return (vs[0]["id"], vs[0].get("name")) if vs else (None, None)
 
 
+def preflight():
+    """Prove the token before the first write.
+
+    Jira reports an unauthorised read as 404 "does not exist" and an unauthorised
+    create as 400 "the target project doesn't exist" — neither says "bad token", so
+    a wrong credential is indistinguishable from a missing ticket. Cost two sessions:
+    2026-08-20 and 2026-09-03, both a placeholder token pasted from an instruction.
+    Enforced by scripts/lint-jira-preflight.sh."""
+    s, r = api("GET", "/rest/api/3/myself")
+    if s != 200:
+        print(f"!! cannot authenticate to {BASE} (HTTP {s})")
+        print("   read -rsp 'Atlassian API token: ' ATLASSIAN_TOKEN; export ATLASSIAN_TOKEN; echo")
+        sys.exit(1)
+    print(f"authenticated as {r.get('displayName')} <{r.get('emailAddress','')}>\n")
+
+
 def main():
+    preflight()
     print(f"{'CREATE' if GO else 'DRY-RUN'} — INFRA @ {BASE} as {EMAIL}\n")
     s, proj = api("GET", "/rest/api/3/project/INFRA")
     if s != 200:
