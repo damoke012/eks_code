@@ -29,6 +29,7 @@ RESTART_LIMIT=10
 CLUSTERS="$*"; [ -n "$CLUSTERS" ] || CLUSTERS="op-dev op-qa op-prod"
 
 bad=0; unknown=0; good=0
+ERRF=$(mktemp); trap 'rm -f "$ERRF"' EXIT
 
 # Overridable ONLY so rw-fleet-licence-status.test.sh can replay recorded output. When unset,
 # the cluster is resolved by ENDPOINT and by live node name, never by a filename.
@@ -45,7 +46,15 @@ for cluster in $CLUSTERS; do
     kc() { "$FAKE" "$CLUSTER_NOW" -- "$@"; }
     CLUSTER_NOW="$cluster"
   else
-    if ! onprem_resolve_ctx "$cluster" 2>&1 | sed 's/^/  /'; then
+    # NOT `onprem_resolve_ctx ... | sed` and NOT `$(onprem_resolve_ctx ...)`. Both run the
+    # function in a SUBSHELL, so the ONPREM_KC/ONPREM_CTX it exports never reach this shell,
+    # and a pipeline's exit status is sed's, not the resolver's. The first version of this
+    # script did exactly that: it printed the candidate line, then died on an unbound
+    # ONPREM_KC under `set -u` with no error. Redirecting stderr to a file is not a subshell.
+    ONPREM_KC=""; ONPREM_CTX=""
+    onprem_resolve_ctx "$cluster" 2>"$ERRF"; rc=$?
+    [ -s "$ERRF" ] && sed 's/^/  /' "$ERRF"
+    if [ "$rc" -ne 0 ] || [ -z "$ONPREM_KC" ] || [ -z "$ONPREM_CTX" ]; then
       printf '  UNKNOWN   cannot reach %s — NOT a statement about whether RisingWave is there\n' "$cluster"
       unknown=$((unknown+1)); continue
     fi
@@ -145,4 +154,9 @@ if [ "$bad" -eq 0 ] && [ "$unknown" -eq 0 ]; then
 else
   echo "NOT clean — an UNKNOWN is not a pass; it is a cluster nobody looked at."
 fi
-[ "$bad" -eq 0 ]
+# Exit codes are part of the contract: 1 = something is wrong, 2 = something was not
+# looked at. An all-UNKNOWN run must NOT exit 0 -- "I could not check" is not "it is fine",
+# and a caller treating it as success is how a fleet gets reported healthy unseen.
+[ "$bad" -eq 0 ]     || exit 1
+[ "$unknown" -eq 0 ] || exit 2
+exit 0

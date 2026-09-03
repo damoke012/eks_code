@@ -132,5 +132,30 @@ else
   printf '  FAIL  tally lost lines: printed %s ok/%s bad, FLEET says %s/%s\n' "$po" "$pb" "$fo" "$fb"; fail=$((fail+1))
 fi
 
+# 9. THE REAL PATH. Cases 1-8 all set RW_FLEET_KUBECTL and never execute cluster
+#    resolution at all -- which is how the first version shipped with
+#    `onprem_resolve_ctx | sed`: a pipeline, so the ONPREM_KC it exports died in the
+#    subshell and the script hit an unbound variable under `set -u` and stopped dead after
+#    one line. Thirteen green tests said nothing about it. HOME is pointed at an empty
+#    directory so ~/.kube is empty on any machine, making this deterministic on WSL too.
+mkdir -p "$TMP/emptyhome/.kube"
+HOME="$TMP/emptyhome" bash scripts/rw-fleet-licence-status.sh > "$TMP/out" 2>&1; rc=$?
+want "real path: unreachable -> UNKNOWN, not a crash" 'UNKNOWN   cannot reach op-dev'
+want "real path: reaches all three clusters" 'UNKNOWN   cannot reach op-prod'
+if [ "$rc" -eq 2 ]; then printf '  PASS  %s\n' "real path: all-unknown exits 2, not 0"; pass=$((pass+1))
+else printf '  FAIL  %s (rc=%s, must be 2)\n' "real path: all-unknown exits 2, not 0" "$rc"; fail=$((fail+1)); fi
+
+# 10. Guard the specific defect: the resolver must never be called in a subshell, because
+#     the variables it exports are the entire point of calling it.
+# Strip comments before matching. The first version of this check flagged the explanatory
+# comment in the script that quotes the very pattern it forbids -- the authoring-gate-hooks
+# trap where a guard makes documenting the danger impossible.
+if sed 's/[[:space:]]*#.*$//' scripts/rw-fleet-licence-status.sh \
+   | grep -qE "onprem_resolve_ctx[^)]*\||\\\$\(\s*onprem_resolve_ctx"; then
+  printf '  FAIL  %s\n' "onprem_resolve_ctx is called in a subshell — its exports are lost"; fail=$((fail+1))
+else
+  printf '  PASS  %s\n' "onprem_resolve_ctx is called in this shell"; pass=$((pass+1))
+fi
+
 printf '\n  passed %d, failed %d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
