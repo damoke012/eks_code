@@ -75,24 +75,43 @@ for cluster in $CLUSTERS; do
     # Parse JSON, not columns. rw-prod-status gate 5 keyed on awk $NF and had no passing
     # branch for weeks because the last column was not the one it assumed.
     verdict=$(printf '%s' "$pods" | RESTART_LIMIT="$RESTART_LIMIT" python3 -c '
-import json, os, sys
+import datetime, json, os, sys
 lim = int(os.environ["RESTART_LIMIT"])
 items = json.load(sys.stdin).get("items", [])
-notready, churn = [], []
+now = datetime.datetime.now(datetime.timezone.utc)
+notready, churn, healed = [], [], []
 for p in items:
     name  = p["metadata"]["name"]
     phase = p.get("status", {}).get("phase", "?")
     cs    = p.get("status", {}).get("containerStatuses") or []
     r     = max([c.get("restartCount", 0) for c in cs], default=0)
+    # A cumulative restart count never goes down, so "532 restarts" alone cannot tell a pod
+    # that is crashlooping RIGHT NOW from one that settled hours ago. How long the current
+    # container instance has been up is the discriminator. Without it this check would shout
+    # CRASHLOOPING at a recovered pod forever, and get ignored -- the way any guard that
+    # cries wolf gets switched off.
+    up = None
+    for c in cs:
+        st = (c.get("state") or {}).get("running", {}).get("startedAt")
+        if st:
+            t = datetime.datetime.fromisoformat(st.replace("Z", "+00:00"))
+            mins = (now - t).total_seconds() / 60
+            up = mins if up is None else min(up, mins)
     if phase not in ("Running", "Succeeded"):
         notready.append("%s(%s)" % (name, phase))
     elif r > lim:
-        churn.append("%s(%d restarts)" % (name, r))
-print(json.dumps({"total": len(items), "notready": notready, "churn": churn}))')
+        if up is not None and up >= 60:
+            healed.append("%s(%d restarts, stable %dh)" % (name, r, up // 60))
+        else:
+            age = "just now" if up is None else "%dm ago" % up
+            churn.append("%s(%d restarts, last %s)" % (name, r, age))
+print(json.dumps({"total": len(items), "notready": notready,
+                  "churn": churn, "healed": healed}))')
 
     tot=$(printf '%s' "$verdict"      | python3 -c 'import json,sys;print(json.load(sys.stdin)["total"])')
     nr=$(printf '%s' "$verdict"       | python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["notready"]))')
     ch=$(printf '%s' "$verdict"       | python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["churn"]))')
+    hl=$(printf '%s' "$verdict"       | python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["healed"]))')
 
     if [ "$tot" -eq 0 ]; then
       printf '  UNKNOWN   %s: namespace exists but has no pods\n' "$ns"; unknown=$((unknown+1))
@@ -100,6 +119,8 @@ print(json.dumps({"total": len(items), "notready": notready, "churn": churn}))')
       printf '  BAD       %s: %s\n' "$ns" "$nr"; bad=$((bad+1))
     elif [ -n "$ch" ]; then
       printf '  BAD       %s: %d/%d Running but CRASHLOOPING: %s\n' "$ns" "$tot" "$tot" "$ch"; bad=$((bad+1))
+    elif [ -n "$hl" ]; then
+      printf '  WARN      %s: %d/%d Running, recovered but scarred: %s\n' "$ns" "$tot" "$tot" "$hl"; good=$((good+1))
     else
       printf '  OK        %s: %d/%d Running, none restarting\n' "$ns" "$tot" "$tot"; good=$((good+1))
     fi

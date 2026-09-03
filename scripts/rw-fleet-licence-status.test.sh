@@ -22,12 +22,17 @@ PY
 
 pods_json() { # $1 = "name:phase:restarts" triples, space separated
   python3 - "$1" <<'PY'
-import json, sys
+import datetime, json, sys
 items = []
 for spec in sys.argv[1].split():
-    n, phase, r = spec.split(":")
+    parts = spec.split(":")
+    n, phase, r = parts[0], parts[1], int(parts[2])
+    cs = {"restartCount": r}
+    if len(parts) > 3:      # minutes the current container instance has been up
+        t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=int(parts[3]))
+        cs["state"] = {"running": {"startedAt": t.strftime("%Y-%m-%dT%H:%M:%SZ")}}
     items.append({"metadata": {"name": n}, "status": {"phase": phase,
-                  "containerStatuses": [{"restartCount": int(r)}]}})
+                  "containerStatuses": [cs]}})
 print(json.dumps({"items": items}))
 PY
 }
@@ -95,7 +100,7 @@ want "dev risingwave-2 is checked" 'risingwave-2: 2/2 Running'
 
 # 3. Running with 532 restarts is the exact shape prod was in, called healthy by gate 3.
 F="$TMP/f2"; mkns "$F/op-prod" risingwave "risingwave-meta-0:Running:0 risingwave-console-1:Running:532" "$GOOD"
-run "$F" op-prod >/dev/null; want "crashlooping console -> BAD" 'BAD .+CRASHLOOPING: risingwave-console-1\(532 restarts\)'
+run "$F" op-prod >/dev/null; want "crashlooping console -> BAD" 'BAD .+CRASHLOOPING: risingwave-console-1\(532 restarts, last'
 wantnot "crashlooping console -> not called healthy" 'healthy on every cluster checked'
 
 # 4. The placeholder. Synced, present, worthless.
@@ -118,6 +123,14 @@ rc=$(run "$F")   # op-qa absent from the fixture entirely
 want "unreachable cluster -> UNKNOWN" 'UNKNOWN .+op-qa'
 wantnot "unreachable cluster -> never reported as healthy fleet" 'healthy on every cluster checked'
 want "unreachable cluster -> says an UNKNOWN is not a pass" 'an UNKNOWN is not a pass'
+
+# 7b. A cumulative restart count never falls. A pod with 532 restarts that has been up for
+#     six hours has RECOVERED, and calling it CRASHLOOPING forever is how a check gets
+#     ignored. It must still be visible -- WARN, not silence.
+F="$TMP/f6b"; mkns "$F/op-prod" risingwave "risingwave-meta-0:Running:0 risingwave-console-1:Running:532:360" "$GOOD"
+run "$F" op-prod >/dev/null
+want "recovered pod -> WARN, not BAD" 'WARN .+recovered but scarred: risingwave-console-1\(532 restarts, stable 6h\)'
+wantnot "recovered pod -> not called an active crashloop" 'CRASHLOOPING'
 
 # 8. Tally invariant: every OK/BAD line printed must reach the FLEET summary. This is what
 #    catches a counter incremented inside a subshell, which cost rw-prod-status its verdict.
