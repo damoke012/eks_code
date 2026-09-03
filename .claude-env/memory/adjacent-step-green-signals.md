@@ -1,13 +1,13 @@
 ---
 name: adjacent-step-green-signals
-description: "The recurring on-prem failure family: a component reports success about a step ADJACENT to the one that matters. Seventeen instances by 2026-08-24, including checks that share the defect they test for; only executable checks catch it."
+description: "The recurring on-prem failure family: a component reports success about a step ADJACENT to the one that matters. Eighteen instances by 2026-09-03, including checks that share the defect they test for and one that never ran at all; only executable checks catch it."
 metadata:
   node_type: memory
   type: feedback
 ---
 
 The single most expensive pattern in on-prem platform work: a green signal that is **true**,
-about a step **next to** the one you care about. Seventeen instances by 2026-08-24.
+about a step **next to** the one you care about. Eighteen instances by 2026-09-03.
 
 | Reports | Actually proves | Does NOT prove |
 |---|---|---|
@@ -70,3 +70,14 @@ the tenant-wide grant can be created directly with a Graph POST.
 Fourth instance in one day of the same shape — a variable snapshot, a region-less secret
 probe, a no-op string replace, and now this. **A command that prints nothing on success
 prints nothing on no-op either.**
+
+**Instance 18 — 2026-09-03. The maintenance script had never run a third of itself.**
+`scripts/weekly-maintenance.sh` carried `exit 0` immediately after section 7's summary, so
+sections **8 (lint-shell-prose) and 9 (Flux revision drift) were unreachable dead code**.
+Every run printed a finding count and exited clean. The script whose whole job is catching
+rot had been reporting success on checks it never executed — the family's own pattern, in the
+tool built to detect the family. Found by accident while adding sections 10 and 11.
+
+**How to apply:** a check's exit code proves it ran *to completion*, not that it ran *at all*.
+Count the sections in the output against the sections in the file. Anything after an
+unconditional `exit` is decoration.

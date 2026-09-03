@@ -56,3 +56,13 @@ about the object next to the one that mattered.
 **How to apply:** use `flux reconcile kustomization <name> --with-source`, which walks the
 Kustomization's own `sourceRef` and cannot pick the wrong repository. Confirm the revision
 actually moved; a reconcile that reports the same sha it started on has done nothing.
+
+**`iaac-talos-flux-platform`'s default branch is `op-dev`** (confirmed 2026-09-03). Because
+the repo is branch-per-cluster, the "Create a pull request" link printed after a push opens
+the compare page with **base=op-dev**, whatever branch the topic was built from. A prod
+change is then one click from merging into dev. The tells are "Can't automatically merge"
+and an empty auto-filled title and body — both artefacts of comparing unrelated branches,
+and neither reads as an error.
+
+Always `gh pr create --base <the branch it was built FROM> --head <topic> --fill`. Enforced
+across the repo's PR builders by `scripts/lint-pr-base-pinned.sh`.

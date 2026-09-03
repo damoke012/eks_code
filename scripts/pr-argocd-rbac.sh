@@ -180,6 +180,13 @@ stops the first SSO login looking broken." || echo "   nothing to commit"
   if [ "$PUSH" = "yes" ]; then
     git push -q -u origin "$TOPIC" --force-with-lease
     echo "   pushed $TOPIC"
+    echo
+    # iaac-talos-flux-platform has a branch PER CLUSTER and its default branch is op-dev, so
+    # GitHub's "Create a pull request" link opens with base=op-dev. Creating it there merges a
+    # change meant for one cluster into DEV. Caught on the compare page 2026-09-03, before it
+    # was created; the tells are "Can't automatically merge" and an empty auto-filled body.
+    echo "   Open the PR with the base pinned — do NOT use the GitHub link, it defaults to op-dev:"
+    echo "     gh pr create --base $BR --head $TOPIC --fill"
   else
     echo "   committed to local $TOPIC (not pushed)"
   fi

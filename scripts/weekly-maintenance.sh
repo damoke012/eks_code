@@ -93,19 +93,27 @@ fence "scripts/check-sprint-membership.py <sprint-id> INFRA-nnn ..."
 fence "   asks the sprint for its members -- no JQL predicate on the multi-valued"
 fence "   sprint field can answer 'is this issue in sprint N' reliably"
 
-printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
-exit 0
-
-echo
-echo "== 8. Prose handed to a shell as a double-quoted string =="
+section "8. Prose handed to a shell as a double-quoted string"
 # A PR body full of backticks becomes commands. See
 # wip/tooling/FINDINGS-2026-08-24-pr-body-executed.md
 bash scripts/lint-shell-prose.sh || true
 
-echo
-echo "== 9. Flux revision drift (on-prem) =="
+section "9. Flux revision drift (on-prem)"
 # A merged PR + a green source reconcile proves nothing about what is APPLIED.
 # See wip/onprem-argocd/FINDINGS-2026-08-24-argocd-url-and-route.md
 for c in op-dev op-qa op-prod; do
   bash scripts/flux-revision-drift.sh --cluster "$c" || true
 done
+
+
+section "10. Jira scripts that write without proving their token"
+# A bad token reads as 404 "does not exist" / 400 "no such project" -- a permissions
+# problem, not an auth one. See wip/tooling/FINDINGS-2026-09-03-jira-board-writes.md
+bash scripts/lint-jira-preflight.sh || findings=$((findings+1))
+
+section "11. PR builders that leave the base unpinned"
+# iaac-talos-flux-platform is branch-per-cluster with default op-dev, so GitHub's
+# compare page offers a prod change for merge into dev. Caught 2026-09-03.
+bash scripts/lint-pr-base-pinned.sh || findings=$((findings+1))
+
+printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
