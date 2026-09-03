@@ -1,6 +1,6 @@
 ---
 name: onprem-ingress-dns-convention
-description: How on-prem Talos clusters expose HTTP and TCP services — A records point at the three PLATFORM worker node IPs, and Istio uses two Gateways, shared-http and tcp-passthrough
+description: How on-prem Talos clusters expose HTTP and TCP services — A records point at THIS cluster's own worker IPs (the count differs per cluster: dev 7, QA 3, prod 10), and Istio uses two Gateways, shared-http and tcp-passthrough
 metadata:
   type: reference
 ---
@@ -76,3 +76,15 @@ cluster claiming it.
 carrying this cluster's platform IPs, a VirtualService, and a Gateway that binds the port. op-usxpress-prod has `shared-http` but
 **no `tcp-passthrough`** as of 2026-08-31, so 4567 and 5432 would resolve, reach a node and
 route nowhere. Related: [[rw-prod-blocked-on-manifests-path]], [[onprem-networking-ingress]].
+
+**Counts, confirmed 2026-09-03 by `scripts/onprem-dns-claims.sh prod`:** dev 7, QA 3,
+**prod 10** (`10.10.82.108,.109,.110,.111,.112,.113,.185,.189,.190,.191`). All five of prod's
+correct routes — argocd, both passthroughs, both RisingWave dashboards — carry that identical
+list, and the checker confirmed every one is a node of op-prod.
+
+⚠️ This file's own description and its MEMORY.md index line used to say "the three PLATFORM
+node IPs". That was QA's count stated as a rule, and it contradicted line 19 of this note.
+The index is what loads into context, so the wrong version is the one that got believed: on
+2026-09-03 it produced a false alarm on a correct 10-target prod route. **When an index line
+and a note body disagree, the body is the note — but fix the index, because the index is what
+is read.** See [[proxy-is-not-the-property]].
