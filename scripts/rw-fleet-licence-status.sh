@@ -90,17 +90,33 @@ for p in items:
     # container instance has been up is the discriminator. Without it this check would shout
     # CRASHLOOPING at a recovered pod forever, and get ignored -- the way any guard that
     # cries wolf gets switched off.
-    up = None
+    # Time since the LAST restart, per container, and a container that is currently in
+    # CrashLoopBackOff counts as restarting right now.
+    #
+    # The first version read only state.running.startedAt. A container in CrashLoopBackOff
+    # is in state.WAITING and has no startedAt, so it contributed nothing, and the minimum
+    # over the remaining healthy siblings won. On 2026-09-03 that reported the op-dev
+    # prometheus-server as "1562 restarts, stable 133h" -- while the restart count rose to
+    # 1565 between two runs half an hour apart. lastState.terminated.finishedAt is the
+    # field that says when a container actually last died, and it survives the restart.
+    up, looping = None, False
     for c in cs:
-        st = (c.get("state") or {}).get("running", {}).get("startedAt")
-        if st:
-            t = datetime.datetime.fromisoformat(st.replace("Z", "+00:00"))
+        st    = (c.get("state") or {})
+        if "CrashLoopBackOff" in str((st.get("waiting") or {}).get("reason", "")):
+            looping = True
+        fin   = ((c.get("lastState") or {}).get("terminated") or {}).get("finishedAt")
+        start = (st.get("running") or {}).get("startedAt")
+        stamp = fin or start
+        if stamp:
+            t = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
             mins = (now - t).total_seconds() / 60
             up = mins if up is None else min(up, mins)
     if phase not in ("Running", "Succeeded"):
         notready.append("%s(%s)" % (name, phase))
     elif r > lim:
-        if up is not None and up >= 60:
+        if looping:
+            churn.append("%s(%d restarts, in CrashLoopBackOff NOW)" % (name, r))
+        elif up is not None and up >= 60:
             healed.append("%s(%d restarts, stable %dh)" % (name, r, up // 60))
         else:
             age = "just now" if up is None else "%dm ago" % up

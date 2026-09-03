@@ -135,6 +135,32 @@ wantnot "recovered pod -> not called an active crashloop" 'CRASHLOOPING'
 wantnot "recovered pod -> verdict does not claim healthy" 'is healthy on every cluster'
 want "recovered pod -> verdict points at the WARN lines" 'read the WARN lines'
 
+# 7c. THE MASKING CASE. A pod whose sidecar has been up for 133h while its main container
+#     sits in CrashLoopBackOff. Reading only state.running.startedAt made the healthy
+#     sibling win the minimum, and op-dev prometheus-server was reported "1565 restarts,
+#     stable 133h" while its restart count climbed by 3 between two runs half an hour apart.
+F="$TMP/f6c"; mkdir -p "$F/op-prod/risingwave"
+python3 - > "$F/op-prod/risingwave/pods.json" <<'MASK'
+import datetime, json
+now = datetime.datetime.now(datetime.timezone.utc)
+old = (now - datetime.timedelta(hours=133)).strftime("%Y-%m-%dT%H:%M:%SZ")
+recent = (now - datetime.timedelta(minutes=4)).strftime("%Y-%m-%dT%H:%M:%SZ")
+print(json.dumps({"items": [
+  {"metadata": {"name": "risingwave-meta-0"},
+   "status": {"phase": "Running", "containerStatuses": [
+      {"restartCount": 0, "state": {"running": {"startedAt": old}}}]}},
+  {"metadata": {"name": "prometheus-server-1"},
+   "status": {"phase": "Running", "containerStatuses": [
+      {"restartCount": 0,    "state": {"running": {"startedAt": old}}},
+      {"restartCount": 1565, "state": {"waiting": {"reason": "CrashLoopBackOff"}},
+       "lastState": {"terminated": {"finishedAt": recent}}}]}}]}))
+MASK
+secret_json "$GOOD" > "$F/op-prod/risingwave/secret.json"
+run "$F" op-prod >/dev/null
+want "crashlooping container behind a healthy sidecar -> BAD" 'BAD .+prometheus-server-1\(1565 restarts, in CrashLoopBackOff NOW\)'
+wantnot "masked crashloop -> not called stable" 'stable 133h'
+wantnot "masked crashloop -> verdict is not clean" 'No live faults'
+
 # 8. Tally invariant: every OK/BAD line printed must reach the FLEET summary. This is what
 #    catches a counter incremented inside a subshell, which cost rw-prod-status its verdict.
 F="$TMP/f7"; mkns "$F/op-dev" risingwave "$HEALTHY" "$GOOD"; mkns "$F/op-qa" risingwave "$HEALTHY" "$GOOD"
@@ -171,6 +197,18 @@ if sed 's/[[:space:]]*#.*$//' scripts/rw-fleet-licence-status.sh \
   printf '  FAIL  %s\n' "onprem_resolve_ctx is called in a subshell — its exports are lost"; fail=$((fail+1))
 else
   printf '  PASS  %s\n' "onprem_resolve_ctx is called in this shell"; pass=$((pass+1))
+fi
+
+# 11. The embedded python runs inside python3 -c '...' — a single-quoted SHELL string. One
+#     apostrophe in a comment ("op-dev's") closes it and the shell starts parsing python.
+#     Cost a broken script on 2026-09-03. Same family as prose-through-shell-strings.
+# bash -n is the assertion, because that is exactly what an escaped apostrophe breaks: the
+# shell stops seeing python and starts parsing it. It would not catch a BALANCED pair of
+# apostrophes, which would parse but corrupt the python; that case is uncovered and named.
+if bash -n scripts/rw-fleet-licence-status.sh 2>/dev/null; then
+  printf '  PASS  %s\n' "script still parses (an apostrophe in a python -c block breaks this)"; pass=$((pass+1))
+else
+  printf '  FAIL  %s\n' "script does not parse — apostrophe in a single-quoted python -c block?"; fail=$((fail+1))
 fi
 
 printf '\n  passed %d, failed %d\n' "$pass" "$fail"
