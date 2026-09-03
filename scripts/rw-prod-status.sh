@@ -112,17 +112,55 @@ fi
 gate "5. ExternalSecrets — synced AND holding real content"
 # SecretSynced proves the sync ran, not that the value works. Check the licence itself.
 if es=$("$K" op-prod -- -n "$NS" get externalsecrets --no-headers 2>/dev/null) && [ -n "$es" ]; then
-  nr=$("$K" op-prod -- -n "$NS" get externalsecrets --no-headers 2>/dev/null \
-        | awk '$NF!="SecretSynced"' | wc -l)
-  [ "$nr" -eq 0 ] && ok "all ExternalSecrets SecretSynced" || no "$nr ExternalSecret(s) not SecretSynced"
-  lic=$("$K" op-prod -- -n "$NS" get secret risingwave-console-license \
-          -o jsonpath='{.data.license}' 2>/dev/null | base64 -d 2>/dev/null)
-  if [ -z "$lic" ]; then
-    huh "console licence secret not readable under the name checked — confirm the key name before concluding"
-  elif printf '%s' "$lic" | grep -qE '^(PLACEHOLDER|CHANGEME|[A-Za-z0-9+/=]{0,24})$'; then
-    no "console licence is still the Terraform-generated placeholder (${#lic} chars) — real one is with Steve/Zach"
+  # Read the CONDITION, not a column position. Until 2026-09-03 this counted rows where
+  # $NF != "SecretSynced" -- but `get externalsecrets` prints NAME STORE REFRESH STATUS
+  # READY, so $NF is READY ("True") and never equals "SecretSynced". Every row matched.
+  # The gate could not return a pass, and on 2026-09-03 it reported "7 not SecretSynced"
+  # against a namespace where all seven were synced.
+  tot=$("$K" op-prod -- -n "$NS" get externalsecrets \
+         -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -c .)
+  syn=$("$K" op-prod -- -n "$NS" get externalsecrets \
+         -o jsonpath='{range .items[*]}{.status.conditions[0].reason}{"\n"}{end}' 2>/dev/null \
+         | grep -c '^SecretSynced$')
+  if [ "$tot" -gt 0 ] && [ "$syn" -eq "$tot" ]; then
+    ok "all $tot ExternalSecrets SecretSynced"
   else
-    ok "console licence is ${#lic} chars, not the generated placeholder"
+    no "$((tot - syn)) of $tot ExternalSecret(s) not SecretSynced"
+  fi
+
+  # The licence. Discover the Secret rather than hardcoding a name -- the old check looked
+  # for "risingwave-console-license" and reported UNKNOWN because the object is
+  # "rw-license-key". A name guessed wrong reads exactly like a thing that is not there.
+  lsec=$("$K" op-prod -- -n "$NS" get externalsecret rw-license-key \
+          -o jsonpath='{.spec.target.name}' 2>/dev/null)
+  [ -n "$lsec" ] || lsec=rw-license-key
+  lic=$("$K" op-prod -- -n "$NS" get secret "$lsec" -o json 2>/dev/null \
+        | python3 -c 'import base64,json,sys
+try: d=json.load(sys.stdin).get("data",{})
+except Exception: sys.exit(0)
+for v in d.values():
+    try: t=base64.b64decode(v).decode()
+    except Exception: continue
+    if t.count(".")==2 and t.startswith("eyJ"): print(t); break' 2>/dev/null)
+  if [ -z "$lic" ]; then
+    huh "no compact JWT in secret $lsec -- a SecretSynced ExternalSecret is not evidence of content"
+  else
+    # A JWT is only good until its exp. This licence is short-dated: renewal is the work.
+    exp=$(printf '%s' "$lic" | python3 -c 'import base64,json,sys
+t=sys.stdin.read().split(".")[1]
+t+="="*(-len(t)%4)
+print(json.loads(base64.urlsafe_b64decode(t)).get("exp",0))' 2>/dev/null)
+    now=$(date +%s)
+    if [ -n "$exp" ] && [ "$exp" -gt "$now" ] 2>/dev/null; then
+      days=$(( (exp - now) / 86400 ))
+      if [ "$days" -lt 30 ]; then
+        no "console licence is a real JWT but EXPIRES IN $days DAYS ($(date -u -d "@$exp" +%Y-%m-%d)) -- renew it"
+      else
+        ok "console licence is a real JWT, expires $(date -u -d "@$exp" +%Y-%m-%d) ($days days)"
+      fi
+    else
+      no "console licence JWT is expired or has no readable exp -- the console will refuse to start"
+    fi
   fi
 else
   no "no ExternalSecrets in $NS"
