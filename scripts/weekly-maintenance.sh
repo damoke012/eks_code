@@ -116,4 +116,10 @@ section "11. PR builders that leave the base unpinned"
 # compare page offers a prod change for merge into dev. Caught 2026-09-03.
 bash scripts/lint-pr-base-pinned.sh || findings=$((findings+1))
 
+section "12. Do the gates themselves still work?"
+# A gate that cannot produce a pass is not a check, it is a constant. rw-prod-status gate 5
+# shipped for weeks unable to return DONE, and reported 7 failures against a healthy
+# namespace on 2026-09-03. This replays recorded kubectl output through it, both directions.
+bash scripts/rw-prod-status.test.sh || findings=$((findings+1))
+
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"

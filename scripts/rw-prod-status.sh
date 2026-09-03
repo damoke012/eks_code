@@ -13,7 +13,9 @@
 #   bash scripts/rw-prod-status.sh
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-K="$SCRIPT_DIR/onprem-kubectl.sh"
+# Overridable ONLY so rw-prod-status.test.sh can replay recorded output. Unset in
+# normal use, so behaviour against a real cluster is unchanged.
+K="${RW_STATUS_KUBECTL:-$SCRIPT_DIR/onprem-kubectl.sh}"
 NS=risingwave          # QA and prod are always `risingwave`; risingwave-2 is dev-only.
 CLUSTER=op-usxpress-prod
 ACCT=937464026810
