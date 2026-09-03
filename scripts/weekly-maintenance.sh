@@ -80,6 +80,9 @@ fence "   another cluster's account/DNS/IPs in a branch (nine instances by 2026-
 fence "scripts/check-argocd-repo-credentials.sh --context <ctx>"
 fence "   does every Application have a credential matching its repoURL? (PR #100"
 fence "   reverted ssh:// to https:// and broke delivery for 18h, all statuses green)"
+fence "scripts/rw-fleet-licence-status.sh"
+fence "   RisingWave pods + console licence on ALL THREE clusters, restarts and expiry"
+fence "   included -- a crashlooping pod reads as Running, and a valid licence expires"
 fence "scripts/audit-ecr-policies.sh --profile infra-common --region us-east-2 --summary"
 fence "   who can push to the shared registry (INFRA-1655: 515 of 517)"
 
@@ -121,5 +124,6 @@ section "12. Do the gates themselves still work?"
 # shipped for weeks unable to return DONE, and reported 7 failures against a healthy
 # namespace on 2026-09-03. This replays recorded kubectl output through it, both directions.
 bash scripts/rw-prod-status.test.sh || findings=$((findings+1))
+bash scripts/rw-fleet-licence-status.test.sh || findings=$((findings+1))
 
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
