@@ -10,6 +10,7 @@ included harmlessly; 1590 excluded — it's closed as a duplicate).
 
 DRY-RUN BY DEFAULT. Pass --go to apply.
 Override the set: pass keys as args, e.g. `... --go INFRA-1588 INFRA-1592`.
+Override the sprint: `--sprint <id>` (needed for a sprint still in state=future).
 
 Auth (WSL): export ATLASSIAN_TOKEN=...
 """
@@ -25,6 +26,14 @@ BOARD = 322
 DEFAULT_ISSUES = ["INFRA-1588", "INFRA-1589", "INFRA-1591", "INFRA-1592", "INFRA-1593", "INFRA-1594"]
 args = [a for a in sys.argv[1:] if a.startswith("INFRA-")]
 ISSUES = args or DEFAULT_ISSUES
+
+# A sprint that has not been started is state=future, and the active-sprint lookup below
+# exits on it. Naming the id explicitly is how you file into a sprint before it starts —
+# the alternative is starting the sprint just to add a ticket to it.
+SPRINT_OVERRIDE = None
+for _i, _a in enumerate(sys.argv):
+    if _a == "--sprint" and _i + 1 < len(sys.argv):
+        SPRINT_OVERRIDE = sys.argv[_i + 1]
 
 
 def get_token():
@@ -62,12 +71,20 @@ def main():
     print(f"{'EXECUTE' if GO else 'DRY-RUN'} — add to active sprint of board {BOARD} @ {BASE}")
     print(f"Issues: {', '.join(ISSUES)}\n")
 
-    s, r = api("GET", f"/rest/agile/1.0/board/{BOARD}/sprint?state=active")
-    sprints = r.get("values", []) if s == 200 else []
-    if not sprints:
-        sys.exit(f"No active sprint on board {BOARD} (HTTP {s} {r}).")
-    sid, sname = sprints[0]["id"], sprints[0].get("name")
-    print(f"Active sprint: {sid} '{sname}'\n")
+    if SPRINT_OVERRIDE:
+        s, r = api("GET", f"/rest/agile/1.0/sprint/{SPRINT_OVERRIDE}")
+        if s != 200:
+            sys.exit(f"Sprint {SPRINT_OVERRIDE}: HTTP {s} {r}")
+        sid, sname = r["id"], r.get("name")
+        print(f"Sprint: {sid} '{sname}' (state {r.get('state')}) — named explicitly\n")
+    else:
+        s, r = api("GET", f"/rest/agile/1.0/board/{BOARD}/sprint?state=active")
+        sprints = r.get("values", []) if s == 200 else []
+        if not sprints:
+            sys.exit(f"No active sprint on board {BOARD} (HTTP {s} {r}). "
+                     f"Pass --sprint <id> to target a sprint that has not started.")
+        sid, sname = sprints[0]["id"], sprints[0].get("name")
+        print(f"Active sprint: {sid} '{sname}'\n")
 
     if not GO:
         for k in ISSUES:
