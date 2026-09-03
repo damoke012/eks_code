@@ -189,7 +189,14 @@ done
 
 printf '\n=== FLEET  %d ok, %d warn, %d bad, %d unknown  (clusters: %s)\n' \
   "$good" "$warn" "$bad" "$unknown" "$CLUSTERS"
-if [ "$bad" -ne 0 ] || [ "$unknown" -ne 0 ]; then
+# Say which of the two problems this is. Printing the UNKNOWN sentence over a run with
+# 1 bad and 0 unknown points the reader at the wrong thing -- a verdict line that does not
+# match its own body, which is the failure this whole script exists to catch.
+if [ "$bad" -ne 0 ] && [ "$unknown" -ne 0 ]; then
+  echo "NOT clean — $bad live fault(s), and $unknown cluster(s) nobody could look at."
+elif [ "$bad" -ne 0 ]; then
+  echo "NOT clean — $bad live fault(s). See the BAD line(s) above."
+elif [ "$unknown" -ne 0 ]; then
   echo "NOT clean — an UNKNOWN is not a pass; it is a cluster nobody looked at."
 elif [ "$warn" -ne 0 ]; then
   echo "No live faults, but $warn namespace(s) carry heavy restart history — read the WARN lines."

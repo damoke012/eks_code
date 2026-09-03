@@ -102,6 +102,10 @@ want "dev risingwave-2 is checked" 'risingwave-2: 2/2 Running'
 F="$TMP/f2"; mkns "$F/op-prod" risingwave "risingwave-meta-0:Running:0 risingwave-console-1:Running:532" "$GOOD"
 run "$F" op-prod >/dev/null; want "crashlooping console -> BAD" 'BAD .+CRASHLOOPING: risingwave-console-1\(532 restarts, last'
 wantnot "crashlooping console -> not called healthy" 'healthy on every cluster checked'
+# The verdict must name the problem it actually has. A run with 1 bad and 0 unknown used to
+# print the UNKNOWN sentence, sending the reader to look for a cluster that was fine.
+want "bad-only run -> verdict says live fault, not UNKNOWN" 'NOT clean — 1 live fault'
+wantnot "bad-only run -> does not blame an UNKNOWN" 'nobody looked at'
 
 # 4. The placeholder. Synced, present, worthless.
 F="$TMP/f3"; mkns "$F/op-qa" risingwave "$HEALTHY" "PLACEHOLDER_INJECT_REAL_LICENSE"
