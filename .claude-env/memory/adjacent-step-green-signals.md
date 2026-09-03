@@ -1,13 +1,13 @@
 ---
 name: adjacent-step-green-signals
-description: "The recurring on-prem failure family: a component reports success about a step ADJACENT to the one that matters. Eighteen instances by 2026-09-03, including checks that share the defect they test for and one that never ran at all; only executable checks catch it."
+description: "The recurring on-prem failure family: a component reports success about a step ADJACENT to the one that matters. Nineteen instances by 2026-09-03, including checks that share the defect they test for and one that never ran at all; only executable checks catch it."
 metadata:
   node_type: memory
   type: feedback
 ---
 
 The single most expensive pattern in on-prem platform work: a green signal that is **true**,
-about a step **next to** the one you care about. Eighteen instances by 2026-09-03.
+about a step **next to** the one you care about. Nineteen instances by 2026-09-03.
 
 | Reports | Actually proves | Does NOT prove |
 |---|---|---|
@@ -81,3 +81,23 @@ tool built to detect the family. Found by accident while adding sections 10 and 
 **How to apply:** a check's exit code proves it ran *to completion*, not that it ran *at all*.
 Count the sections in the output against the sections in the file. Anything after an
 unconditional `exit` is decoration.
+
+**Instance 19 — 2026-09-03. A gate with no passing branch.**
+`rw-prod-status.sh` gate 5 counted ExternalSecret rows where `$NF != "SecretSynced"`. But
+`kubectl get externalsecrets` prints NAME STORE REFRESH **STATUS READY**, so `$NF` is READY
+("True") and never equals "SecretSynced". Every row always matched. Against a namespace where
+all seven were genuinely synced it reported **"7 ExternalSecret(s) not SecretSynced"**, and
+sent an hour into diagnosing a healthy cluster. The same gate looked for the licence under
+`risingwave-console-license`; the object is `rw-license-key`, so it returned UNKNOWN — a name
+guessed wrong reads exactly like a thing that is not there.
+
+**Three in one session**, all in checks written *because of* an earlier incident:
+`weekly-maintenance.sh` exiting before a third of its own sections, a line-based grep for
+`--base` that missed continuation lines, and this. **The checks are now the most defect-dense
+code in the repo, and nothing tests them.**
+
+**How to apply:** a gate must be run against a known-good input and a known-bad one before it
+is trusted — if it cannot produce a pass, it is not a check, it is a constant. Never key on
+column position (`$NF`, `awk '{print $3}'`) in kubectl output; read the field by name or by
+jsonpath. And a gate that reports absence must distinguish "not there" from "I looked under
+the wrong name". See [[proxy-is-not-the-property]].

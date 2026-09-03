@@ -30,3 +30,15 @@ evidence the env has not been re-read since the pod was created.
   container restarts. They answer different questions.
 
 See [[eso-secretsynced-not-content-check]] and [[qa-postgres-password-drift]].
+
+⚠️ **Possible exception, 2026-09-03 — risingwave-console on op-usxpress-prod.** Idris's
+automation wrote the real licence into Secrets Manager; `rw-license-key` synced; and the
+console recovered **without the pod being recreated**. `kubectl get pods` showed AGE 45h
+(original pod), 532 restarts at ~1 per 5 min, then 50 minutes stable. So the new value
+reached the container on a *container* restart.
+
+Not yet explained. Most likely the console mounts the secret as a **volume** (updates in
+place) rather than taking it through `secretKeyRef` env. **Confirm before trusting it** —
+if true, INFRA-1688's "the pod must be recreated" step is wrong for this workload, and the
+rule in this note holds only for env-injected values. Do not generalise the exception until
+the pod spec has been read.
