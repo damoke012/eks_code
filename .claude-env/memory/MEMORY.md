@@ -58,3 +58,4 @@
 - [Octopus releases freeze variables](octopus-release-freezes-variables.md) — a release snapshots project variables at creation; correcting a variable never reaches an existing release until the snapshot is refreshed
 - [Jira board 322 / sprint topology](jira-board-sprint-topology.md) — sprint ids incl. UI Sprint 4 = 1041 (state=future, never started); bad token reads as 404/permissions, API-created tickets land in the backlog, openSprints() misses an unstarted sprint
 - [Policy cannot fix what stops it running](policy-cannot-fix-what-stops-it-running.md) — Prometheus retention could not recover a full disk; free the resource from OUTSIDE first, then set the policy, then make Git match
+- [GitOps has four stale layers](gitops-has-four-stale-layers.md) — GitRepository → Kustomization → HelmRelease → Pod; each says Ready while the next is behind. lastAppliedRevision ≠ live; finish at the pod start time
