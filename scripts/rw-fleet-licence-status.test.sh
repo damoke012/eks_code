@@ -131,6 +131,9 @@ F="$TMP/f6b"; mkns "$F/op-prod" risingwave "risingwave-meta-0:Running:0 risingwa
 run "$F" op-prod >/dev/null
 want "recovered pod -> WARN, not BAD" 'WARN .+recovered but scarred: risingwave-console-1\(532 restarts, stable 6h\)'
 wantnot "recovered pod -> not called an active crashloop" 'CRASHLOOPING'
+# A WARN must not be laundered into "healthy" by the summary line, which is the line people read.
+wantnot "recovered pod -> verdict does not claim healthy" 'is healthy on every cluster'
+want "recovered pod -> verdict points at the WARN lines" 'read the WARN lines'
 
 # 8. Tally invariant: every OK/BAD line printed must reach the FLEET summary. This is what
 #    catches a counter incremented inside a subshell, which cost rw-prod-status its verdict.
@@ -138,7 +141,7 @@ F="$TMP/f7"; mkns "$F/op-dev" risingwave "$HEALTHY" "$GOOD"; mkns "$F/op-qa" ris
 mkns "$F/op-prod" risingwave "risingwave-meta-0:Running:0 risingwave-console-1:Running:900" "$GOOD"
 run "$F" >/dev/null
 po=$(grep -c '^  OK  ' "$TMP/out"); pb=$(grep -c '^  BAD ' "$TMP/out")
-fo=$(sed -n 's/^=== FLEET  \([0-9]*\) ok.*/\1/p' "$TMP/out"); fb=$(sed -n 's/^=== FLEET  [0-9]* ok, \([0-9]*\) bad.*/\1/p' "$TMP/out")
+fo=$(sed -n 's/^=== FLEET  \([0-9]*\) ok.*/\1/p' "$TMP/out"); fb=$(sed -n 's/^=== FLEET  [0-9]* ok, [0-9]* warn, \([0-9]*\) bad.*/\1/p' "$TMP/out")
 if [ "$po" = "$fo" ] && [ "$pb" = "$fb" ]; then
   printf '  PASS  tally matches printed lines (%s ok, %s bad)\n' "$po" "$pb"; pass=$((pass+1))
 else

@@ -28,7 +28,7 @@ RESTART_LIMIT=10
 
 CLUSTERS="$*"; [ -n "$CLUSTERS" ] || CLUSTERS="op-dev op-qa op-prod"
 
-bad=0; unknown=0; good=0
+bad=0; unknown=0; good=0; warn=0
 ERRF=$(mktemp); trap 'rm -f "$ERRF"' EXIT
 
 # Overridable ONLY so rw-fleet-licence-status.test.sh can replay recorded output. When unset,
@@ -120,7 +120,9 @@ print(json.dumps({"total": len(items), "notready": notready,
     elif [ -n "$ch" ]; then
       printf '  BAD       %s: %d/%d Running but CRASHLOOPING: %s\n' "$ns" "$tot" "$tot" "$ch"; bad=$((bad+1))
     elif [ -n "$hl" ]; then
-      printf '  WARN      %s: %d/%d Running, recovered but scarred: %s\n' "$ns" "$tot" "$tot" "$hl"; good=$((good+1))
+      # Counted as its OWN thing. Folding a WARN into "ok" is how a namespace with 313
+      # restarts reads as healthy in the one line most people actually read.
+      printf '  WARN      %s: %d/%d Running, recovered but scarred: %s\n' "$ns" "$tot" "$tot" "$hl"; warn=$((warn+1))
     else
       printf '  OK        %s: %d/%d Running, none restarting\n' "$ns" "$tot" "$tot"; good=$((good+1))
     fi
@@ -169,11 +171,14 @@ print(json.loads(base64.urlsafe_b64decode(t)).get("exp", 0))' 2>/dev/null)
     unknown=$((unknown+1)); }
 done
 
-printf '\n=== FLEET  %d ok, %d bad, %d unknown\n' "$good" "$bad" "$unknown"
-if [ "$bad" -eq 0 ] && [ "$unknown" -eq 0 ]; then
-  echo "RisingWave is healthy on every cluster checked, with a valid licence."
-else
+printf '\n=== FLEET  %d ok, %d warn, %d bad, %d unknown  (clusters: %s)\n' \
+  "$good" "$warn" "$bad" "$unknown" "$CLUSTERS"
+if [ "$bad" -ne 0 ] || [ "$unknown" -ne 0 ]; then
   echo "NOT clean — an UNKNOWN is not a pass; it is a cluster nobody looked at."
+elif [ "$warn" -ne 0 ]; then
+  echo "No live faults, but $warn namespace(s) carry heavy restart history — read the WARN lines."
+else
+  echo "RisingWave is healthy on every cluster checked, with a valid licence."
 fi
 # Exit codes are part of the contract: 1 = something is wrong, 2 = something was not
 # looked at. An all-UNKNOWN run must NOT exit 0 -- "I could not check" is not "it is fine",
