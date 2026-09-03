@@ -63,7 +63,9 @@ Two failed prod deploys preceded the successful one, both 403 on the Terraform s
 backend: S3_BUCKET in production scope held QA's bucket, and after correcting it the
 release still deployed its frozen variable snapshot. Both are written up in the repo."""
 
-COMMENTS = {"INFRA-1674": C1674}
+# jira-update-2026-09-02.py carries the same INFRA-1674 evidence in a later, fuller form.
+# Running both posts it twice, so pass --no-comment here when that script is also being run.
+COMMENTS = {} if "--no-comment" in sys.argv else {"INFRA-1674": C1674}
 
 # ── C. tickets that do not exist yet ─────────────────────────────────────────
 NEW = [
