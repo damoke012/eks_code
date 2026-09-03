@@ -157,6 +157,14 @@ COMMIT
 if [ "$PUSH" = "yes" ]; then
   git push -q -u origin "$TOPIC" --force-with-lease
   echo "   pushed $TOPIC"
+  echo
+  # This repo has a branch PER CLUSTER and its default branch is op-dev, so GitHub's
+  # "Open a pull request" page opens with base=op-dev. Creating it there would merge a
+  # PROD route into DEV: dev's Grafana would claim grafana.op-prod.usxpress.io with prod's
+  # targets. The tell is "Can't automatically merge" plus an empty auto-filled body.
+  # Use this and the base cannot be wrong:
+  echo "   Open the PR with the base pinned — do NOT use the GitHub link, it defaults to op-dev:"
+  echo "     gh pr create --base $BR --head $TOPIC --fill"
 else
   echo "   committed to local $TOPIC (not pushed). Re-run with --push."
 fi
