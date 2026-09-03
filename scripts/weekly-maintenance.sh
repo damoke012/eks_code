@@ -126,5 +126,6 @@ section "12. Do the gates themselves still work?"
 bash scripts/rw-prod-status.test.sh || findings=$((findings+1))
 bash scripts/rw-fleet-licence-status.test.sh || findings=$((findings+1))
 bash scripts/lib-onprem-ctx.test.sh || findings=$((findings+1))
+python3 scripts/lib-pod-health.test.py || findings=$((findings+1))
 
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"

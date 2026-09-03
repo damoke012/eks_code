@@ -52,7 +52,7 @@ case "$args" in
   *"get secret"*)                                    cat "$FIXTURE/secret.json" ;;
   *"get kustomization"*)                             echo True ;;
   *"get ns risingwave"*)                             echo "namespace/risingwave" ;;
-  *"get pods --no-headers"*)                         cat "$FIXTURE/pods" ;;
+  *"get pods -o json"*)                              cat "$FIXTURE/pods.json" ;;
   *"get sa risingwave"*)                             cat "$FIXTURE/sa-arn" ;;
   *"get gateway"*)                                   cat "$FIXTURE/gateways" ;;
   *"get virtualservice"*)                            cat "$FIXTURE/vs" ;;
@@ -63,6 +63,18 @@ esac
 FAKE
 chmod +x "$TMP/fake-kubectl"
 
+podsjson() { # "name:phase:restarts" triples
+  python3 - "$1" <<'PJ'
+import json, sys
+items = []
+for spec in sys.argv[1].split():
+    n, phase, r = spec.split(":")
+    items.append({"metadata": {"name": n},
+                  "status": {"phase": phase, "containerStatuses": [{"restartCount": int(r)}]}})
+print(json.dumps({"items": items}))
+PJ
+}
+
 mkfixture() { # $1 = dir, $2 = reasons (newline sep), $3 = licence plaintext
   mkdir -p "$1"
   printf 'dex-entra-client-secret\npg-credentials\nrisingwave-pg-credentials\nrw-license-key\nrw-root-credentials\nrw-secret-store-private-key\nrw-service-account-credentials\n' > "$1/es-names"
@@ -70,7 +82,7 @@ mkfixture() { # $1 = dir, $2 = reasons (newline sep), $3 = licence plaintext
   printf 'rw-license-key' > "$1/es-target"
   secret_json "$3" > "$1/secret.json"
   # Defaults for the other gates; individual cases overwrite the one they exercise.
-  printf 'risingwave-meta-default-0            1/1   Running   0   45h\nrisingwave-frontend-default-1       1/1   Running   0   45h\n' > "$1/pods"
+  podsjson "risingwave-meta-default-0:Running:0 risingwave-frontend-default-1:Running:0" > "$1/pods.json"
   printf 'arn:aws:iam::937464026810:role/op-usxpress-prod-risingwave' > "$1/sa-arn"
   printf 'istio-ingress  shared-http      45h\nistio-ingress  tcp-passthrough  45h\n' > "$1/gateways"
   printf 'risingwave-dashboard risingwave-dashboard.op-prod.usxpress.io\n' > "$1/vs"
@@ -124,7 +136,7 @@ echo "== rw-prod-status other gates"
 # 6. A pod that is Running between backoffs is not healthy. This exact shape -- STATUS
 #    Running, 532 restarts -- was reported as "12/12 pods Running" on 2026-09-03.
 mkfixture "$TMP/f6" "$SYNCED" "$(jwt 3628800)"
-printf 'risingwave-meta-default-0   1/1   Running   0     45h\nrisingwave-console-5b6      2/2   Running   532 (50m ago)   45h\n' > "$TMP/f6/pods"
+podsjson "risingwave-meta-default-0:Running:0 risingwave-console-5b6:Running:532" > "$TMP/f6/pods.json"
 gate3() { FIXTURE="$1" RW_STATUS_KUBECTL="$TMP/fake-kubectl" bash scripts/rw-prod-status.sh 2>/dev/null \
             | sed -n '/== 3\./,/== 4\./p' > "$TMP/out"; }
 gate3 "$TMP/f6"

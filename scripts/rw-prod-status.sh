@@ -89,21 +89,22 @@ done
 gate "3. Namespace + workloads actually running"
 if "$K" op-prod -- get ns "$NS" >/dev/null 2>&1; then
   ok "namespace $NS exists"
-  tot=$("$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null | wc -l)
-  bad=$("$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null \
-          | awk '$3!="Running" && $3!="Completed"' | wc -l)
-  # A crashlooping pod is "Running" between backoffs. On 2026-09-03 this gate reported
-  # "12/12 pods Running" while risingwave-console had 532 restarts and was cycling every
-  # five minutes. STATUS alone cannot see that; the restart count can. Column 4 is RESTARTS
-  # ("532 (50m ago)" splits so that $4 is still the number).
-  churn=$("$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null \
-           | awk '$4+0 > 10 {printf "%s(%s restarts) ", $1, $4}')
-  if [ "$tot" -eq 0 ]; then no "namespace $NS has no pods"
-  elif [ "$bad" -eq 0 ] && [ -n "$churn" ]; then
-    no "$tot/$tot pods Running, but crashlooping: $churn"
-  elif [ "$bad" -eq 0 ]; then ok "$tot/$tot pods Running, none restarting"
-  else no "$bad of $tot pods not Running:"
-       "$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{print "             "$0}'
+  # Shared with rw-fleet-licence-status.sh. These had two implementations and on
+  # 2026-09-03 they disagreed about op-prod risingwave-console in front of the operator --
+  # one said "stable 3h", this one said "crashlooping" -- because only one of them knew
+  # that a cumulative restart count cannot tell crashing-now from settled-hours-ago.
+  v=$("$K" op-prod -- -n "$NS" get pods -o json 2>/dev/null \
+       | RESTART_LIMIT=10 python3 "$SCRIPT_DIR/lib-pod-health.py")
+  tot=$(printf '%s' "$v" | python3 -c 'import json,sys;print(json.load(sys.stdin)["total"])')
+  nr=$(printf  '%s' "$v" | python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["notready"]))')
+  ch=$(printf  '%s' "$v" | python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["churn"]))')
+  hl=$(printf  '%s' "$v" | python3 -c 'import json,sys;print(" ".join(json.load(sys.stdin)["healed"]))')
+  if   [ "$tot" -lt 0 ];  then huh "could not read pods in $NS as JSON — not an empty namespace"
+  elif [ "$tot" -eq 0 ];  then no "namespace $NS has no pods"
+  elif [ -n "$nr" ];      then no "pods not Running: $nr"
+  elif [ -n "$ch" ];      then no "$tot/$tot pods Running, but crashlooping: $ch"
+  elif [ -n "$hl" ];      then ok "$tot/$tot pods Running; recovered but scarred: $hl"
+  else                         ok "$tot/$tot pods Running, none restarting"
   fi
 else
   no "namespace $NS does not exist"
