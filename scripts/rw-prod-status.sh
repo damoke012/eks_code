@@ -43,7 +43,7 @@ if ! out=$("$K" op-prod -- get --raw='/readyz' 2>&1); then
 fi
 echo "op-prod reachable (/readyz=$out)"
 
-gate "1. AWS layer — IRSA role, bucket, five secrets (applied 2026-09-01)"
+gate "1. AWS layer — IRSA role, bucket, six secrets (applied 2026-09-01)"
 if command -v aws >/dev/null 2>&1 && aws sts get-caller-identity --profile ops-controller >/dev/null 2>&1; then
   who=$(aws sts get-caller-identity --profile ops-controller --query Account --output text)
   if [ "$who" != "$ACCT" ]; then
@@ -92,8 +92,16 @@ if "$K" op-prod -- get ns "$NS" >/dev/null 2>&1; then
   tot=$("$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null | wc -l)
   bad=$("$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null \
           | awk '$3!="Running" && $3!="Completed"' | wc -l)
+  # A crashlooping pod is "Running" between backoffs. On 2026-09-03 this gate reported
+  # "12/12 pods Running" while risingwave-console had 532 restarts and was cycling every
+  # five minutes. STATUS alone cannot see that; the restart count can. Column 4 is RESTARTS
+  # ("532 (50m ago)" splits so that $4 is still the number).
+  churn=$("$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null \
+           | awk '$4+0 > 10 {printf "%s(%s restarts) ", $1, $4}')
   if [ "$tot" -eq 0 ]; then no "namespace $NS has no pods"
-  elif [ "$bad" -eq 0 ]; then ok "$tot/$tot pods Running"
+  elif [ "$bad" -eq 0 ] && [ -n "$churn" ]; then
+    no "$tot/$tot pods Running, but crashlooping: $churn"
+  elif [ "$bad" -eq 0 ]; then ok "$tot/$tot pods Running, none restarting"
   else no "$bad of $tot pods not Running:"
        "$K" op-prod -- -n "$NS" get pods --no-headers 2>/dev/null | awk '$3!="Running" && $3!="Completed"{print "             "$0}'
   fi
@@ -180,13 +188,19 @@ vs=$("$K" op-prod -- -n "$NS" get virtualservice -o jsonpath='{range .items[*]}{
 if [ -z "$vs" ]; then
   no "no VirtualService in $NS"
 else
-  echo "$vs" | while read -r name hosts; do
+  # Process substitution, NOT `echo "$vs" | while`. A piped while runs in a SUBSHELL, so
+  # every ok/no inside it printed its line and incremented a counter that died with the
+  # subshell. On 2026-09-03 the body printed 14 DONE lines and RESULT said 12 -- the two
+  # missing ones were exactly these. The dangerous half is `no`: a VirtualService publishing
+  # a foreign host would print NOT DONE without raising `fail`, and the script would then
+  # announce "COMPLETE" with a NOT DONE line above it. A fail-open in the verdict itself.
+  while read -r name hosts; do
     [ -z "$name" ] && continue
     case "$hosts" in
       *op-dev*|*op-qa*) no "VirtualService $name publishes a FOREIGN host: $hosts" ;;
       *)                ok "VirtualService $name -> $hosts" ;;
     esac
-  done
+  done < <(printf '%s\n' "$vs")
   for h in $(echo "$vs" | awk '{print $2}'); do
     case "$h" in *op-prod*) getent hosts "$h" >/dev/null 2>&1 \
         && ok "DNS resolves $h" || no "DNS does not resolve $h — external-dns has not published it" ;;

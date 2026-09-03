@@ -9,10 +9,11 @@
 #
 # No amount of reading it caught that. Running it against known input does, in one second.
 #
-# The four cases below are the ones that matter: a healthy namespace MUST come back DONE
-# (the direction the old code could never produce), and each unhealthy shape must come back
-# NOT DONE for its own reason. Case 4 exists because a valid licence is only valid until a
-# date, and "expires next week" reads identical to "fine" if you only check the format.
+# Ten cases. A healthy namespace MUST come back DONE (the direction the old code could never
+# produce), and each unhealthy shape must come back NOT DONE for its own reason. Two are
+# worth calling out: a licence expiring next week reads identical to a healthy one if you
+# only check the format, and case 8 asserts the RESULT tally equals the lines actually
+# printed -- which is what catches a counter incremented inside a subshell, anywhere.
 #
 # Run: bash scripts/rw-prod-status.test.sh
 set -uo pipefail
@@ -49,6 +50,14 @@ case "$args" in
   *"get externalsecrets"*conditions*)                cat "$FIXTURE/es-reasons" ;;
   *"get externalsecret rw-license-key"*)             cat "$FIXTURE/es-target" ;;
   *"get secret"*)                                    cat "$FIXTURE/secret.json" ;;
+  *"get kustomization"*)                             echo True ;;
+  *"get ns risingwave"*)                             echo "namespace/risingwave" ;;
+  *"get pods --no-headers"*)                         cat "$FIXTURE/pods" ;;
+  *"get sa risingwave"*)                             cat "$FIXTURE/sa-arn" ;;
+  *"get gateway"*)                                   cat "$FIXTURE/gateways" ;;
+  *"get virtualservice"*)                            cat "$FIXTURE/vs" ;;
+  *"get schedule"*)                                  echo "schedule/risingwave-metastore" ;;
+  *"get backups"*)                                   cat "$FIXTURE/backups" ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -60,6 +69,12 @@ mkfixture() { # $1 = dir, $2 = reasons (newline sep), $3 = licence plaintext
   printf '%s\n' "$2" > "$1/es-reasons"
   printf 'rw-license-key' > "$1/es-target"
   secret_json "$3" > "$1/secret.json"
+  # Defaults for the other gates; individual cases overwrite the one they exercise.
+  printf 'risingwave-meta-default-0            1/1   Running   0   45h\nrisingwave-frontend-default-1       1/1   Running   0   45h\n' > "$1/pods"
+  printf 'arn:aws:iam::937464026810:role/op-usxpress-prod-risingwave' > "$1/sa-arn"
+  printf 'istio-ingress  shared-http      45h\nistio-ingress  tcp-passthrough  45h\n' > "$1/gateways"
+  printf 'risingwave-dashboard risingwave-dashboard.op-prod.usxpress.io\n' > "$1/vs"
+  printf 'risingwave-metastore-20260903 Completed 0 0 45h\n' > "$1/backups"
 }
 
 SYNCED=$'SecretSynced\nSecretSynced\nSecretSynced\nSecretSynced\nSecretSynced\nSecretSynced\nSecretSynced'
@@ -102,6 +117,64 @@ check "licence expiring in 10d -> NOT DONE" "$TMP/f4" 'NOT DONE +.*EXPIRES IN 10
 # 5. An expired licence is the state prod lands in if nobody renews.
 mkfixture "$TMP/f5" "$SYNCED" "$(jwt -86400)"
 check "expired licence -> NOT DONE" "$TMP/f5" 'NOT DONE +console licence JWT is expired'
+
+echo
+echo "== rw-prod-status other gates"
+
+# 6. A pod that is Running between backoffs is not healthy. This exact shape -- STATUS
+#    Running, 532 restarts -- was reported as "12/12 pods Running" on 2026-09-03.
+mkfixture "$TMP/f6" "$SYNCED" "$(jwt 3628800)"
+printf 'risingwave-meta-default-0   1/1   Running   0     45h\nrisingwave-console-5b6      2/2   Running   532 (50m ago)   45h\n' > "$TMP/f6/pods"
+gate3() { FIXTURE="$1" RW_STATUS_KUBECTL="$TMP/fake-kubectl" bash scripts/rw-prod-status.sh 2>/dev/null \
+            | sed -n '/== 3\./,/== 4\./p' > "$TMP/out"; }
+gate3 "$TMP/f6"
+if grep -qE 'NOT DONE +.*crashlooping: risingwave-console' "$TMP/out"; then
+  printf '  PASS  %s\n' "crashlooping pod -> NOT DONE"; pass=$((pass+1))
+else
+  printf '  FAIL  %s\n' "crashlooping pod -> NOT DONE"; sed 's/^/          /' "$TMP/out"; fail=$((fail+1))
+fi
+
+# 7. Steady pods must still pass, or the new restart check just broke a working gate.
+mkfixture "$TMP/f7" "$SYNCED" "$(jwt 3628800)"
+gate3 "$TMP/f7"
+if grep -qE 'DONE +2/2 pods Running, none restarting' "$TMP/out"; then
+  printf '  PASS  %s\n' "steady pods -> DONE"; pass=$((pass+1))
+else
+  printf '  FAIL  %s\n' "steady pods -> DONE"; sed 's/^/          /' "$TMP/out"; fail=$((fail+1))
+fi
+
+# 8. THE INVARIANT. Every DONE/NOT DONE line printed must be counted in RESULT. This is
+#    what catches a counter incremented inside a subshell, anywhere in the script -- gate 6
+#    used `echo | while`, so its two VirtualService lines printed and vanished from the
+#    tally (14 printed, 12 counted, 2026-09-03). Worse for `no`: a foreign host would print
+#    NOT DONE without raising fail, and the script would then announce COMPLETE.
+mkfixture "$TMP/f8" "$SYNCED" "$(jwt 3628800)"
+printf 'risingwave-dashboard risingwave-dashboard.op-prod.usxpress.io\nrisingwave-overview risingwave-overview.op-prod.usxpress.io\n' > "$TMP/f8/vs"
+FIXTURE="$TMP/f8" RW_STATUS_KUBECTL="$TMP/fake-kubectl" bash scripts/rw-prod-status.sh 2>/dev/null > "$TMP/full"
+pd=$(grep -c '^   DONE ' "$TMP/full"); pn=$(grep -c '^   NOT DONE ' "$TMP/full")
+rd=$(sed -n 's/^== RESULT  \([0-9]*\) done.*/\1/p' "$TMP/full")
+rn=$(sed -n 's/^== RESULT  [0-9]* done, \([0-9]*\) not done.*/\1/p' "$TMP/full")
+if [ "$pd" = "$rd" ] && [ "$pn" = "$rn" ]; then
+  printf '  PASS  tally matches printed lines (%s done, %s not done)\n' "$pd" "$pn"; pass=$((pass+1))
+else
+  printf '  FAIL  tally lost lines to a subshell: printed %s done/%s not done, RESULT says %s/%s\n' \
+    "$pd" "$pn" "$rd" "$rn"; fail=$((fail+1))
+fi
+
+# 9. A foreign host must reach the VERDICT, not just the screen.
+mkfixture "$TMP/f9" "$SYNCED" "$(jwt 3628800)"
+printf 'grafana grafana.op-dev.usxpress.io\n' > "$TMP/f9/vs"
+FIXTURE="$TMP/f9" RW_STATUS_KUBECTL="$TMP/fake-kubectl" bash scripts/rw-prod-status.sh 2>/dev/null > "$TMP/full9"
+# Assert the not-done COUNT, not the absence of "COMPLETE". With the subshell bug this
+# case still passed, because gate 1's UNKNOWN happened to suppress the COMPLETE line -- the
+# test looked like it worked while the finding never reached the verdict at all.
+n9=$(sed -n 's/^== RESULT  [0-9]* done, \([0-9]*\) not done.*/\1/p' "$TMP/full9")
+if grep -qE 'NOT DONE +VirtualService grafana publishes a FOREIGN host' "$TMP/full9" \
+   && [ "${n9:-0}" -ge 1 ]; then
+  printf '  PASS  %s\n' "foreign host reaches the verdict count"; pass=$((pass+1))
+else
+  printf '  FAIL  %s\n' "foreign host printed but never reached the verdict count"; fail=$((fail+1))
+fi
 
 printf '\n  passed %d, failed %d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
