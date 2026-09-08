@@ -204,7 +204,18 @@ finish() {
 #      access comes entirely from the two namespaced RoleBindings in stage 5.
 #      His group therefore grants nothing on its own, which is the point.
 
-TOTAL_STAGES=8
+# RBAC binds to a USERNAME STRING. The user does not have to exist, hold a cert,
+# or ever have logged in -- and `auth can-i --as=` verifies the grant the same way
+# either order. So the permission model can be landed and proved while Tim is away,
+# leaving only CSR -> sign -> send for the day he is back.
+MODE=full
+case "${1:-}" in
+  --rbac-only) MODE=rbac-only ;;
+  "") ;;
+  *) echo "usage: $0 [--rbac-only]" >&2; exit 2 ;;
+esac
+
+if [[ "$MODE" == "rbac-only" ]]; then TOTAL_STAGES=5; else TOTAL_STAGES=8; fi
 
 API=10.10.82.50
 CLUSTER=op-usxpress-dev
@@ -214,7 +225,11 @@ WORKDIR="$HOME/onprem-access"
 ENV_FILE="$WORKDIR/tim.env"
 mkdir -p "$WORKDIR"
 
-banner "Onboard Tim to $CLUSTER (namespace super-user)"
+if [[ "$MODE" == "rbac-only" ]]; then
+  banner "Tim's op-dev permissions (RBAC only -- no cert, he can be away)"
+else
+  banner "Onboard Tim to $CLUSTER (namespace super-user)"
+fi
 
 # ── 1 ─────────────────────────────────────────────────────────────────────
 stage "Preflight: pin the cluster, prove admin, report what exists"
@@ -319,9 +334,16 @@ Do NOT send the .key file. Nobody needs it, ever.
 EOF
 say ""
 say "Written to: $SEND"
-say "Send that to Tim now, then come back when he replies."
 note "(macOS openssl handles all of the above; no GNU tools required)"
-pause "Sent? Press Enter when you have his CSR."
+if [[ "$MODE" == "rbac-only" ]]; then
+  say "Send it whenever suits -- it waits for him. This run stops before the cert."
+  pause
+else
+  say "Send that to Tim now, then come back when he replies."
+  pause "Sent? Press Enter when you have his CSR."
+fi
+
+if [[ "$MODE" != "rbac-only" ]]; then
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
 stage "Verify the CSR he sent"
@@ -394,6 +416,8 @@ write_env TIM_CERT_EXPIRES "$NOTAFTER"
 note "Set a calendar reminder 30 days before that date -- expiry is the only"
 note "revocation control until OIDC lands."
 pause
+
+fi   # end stages 3-4 (need Tim)
 
 # ── 5 ─────────────────────────────────────────────────────────────────────
 stage "Grant: namespace super-user in $NS_PRIMARY and $NS_SECONDARY"
@@ -477,6 +501,8 @@ fi
 printf '  %s✓ grant and boundary both verified%s\n' "$GREEN" "$RESET"
 pause
 
+if [[ "$MODE" != "rbac-only" ]]; then
+
 # ── 7 ─────────────────────────────────────────────────────────────────────
 stage "Send Tim his certificate and kubeconfig steps"
 CA="$WORKDIR/$TIM_CN/op-usxpress-dev-ca.crt"
@@ -551,6 +577,8 @@ say "Send that file's contents to Tim."
 note "It contains no private key material -- cert and CA are both public."
 pause
 
+fi   # end stage 7 (needs the signed cert)
+
 # ── 8 ─────────────────────────────────────────────────────────────────────
 stage "Make Git say what the cluster says"
 warn "The RoleBindings were applied live. They are NOT yet in Git."
@@ -569,10 +597,22 @@ note "  did not mean to change"
 step "Open the PR with the base pinned: gh pr create --base op-dev --fill"
 say ""
 SKIPPED+=("land $RBAC on the op-dev branch, or the next rebuild drops Tim's access")
-SKIPPED+=("calendar reminder 30 days before $NOTAFTER to re-issue Tim's cert")
+if [[ "$MODE" == "rbac-only" ]]; then
+  SKIPPED+=("when Tim is back: re-run this WITHOUT --rbac-only for his cert (stages 3, 4, 7)")
+else
+  SKIPPED+=("calendar reminder 30 days before $NOTAFTER to re-issue Tim's cert")
+fi
 pause
 
 finish
-say "Tim is a super-user in $NS_PRIMARY and $NS_SECONDARY on $CLUSTER, and nowhere else."
+if [[ "$MODE" == "rbac-only" ]]; then
+  say "The permission model is live and proved: user '$TIM_CN' is a super-user in"
+  say "$NS_PRIMARY and $NS_SECONDARY on $CLUSTER, and nowhere else."
+  say "He has no credential yet, so it grants nobody anything until he is issued one."
+  say ""
+  say "When he is back:  bash $0"
+else
+  say "Tim is a super-user in $NS_PRIMARY and $NS_SECONDARY on $CLUSTER, and nowhere else."
+fi
 say "Files: $WORKDIR/$TIM_CN/"
 say ""
