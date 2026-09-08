@@ -241,3 +241,44 @@ where Tim posted his IP: there is nothing for an IP to be added to.
 
 **New ticket candidate:** `op-dev.usxpress.io` resolves from the public internet. Internal
 `10.10.82.x` addresses were readable from a GitHub codespace with no VPN.
+
+### 2026-09-08 later — Idris cleared the queue; #22 reviewed twice
+
+**#18 closed** by Idris. **#21 merged** (squash) — `apply.sh` hardening plus two new docs.
+Both Round 1 asks on it turned out to be **already satisfied**, verified in the code, not
+conceded: the `%TOKEN%` substitution writes to a temp file and `sha256sum` reads *that*, and
+an `EXCLUDE_RE` that empties the selection exits 1 with a named error. His `EXCLUDE_RE` was
+also exact — run against the tree at `4873de43`, 24 `.sql`/`.rw` files discovered, 22
+excluded, exactly `Brand/100-sources.rw` and `Brand/200-ingest.rw` selected.
+
+**#23** opened automatically from the #21 merge, promoting `ae5176cb`. It cannot deploy
+either — same wedge.
+
+**#22 (QA cutover) — two rounds, and I was wrong once.**
+
+❌ **My Round 1 blocker "this PR is seven files" was wrong.** I read the diff GitHub
+*displays*, which is computed from a merge-base predating the #21 squash. The effective
+diff — `git diff --stat origin/master pr-22` — is four files and 84 lines, overlay only,
+exactly as Idris described. His `apply.sh` and docs are byte-identical to master. Withdrawn
+in Round 2. Same class as everything else today: the displayed artifact is a proxy; the
+effective diff is the property.
+
+✅ **And the file I had not read carried a real one.**
+`deploy/overlays/qa/kustomization.yaml` reverts the QA digest from `5108f32…` (merged by
+#20 today) back to `d616242…` (**19 August**). The branch predates #20 and touches the
+file, so merging it undoes the promotion — invisible in the file list, invisible in the
+description, green all the way. Same shape as the #17-after-#20 ordering trap, through a
+different door. Fix is a rebase; better still, overlay PRs should stop pinning the digest
+at all and leave it to the promotion PRs.
+
+**Check added, because one would have caught it.** `scripts/rw-pr-triage.sh` now flags any
+open PR that moves an image digest and is not titled `promote:`, prints the before/after
+lines and gives the command to diff the branch against master. Verified against the real
+#22 hunk (flagged) and the `PIPELINE_DIR`-only hunk from the same PR (quiet).
+
+**#22's remaining list:** the QA wedge (blocks everything), the digest revert (one rebase),
+`PIPELINE_DIR` exiting 0 on an empty match, and the unanswered Kafka-credentials question.
+
+**Critical path is one item:** create `op-usxpress-qa/risingwave/entity-postgres/{username,
+password}` through the Octopus Terraform run. Until then nothing reaches QA — not #22, not
+#23, and #20's image is still not running.
