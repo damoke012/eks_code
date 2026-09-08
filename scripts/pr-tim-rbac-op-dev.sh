@@ -182,7 +182,9 @@ if [ "$PUSH" = "yes" ]; then
   echo "   pushed $TOPIC"
   echo
   ORIGIN=$(git remote get-url origin)
-  SLUG=$(printf '%s' "$ORIGIN" | sed -E 's#^.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')
+  # Strip .git FIRST: sed -E is POSIX ERE and has no lazy quantifiers, so "[^/]+?"
+  # is not a lazy match and the suffix survived.
+  SLUG=$(printf '%s' "$ORIGIN" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')
   echo "   Open the PR — run this from anywhere; --repo means no default remote is needed:"
   echo
   echo "     gh pr create --repo $SLUG --base $BR --head $TOPIC --fill"
