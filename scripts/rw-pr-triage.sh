@@ -62,6 +62,26 @@ else
   fi
 fi
 
+# A digest belongs to a promotion PR. When any OTHER PR moves one, it is almost always a
+# stale branch silently reverting a merged promotion -- #22 on 2026-09-08 put QA back on
+# the 19 August image through a file nobody was reading, and it would have merged green.
+echo
+echo "== digest changes outside promotion PRs"
+FOUND=0
+while IFS=$'\t' read -r num title; do
+  [ -n "$num" ] || continue
+  case "$title" in "promote:"*) continue ;; esac
+  d=$(gh pr diff "$num" --repo "$REPO" 2>/dev/null | grep -E '^[-+][[:space:]]*digest:[[:space:]]*sha256:' || true)
+  [ -n "$d" ] || continue
+  FOUND=1
+  echo "   ⚠ #$num moves an image digest and is not a promotion:"
+  printf '%s\n' "$d" | sed 's/^/       /'
+  echo "     Check it against master before merging:"
+  echo "       git diff origin/master pr-$num -- deploy/overlays"
+  echo "     A branch cut before the last promotion reverts it just by touching the file."
+done < <(gh pr list --repo "$REPO" --state open --json number,title --jq '.[] | "\(.number)\t\(.title)"')
+[ "$FOUND" = "0" ] && echo "   none -- no open PR outside a promotion moves a digest"
+
 for n in "$@"; do
   case "$n" in [0-9]*) ;; *) echo "!! '$n' is not a PR number" >&2; exit 2 ;; esac
   echo
