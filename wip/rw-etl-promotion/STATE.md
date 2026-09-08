@@ -142,3 +142,60 @@ QA's console pod is actually running (op-qa unreachable at the time — VPN/SSO)
 **Also still open:** prod's Entra redirect URI
 `https://risingwave-dashboard.op-prod.usxpress.io/dex/callback` on app registration
 `e112d6ce-cc60-4884-9898-8fcc5b78b0b1`, and a first COMPLETED Velero backup (~6h).
+
+## 2026-09-08 — Tim's access, and the PR queue cleared
+
+**Tim (Timothy Preble) had never been provisioned on op-dev.** Not expired, not blocked
+by the network team, not an IP allow-list — no certificate and no bindings had ever
+existed under his name. Confirmed on the cluster before anything was granted.
+
+Proven, from a VPN'd client: op-dev is healthy end to end — `10.10.82.50:6443` open,
+`rw2-sql:4567` open, `rw2-dashboard` and `risingwave-dashboard` both HTTP 200. So the
+original report was client-side.
+
+Done:
+- RoleBindings to ClusterRole `admin` in `risingwave-2` and `risingwave`, applied live and
+  **boundary-tested** (6 allowed / 6 denied, including nodes, kube-system secrets,
+  cluster-wide secrets, flux-system). Scope matches the Phase 1 record: namespace
+  super-user, not cluster-wide.
+- `variant-inc/iaac-talos-flux-platform#150` → `op-dev`, so a rebuild cannot drop them.
+- Cert carries `O=risingwave-users`, a group with no bindings anywhere. Deliberate: the
+  runbook's default `O=onprem-platform-users` picks up cluster-wide read, and
+  `infrastructure/rbac/` on op-dev really does carry those tiers.
+- `scripts/wizard-onboard-tim-op-dev.sh` (8 stages, `--rbac-only` for the 5 that need
+  nobody), `scripts/triage-user-cluster-access.sh`, `scripts/pr-tim-rbac-op-dev.sh`.
+
+**Still open:** Tim is on vacation. His certificate is stages 3, 4 and 7 of the wizard —
+about ten minutes on his return.
+
+⚠️ **Unanswered, and it should have been asked first:** nobody has confirmed which door
+Tim was knocking on. The Phase 1 record has his path as psql plus the dashboard with
+kubectl *explicitly excluded*. If he meant the SQL endpoint he needs a RisingWave DB user,
+not this. The grant is correct and needed either way, so nothing is wasted — but it was
+built on a decision record rather than on an answer.
+
+**PR queue.** #17 closed as superseded (`310aa151` is an ancestor of `4873de43`, checked
+with `merge-base --is-ancestor`, not by PR date). #20 approved and merged: QA had been on
+the **19 August** image for three weeks and now carries INFRA-1675 — guardrail regex,
+`apply.sh` routing, per-env account IDs, and the per-environment `risingwave` namespace
+map that was our change request on #19. #18 and #21 are back with Idris; messages in
+`MSG-IDRIS-PRS-2026-09-08.md`.
+⏳ **Not yet verified:** that `app-risingwave` on op-qa is actually running
+`sha256:5108f320…`. The SSO session expired mid-check — `aws sso login --profile op-qa`
+then read the pod's imageID. A merged promotion is not a running pod.
+
+**Traps hit today, all self-inflicted, all caught by running against a known-good machine
+rather than by review:** interface name read as reachability (invalid in WSL2), one missing
+DNS record read as resolver health, the default kubeconfig path read as whether a
+credential exists, "merge oldest first" applied to *parallel* promotions, and a
+kustomization entry appended at the wrong indentation — invalid YAML that would have taken
+`infrastructure/rbac` down. `kubectl kustomize` did refuse to build it, and the script
+printed "check it by hand" instead of failing.
+
+**Absent by design, not broken:** `rw2-pg.op-dev.usxpress.io` has no DNS record because
+`rw2-pg-passthrough.yaml` was never applied (INFRA-1495). And INFRA-1496 — the source-CIDR
+allow-list via CiliumNetworkPolicy — is still `filed`, which is the answer to Idris asking
+where Tim posted his IP: there is nothing for an IP to be added to.
+
+**New ticket candidate:** `op-dev.usxpress.io` resolves from the public internet. Internal
+`10.10.82.x` addresses were readable from a GitHub codespace with no VPN.
