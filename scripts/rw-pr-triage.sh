@@ -39,9 +39,26 @@ else
   printf '%s\n' "$PROMOS" | sed 's/^/   /'
   N=$(printf '%s\n' "$PROMOS" | grep -c . || true)
   if [ "$N" -gt 1 ]; then
-    echo "   ⚠ $N open promotions. Merge OLDEST FIRST (top of this list), or close the"
-    echo "     superseded ones. Merging an older promote after a newer one rolls the"
-    echo "     environment back, and both merges report success."
+    echo
+    echo "   ⚠ $N open promotions against the same overlay."
+    echo
+    echo "   These are PARALLEL, not stacked: each replaces the SAME current digest, so"
+    echo "   only one of them is wanted. Merging the older one deploys stale code, and"
+    echo "   merging it AFTER the newer one is a rollback that reports success."
+    echo
+    echo "   Do NOT decide by PR date. A newer PR is not a newer commit -- that is the"
+    echo "   proxy, and the property is ancestry. For each older source commit, check"
+    echo "   it is actually contained in the newest before closing its PR:"
+    echo
+    NEWEST=$(printf '%s\n' "$PROMOS" | tail -1 | sed 's/.*promote: QA -> //')
+    printf '%s\n' "$PROMOS" | head -n -1 | sed 's/.*promote: QA -> //' | while read -r old_sha; do
+      [ -n "$old_sha" ] || continue
+      echo "     git merge-base --is-ancestor $old_sha $NEWEST && echo CONTAINED || echo NOT-CONTAINED"
+    done
+    echo
+    echo "   CONTAINED     -> close the older PR, merge the newest only."
+    echo "   NOT-CONTAINED -> the branches diverged; closing it DROPS work. Rebuild"
+    echo "                    from a commit that has both before promoting anything."
   fi
 fi
 

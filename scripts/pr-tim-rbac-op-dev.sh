@@ -105,9 +105,26 @@ KUS="$DIR/kustomization.yaml"
 BASE=$(basename "$FILE")
 if [ -f "$KUS" ]; then
   if grep -qE '^resources:' "$KUS"; then
-    grep -qF "$BASE" "$KUS" || printf -- '- %s\n' "$BASE" >> "$KUS"
-    grep -qF "$BASE" "$KUS" || { echo "!! failed to enumerate $BASE in $KUS" >&2; exit 1; }
-    echo "   enumerated in $KUS"
+    # Match the existing list's indentation. A hardcoded "- " at column 0 appended
+    # under an INDENTED list is not a cosmetic difference -- it is invalid YAML and
+    # breaks the entire kustomization. Observed doing exactly that on 2026-09-08.
+    IND=$(awk '/^resources:/{f=1;next} f && /^[[:space:]]*-/{match($0,/^[[:space:]]*/); print substr($0,1,RLENGTH); exit}' "$KUS")
+    [ -n "$IND" ] || IND="  "
+    grep -qF "$BASE" "$KUS" || printf '%s- %s\n' "$IND" "$BASE" >> "$KUS"
+    # Assert by PARSING it back, not by grepping the text we just wrote. A grep
+    # passes happily on a file no YAML parser will accept.
+    python3 - "$KUS" "$BASE" <<'PYK'
+import sys, yaml
+kus, base = sys.argv[1], sys.argv[2]
+try:
+    d = yaml.safe_load(open(kus))
+except Exception as e:
+    sys.exit("!! %s is not valid YAML after the edit: %s" % (kus, e))
+res = (d or {}).get("resources") or []
+if base not in res:
+    sys.exit("!! %s parsed, but %s is not in resources: %s" % (kus, base, res))
+print("   enumerated in %s (parsed back: %d resources)" % (kus, len(res)))
+PYK
   else
     echo "   $KUS has no resources: list -- it does not enumerate; nothing to add"
   fi
@@ -118,12 +135,16 @@ fi
 
 # ---- assert on the RENDERED output, not on the file we just wrote -----------
 if command -v kubectl >/dev/null 2>&1 && [ -f "$KUS" ]; then
-  if OUT=$(kubectl kustomize "$DIR" 2>/dev/null); then
+  if OUT=$(kubectl kustomize "$DIR" 2>&1); then
     C=$(printf '%s' "$OUT" | grep -c "name: risingwave-admin-$CN" || true)
     [ "$C" = "2" ] || { echo "!! rendered output contains $C of the 2 RoleBindings" >&2; exit 1; }
     echo "   rendered kustomize output contains both RoleBindings"
   else
-    echo "   (kubectl kustomize could not build $DIR -- check it by hand)"
+    echo "!! kubectl kustomize cannot build $DIR after this edit:" >&2
+    printf '%s\n' "$OUT" | sed 's/^/     /' >&2
+    echo "   Refusing to commit a directory Flux will fail to render. Nothing was" >&2
+    echo "   committed; the branch is reset on the next run." >&2
+    exit 1
   fi
 fi
 
