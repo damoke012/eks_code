@@ -180,9 +180,51 @@ the **19 August** image for three weeks and now carries INFRA-1675 — guardrail
 `apply.sh` routing, per-env account IDs, and the per-environment `risingwave` namespace
 map that was our change request on #19. #18 and #21 are back with Idris; messages in
 `MSG-IDRIS-PRS-2026-09-08.md`.
-⏳ **Not yet verified:** that `app-risingwave` on op-qa is actually running
-`sha256:5108f320…`. The SSO session expired mid-check — `aws sso login --profile op-qa`
-then read the pod's imageID. A merged promotion is not a running pod.
+❌ **VERIFIED, AND IT DID NOT LAND.** `app-risingwave` on op-qa is still on `d616…`.
+The apply Job `etl-pipeline-apply-djbp9` has been in `CreateContainerConfigError` for
+**6d20h — 45,497 attempts**, since ~2026-09-01:
+
+    Error: couldn't find key POSTGRES_ENTITY_USER in Secret app-risingwave/etl-pipeline-credentials
+
+The Job is an Argo **sync hook**, so a hook that never completes blocks the sync and #20's
+digest is never applied. Merging the promotion changed nothing. Same shape as
+`rw-bootstrap-service-accounts` wedging `risingwave-onprem` on prod last week.
+
+**Root cause — Blocker 1 from `REVIEW-IDRIS-ARCHITECTURE-2026-09-02.md`, which we recorded
+as "deferred". It is not deferred; it has been blocking QA for a week.** The
+ExternalSecret requests five keys and the Secret holds three:
+
+| requested | present | remoteRef |
+|---|---|---|
+| `RW_PASSWORD` | ✅ | `op-usxpress-qa/risingwave/root/password` |
+| `PG_PASSWORD` | ✅ | `op-usxpress-qa/risingwave/postgres/password` |
+| `PG_USER` | ✅ | `op-usxpress-qa/risingwave/postgres/username` |
+| `POSTGRES_ENTITY_USER` | ❌ | `op-usxpress-qa/risingwave/entity-postgres/username` |
+| `POSTGRES_ENTITY_PASSWORD` | ❌ | `op-usxpress-qa/risingwave/entity-postgres/password` |
+
+The `entity-postgres` records were never created in Secrets Manager. They are Terraform's,
+applied through Octopus.
+
+⚠️ **Correction to a claim made in this session.** I called this another instance of
+"a green sync is not a valid value". **It is not.** The ExternalSecret reports
+`SecretSyncedError` — ESO was honest. What actually happened is worse in a different way:
+**ESO wrote a PARTIAL Secret**, three of five keys, so the Secret looks populated while
+being unusable. The pod then gets far enough to attempt container creation and dies on the
+missing key. Nothing was watching the ExternalSecret's condition, and nothing alerted for
+seven days on a cluster where alert delivery was fixed on 2026-08-24.
+
+**Fix, in this order — the order matters:**
+1. Create `op-usxpress-qa/risingwave/entity-postgres/{username,password}` in Secrets
+   Manager, via Terraform through Octopus. Never a local apply.
+2. Confirm the Secret carries **five** keys, by listing keys — not by reading the
+   ExternalSecret's condition.
+3. **Then** delete the wedged Job so Argo recreates the hook at the new digest. Doing this
+   before step 1 just wedges it again.
+4. Verify the new pod's imageID is `sha256:5108f320…` and the Job reports Complete.
+
+**Open question for Idris:** does the Terraform create the Postgres ROLE as well as the
+Secrets Manager record? A credential that exists in SM but not in the database moves the
+failure from container-create to connect-time, which is harder to see.
 
 **Traps hit today, all self-inflicted, all caught by running against a known-good machine
 rather than by review:** interface name read as reachability (invalid in WSL2), one missing
