@@ -185,9 +185,11 @@ if [ "$PUSH" = "yes" ]; then
   # Strip .git FIRST: sed -E is POSIX ERE and has no lazy quantifiers, so "[^/]+?"
   # is not a lazy match and the suffix survived.
   SLUG=$(printf '%s' "$ORIGIN" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')
-  echo "   Open the PR — run this from anywhere; --repo means no default remote is needed:"
+  echo "   Open the PR. The cd matters: --repo fixes which remote gh talks to, but"
+  echo "   --fill still reads the LOCAL repo to build the title and body, so it has to"
+  echo "   run where these branches exist."
   echo
-  echo "     gh pr create --repo $SLUG --base $BR --head $TOPIC --fill"
+  echo "     cd $REPO && gh pr create --repo $SLUG --base $BR --head $TOPIC --fill"
 else
   echo "   committed to local $TOPIC (not pushed). Re-run with --push."
 fi
