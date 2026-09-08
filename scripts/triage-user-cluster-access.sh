@@ -128,7 +128,12 @@ for name in rw2-sql.op-dev.usxpress.io rw2-pg.op-dev.usxpress.io rw2-dashboard.o
     ok "$name -> ${A% }"
   elif [ "$RESOLVER_UP" = "1" ]; then
     bad "$name has NO DNS RECORD -- the resolver answered, this name does not exist"
-    DNSGAP="$DNSGAP $name"
+    case "$name" in
+      rw2-pg.*) note "EXPECTED. rw2-pg-passthrough.yaml is a draft, deliberately not applied:"
+                note "exposing RW-2 postgres is a Phase 2 decision (INFRA-1495), not an outage."
+                note "If Tim needs it, that is a decision to take, not a fault to chase." ;;
+      *)        DNSGAP="$DNSGAP $name" ;;
+    esac
   else
     bad "$name did not resolve (resolver down -- cannot tell whether the record exists)"
   fi
@@ -142,8 +147,10 @@ tcp "$API" 6443; say_tcp $? "$API:6443" || D1=fail
 echo
 echo "== 4. door 2 -- RisingWave SQL and Postgres (op-dev, namespace risingwave-2)"
 tcp rw2-sql.op-dev.usxpress.io 4567; say_tcp $? "rw2-sql.op-dev.usxpress.io:4567" || D2=fail
-tcp rw2-pg.op-dev.usxpress.io  5432; say_tcp $? "rw2-pg.op-dev.usxpress.io:5432"  || D2=fail
-note "If :5432 opens but psql then hangs or resets, that is INFRA-1654, not access:"
+tcp rw2-pg.op-dev.usxpress.io  5432; say_tcp $? "rw2-pg.op-dev.usxpress.io:5432" || true
+note "rw2-pg is expected to be absent -- its VirtualService was never applied."
+note "In the risingwave namespace, if :5432 opens but psql hangs or resets, that is"
+note "INFRA-1654 rather than access:"
 note "ghostunnel-rw-postgres listens on :4567 behind a Service published as 5432, so"
 note "nothing is bound where traffic arrives. Its readinessProbe watches the status"
 note "port, so the pod reports Ready with a dead data port."
