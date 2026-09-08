@@ -70,10 +70,24 @@ if [ -z "$DIR" ]; then
   if [ "$N" = "1" ]; then
     DIR="$CANDS"
   else
-    echo "!! found $N directories already holding RBAC on origin/$BR:" >&2
-    printf '%s\n' "$CANDS" | sed 's/^/     /' >&2
-    echo "   Pick one and re-run with --dir <path>. Guessing here puts the file" >&2
-    echo "   somewhere Flux may not read." >&2
+    # Listing nine paths and saying "pick one" leaves the operator guessing, which is
+    # the thing this refusal exists to prevent. Show the evidence that distinguishes
+    # them: a component's own RBAC binds ServiceAccounts, a people directory binds
+    # Users and Groups. Ours is a User binding.
+    echo "!! found $N directories already holding RBAC on origin/$BR." >&2
+    echo "   Ours binds a User, so the directory that already binds Users/Groups is" >&2
+    echo "   the one to join; the rest are each a component's own ServiceAccount RBAC." >&2
+    echo >&2
+    printf '   %-42s %6s %6s\n' "directory" "user" "svcacct" >&2
+    while read -r d; do
+      [ -n "$d" ] || continue
+      u=$(grep -rl --include='*.yaml' -e 'kind: User' -e 'kind: Group' "$d" 2>/dev/null | wc -l | tr -d ' ')
+      a=$(grep -rl --include='*.yaml' 'kind: ServiceAccount' "$d" 2>/dev/null | wc -l | tr -d ' ')
+      mark=" "; [ "$u" -gt 0 ] && [ "$a" -eq 0 ] && mark="*"
+      printf ' %s %-42s %6s %6s\n' "$mark" "$d" "$u" "$a" >&2
+    done <<< "$CANDS"
+    echo >&2
+    echo "   * = binds people and no ServiceAccounts. Re-run with --dir <path>." >&2
     exit 1
   fi
 fi
