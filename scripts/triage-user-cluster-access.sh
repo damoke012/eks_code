@@ -173,34 +173,52 @@ echo
 echo "== 6. credential"
 if [ "$NETFAIL" = "1" ]; then
   echo "   SKIPPED -- something above failed at the network layer."
-  echo "   A credential test on an unreachable endpoint reports a transport failure as if"
-  echo "   it were an access verdict. It is not one. Fix the route first."
+  echo "   A credential test against an unreachable endpoint reports a TRANSPORT failure as"
+  echo "   though it were an access verdict. It is not one. Fix the route first."
 elif ! command -v kubectl >/dev/null 2>&1; then
-  echo "   kubectl is not installed on this machine -- nothing to test."
+  echo "   kubectl is not installed here -- nothing to test."
   echo "   That is fine if the SQL endpoint (door 2) is all that is needed."
 else
-  CTX=$(kubectl config current-context 2>/dev/null)
+  # Pin the context to the cluster this run is ABOUT. current-context is merely whatever
+  # was used last, so on an operator's own machine it will happily report on prod while
+  # every other line of output is about dev -- a true answer to the adjacent question.
+  CTX=""
+  for c in $(kubectl config get-contexts -o name 2>/dev/null); do
+    srv=$(kubectl config view --minify --context "$c" \
+            -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null)
+    case "$srv" in
+      *"$API"*) CTX="$c"; ok "context '$c' -> $srv"; break ;;
+    esac
+  done
+
   if [ -z "$CTX" ]; then
-    echo "   kubectl has NO current context configured -- no credential has ever been issued"
-    echo "   for this machine. That is a provisioning gap; go to the runbook."
+    CUR=$(kubectl config current-context 2>/dev/null)
+    if [ -n "$CUR" ]; then
+      bad "no kubeconfig context points at $API ($CLUSTER)."
+      note "current-context is '$CUR' -- a DIFFERENT cluster. Not testing it: an answer"
+      note "about another cluster is not an answer about this one."
+    else
+      bad "kubectl has no contexts at all on this machine."
+    fi
+    note "No credential exists here for $CLUSTER. That is a provisioning gap."
     AUTHFAIL=1
   else
-    echo "   current context: $CTX"
     OUT=$(kubectl --context "$CTX" get --raw /version 2>&1); RC=$?
-    if [ $RC -eq 0 ]; then
-      ok "authenticated to the API"
-      echo "   permissions in namespace risingwave-2:"
-      kubectl --context "$CTX" auth can-i --list -n risingwave-2 2>&1 | sed 's/^/            /' | head -15
+    if [ "$RC" -eq 0 ]; then
+      ok "authenticated to $CLUSTER"
+      echo "   what this identity may do in namespace risingwave-2:"
+      kubectl --context "$CTX" auth can-i --list -n risingwave-2 2>&1 \
+        | sed 's/^/            /' | head -12
     else
       printf '%s\n' "$OUT" | sed 's/^/            /'
       case "$OUT" in
         *Unauthorized*|*"must be logged in"*)
-          bad "AUTHN -- reached the API, credential rejected or expired. Re-issue it."; AUTHFAIL=1 ;;
+          bad "AUTHN -- the API answered and rejected the credential. Re-issue it."; AUTHFAIL=1 ;;
         *Forbidden*|*"cannot list"*|*"cannot get"*)
-          bad "AUTHZ -- identity accepted, permissions missing. Bind the group, do not re-issue."; AUTHFAIL=1 ;;
+          bad "AUTHZ -- identity accepted, permissions missing. Bind the group; do not re-issue."; AUTHFAIL=1 ;;
         *"i/o timeout"*|*"no route to host"*|*"connection refused"*|*"context deadline"*)
-          bad "NETWORK -- this is transport, not access. Nothing to provision."; NETFAIL=1 ;;
-        *) bad "unclassified -- paste the line above rather than guessing at it"; AUTHFAIL=1 ;;
+          bad "NETWORK -- transport, not access. There is nothing to provision."; NETFAIL=1 ;;
+        *) bad "unclassified -- send the line above rather than guessing at it"; AUTHFAIL=1 ;;
       esac
     fi
   fi
