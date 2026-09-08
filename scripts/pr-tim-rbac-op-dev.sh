@@ -181,8 +181,11 @@ if [ "$PUSH" = "yes" ]; then
   git push -q -u origin "$TOPIC" --force-with-lease
   echo "   pushed $TOPIC"
   echo
-  echo "   Open the PR with the base pinned:"
-  echo "     gh pr create --base $BR --head $TOPIC --fill"
+  ORIGIN=$(git remote get-url origin)
+  SLUG=$(printf '%s' "$ORIGIN" | sed -E 's#^.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')
+  echo "   Open the PR — run this from anywhere; --repo means no default remote is needed:"
+  echo
+  echo "     gh pr create --repo $SLUG --base $BR --head $TOPIC --fill"
 else
   echo "   committed to local $TOPIC (not pushed). Re-run with --push."
 fi
