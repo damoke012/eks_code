@@ -184,32 +184,43 @@ elif ! command -v kubectl >/dev/null 2>&1; then
   echo "   kubectl is not installed here -- nothing to test."
   echo "   That is fine if the SQL endpoint (door 2) is all that is needed."
 else
-  # Pin the context to the cluster this run is about. current-context is merely
-  # whatever was used last, and would report on a different cluster entirely.
-  CTX=""
-  for c in $(kubectl config get-contexts -o name 2>/dev/null); do
-    srv=$(kubectl config view --minify --context "$c" \
-            -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null)
-    case "$srv" in *"$API"*) CTX="$c"; ok "context '$c' -> $srv"; break ;; esac
+  # Look in every kubeconfig, not just the default one. Asking `kubectl config` with no
+  # KUBECONFIG set reads ~/.kube/config alone, and this team deliberately keeps each
+  # cluster in its OWN file (op-usxpress-prod-breakglass.yaml, op-usxpress-qa-sso.yaml)
+  # precisely so a stray command cannot inherit the wrong cluster. Reading the default
+  # path and concluding "no credential exists" is a claim about a FILE, not about access.
+  CANDS=""
+  [ -n "${KUBECONFIG:-}" ] && CANDS=$(printf '%s' "$KUBECONFIG" | tr ':' '\n')
+  for f in "$HOME/.kube/config" "$HOME"/.kube/*.yaml "$HOME"/.kube/*.yml "$HOME"/.kube/*.conf; do
+    [ -f "$f" ] && CANDS="$CANDS
+$f"
   done
-  if [ -z "$CTX" ]; then
-    CUR=$(kubectl config current-context 2>/dev/null)
-    if [ -n "$CUR" ]; then
-      bad "no kubeconfig context points at $API ($CLUSTER)"
-      note "current-context is '$CUR' -- a DIFFERENT cluster. Not testing it: an answer"
-      note "about another cluster is not an answer about this one."
-    else
-      bad "kubectl has no contexts at all on this machine"
-    fi
-    note "No credential exists here for $CLUSTER -- a provisioning gap."
-    CRED=missing
-  else
-    OUT=$(kubectl --context "$CTX" get --raw /version 2>&1); RC=$?
+  CANDS=$(printf '%s\n' "$CANDS" | grep -v '^$' | awk '!seen[$0]++')
+
+  CTX=""; KCF=""; SEEN=0; OTHERS=""
+  for f in $CANDS; do
+    [ -f "$f" ] || continue
+    SEEN=$((SEEN+1))
+    for c in $(kubectl --kubeconfig "$f" config get-contexts -o name 2>/dev/null); do
+      srv=$(kubectl --kubeconfig "$f" config view --minify --context "$c" \
+              -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null)
+      case "$srv" in
+        *"$API"*) CTX="$c"; KCF="$f"; break ;;
+        *)        OTHERS="$OTHERS
+            $(basename "$f")  $c  ->  ${srv:-<no server>}" ;;
+      esac
+    done
+    [ -n "$CTX" ] && break
+  done
+
+  if [ -n "$CTX" ]; then
+    ok "context '$CTX' in $KCF -> $API"
+    OUT=$(kubectl --kubeconfig "$KCF" --context "$CTX" get --raw /version 2>&1); RC=$?
     if [ "$RC" -eq 0 ]; then
       ok "authenticated to $CLUSTER"
       CRED=ok
       echo "   what this identity may do in namespace risingwave-2:"
-      kubectl --context "$CTX" auth can-i --list -n risingwave-2 2>&1 \
+      kubectl --kubeconfig "$KCF" --context "$CTX" auth can-i --list -n risingwave-2 2>&1 \
         | sed 's/^/            /' | head -12
     else
       printf '%s\n' "$OUT" | sed 's/^/            /'
@@ -218,11 +229,22 @@ else
           bad "AUTHN -- the API answered and rejected the credential. Re-issue it."; CRED=authn ;;
         *Forbidden*|*"cannot list"*|*"cannot get"*)
           bad "AUTHZ -- identity accepted, permissions missing. Bind the group."; CRED=authz ;;
+        *"certificate has expired"*|*"x509"*)
+          bad "AUTHN -- the client certificate is expired or untrusted. Re-issue it."; CRED=authn ;;
         *"i/o timeout"*|*"no route to host"*|*"connection refused"*|*"context deadline"*)
           bad "transport failure on a port that opened seconds ago -- rerun before acting"; CRED=flaky ;;
         *) bad "unclassified -- send the line above rather than guessing at it"; CRED=unknown ;;
       esac
     fi
+  elif [ "$SEEN" -eq 0 ]; then
+    bad "no kubeconfig file found (checked \$KUBECONFIG and $HOME/.kube/)"
+    note "No credential for $CLUSTER on this machine -- a provisioning gap."
+    CRED=missing
+  else
+    bad "$SEEN kubeconfig file(s) found, none with a context pointing at $API"
+    [ -n "$OTHERS" ] && { note "what they do point at:"; printf '%s\n' "$OTHERS"; }
+    note "So there is no credential for $CLUSTER here. Other clusters are not a substitute."
+    CRED=missing
   fi
 fi
 
