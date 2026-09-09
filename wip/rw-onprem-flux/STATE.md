@@ -6,7 +6,10 @@
 
 ## Current state (2026-05-29, post-approval)
 
-- PR [#7](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7) on iaac-talos-flux-cluster — **APPROVED 2026-05-29 PM**, awaiting Idris to merge
+- PR [#7](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7) on iaac-talos-flux-cluster — **MERGED 2026-06-01T15:20:55Z.** ~~awaiting Idris to merge~~ — that line stood for three months and was
+  read as an open item again on 2026-09-08. Corrected in place rather than deleted: a note that says
+  "awaiting X" needs a closing edit, or it keeps generating work. Checked with
+  `gh pr view 7 --repo variant-inc/iaac-talos-flux-cluster --json state,mergedAt`.
 - Latest commit `d2dfdd5` — addressed all 3 remaining blockers
 - **3 review rounds + approval**:
   - Round 1: [comment-4578051242](https://github.com/variant-inc/iaac-talos-flux-cluster/pull/7#issuecomment-4578051242)
