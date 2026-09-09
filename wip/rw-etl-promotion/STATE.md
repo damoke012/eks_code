@@ -282,3 +282,38 @@ lines and gives the command to diff the branch against master. Verified against 
 **Critical path is one item:** create `op-usxpress-qa/risingwave/entity-postgres/{username,
 password}` through the Octopus Terraform run. Until then nothing reaches QA — not #22, not
 #23, and #20's image is still not running.
+
+### 2026-09-09 — `variant-inc/iaac-talos` #62, blocked
+
+`fix(INFRA-1672): widen GHA OIDC trust policy for risingwave-pipeline`, +16/-18 in
+`deploy/terraform/modules/irsa/gha-risingwave-pipeline-secrets-role.tf`. Review requested
+from us a week ago.
+
+The diagnosis is correct — a `workflow_dispatch` job referencing a GitHub Environment sends
+`environment:<name>` as the `sub` claim, which a policy pinned to `ref:refs/heads/master`
+rejects. **The size of the fix is the problem, and two changes compound:**
+
+1. Subject becomes `repo:variant-inc/risingwave-pipeline:*`, which also matches
+   `repo:…:pull_request`. Anyone able to open a PR in that repo can assume the role.
+2. The same commit adds `${cluster_name}/risingwave/*` — **Tim's production path** — to what
+   that role may read.
+
+Net: a wildcard-trusted role that reads production RisingWave credentials. `StringLike`
+takes a list, so naming `master` plus the three `environment:` subjects fixes the real
+problem without admitting PRs.
+
+**The PR deletes the two comments that argue against exactly this**, and both were quoted
+back rather than re-argued. Verified rather than assumed:
+`gha-risingwave-poc-secrets-role.tf` **is still present**, so the separation is a live
+property being removed, not a historical note — two roles would read `/risingwave/*` after
+this merge.
+
+Advisories: `risingwave-2` scope granted in every environment though it is dev-only, and
+`data.aws_caller_identity.current` lets a wrong-account apply succeed quietly a week after
+0.5.6 died reading QA's bucket in prod.
+
+Wiz reported 8 Medium / 5 Low / 1 Info on this PR — **all on resources it does not touch**
+(`aws_s3_bucket.risingwave_state`, `grafana_admin`, `grafana_azure_ad`); Wiz scans the
+module, not the diff. Two are worth their own ticket though: **no versioning and no
+HTTP-deny on the RisingWave Hummock state store**, which combined with prod RisingWave
+having no completed Velero backup means no recovery path at either layer.

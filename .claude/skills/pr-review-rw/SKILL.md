@@ -165,6 +165,18 @@ Two scripts live under `scripts/` to speed up Phase 3:
       `5432 -> targetPort 5432`, with `readinessProbe.tcpSocket.port: status` (9090). Both pods
       reported `READY true, 0 restarts` while serving nothing, on dev **and** QA, for eleven
       weeks. Check with `scripts/check-service-ports-listening.sh <ns> --context <ctx>`.
+- [ ] **Did I read the DELETED lines, especially deleted comments?** A comment being
+      removed often contains the argument against the change removing it. `iaac-talos#62`
+      (2026-09-09) widened a GHA OIDC trust subject to `repo:ORG/REPO:*` and added Tim's
+      production secret path to the same role — and deleted the two comments saying
+      *"Blocks PRs from forks + other branches … rather than broadening this scope"* and
+      *"Kept as separate roles so prod and CICD-env credentials are independently
+      rotatable … Does NOT include /risingwave/ (Tim's prod)."* Quoting the author's own
+      prior reasoning back is stronger than arguing it yourself, and it is free — it is
+      already in the diff, on the `-` side. Then **verify the deleted claim still holds**
+      before relying on it: `gh api repos/ORG/REPO/contents/<dir> --jq '.[].name'`
+      confirmed the companion role still existed, which turned a tidy-up into a live
+      regression.
 - [ ] **Did I read the WHOLE diff, including hunks I did not intend?** A PR assembled by
       copying a file wholesale carries every difference between the two copies, not just the
       change you meant. `iaac-talos-flux-platform#100` was a Kyverno change that also reverted
