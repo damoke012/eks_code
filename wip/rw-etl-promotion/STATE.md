@@ -320,3 +320,34 @@ Wiz reported 8 Medium / 5 Low / 1 Info on this PR — **all on resources it does
 module, not the diff. Two are worth their own ticket though: **no versioning and no
 HTTP-deny on the RisingWave Hummock state store**, which combined with prod RisingWave
 having no completed Velero backup means no recovery path at either layer.
+
+### 2026-09-09 — INFRA-1690 filed and withdrawn the same hour. My error.
+
+I reported a plaintext Postgres CDC password in `pipelines/employee/100-Sources.rw` and
+filed INFRA-1690 against it. **There is no plaintext credential.** Line 52 is
+`password = '%POSTGRES_ENTITY_PASSWORD%'` — a correctly-uppercased placeholder token, the
+exact form `apply.sh` renders.
+
+**The defect was in my check.** I redacted with two `sed` expressions in sequence:
+
+    s/'%[A-Z0-9_]+%'/'<PLACEHOLDER-TOKEN-OK>'/g;  s/'[^']*'/'<LITERAL-VALUE-INVESTIGATE>'/g
+
+The first correctly labelled the placeholder safe. The second then matched **its own
+output** and overwrote it with the unsafe label. Reproduced against the real line: chained,
+it prints `LITERAL-VALUE-INVESTIGATE`; the first expression alone prints
+`PLACEHOLDER-TOKEN-OK`. **Every placeholder in the repository would have been reported as a
+literal.** The check had exactly one reachable verdict — the same shape as the
+`rw-prod-status.sh` gate 5 that could not pass, on 2026-09-03.
+
+**What the proper sweep found.** `scripts/scan-pipeline-plaintext.sh`, written afterwards,
+evaluates each line once through an ordered `case` rather than chained substitutions.
+Across all 24 `.rw`/`.sql` files on `master`: **7 SECRET references, 3 placeholders, 0
+literal usernames, 0 literal secrets.** INFRA-1637's conversion is complete on master —
+better than anyone had evidence for, including Idris.
+
+**What this cost:** a security ticket raised against a colleague's work on a false premise,
+withdrawn within the hour with the cause stated. What it did not cost: any change to his
+code, because the finding was checked before anyone was asked to act on it.
+
+**Still open and unaffected:** the old Confluent key was replaced, never revoked. That needs
+a Confluent Cloud administrator other than Tim.
