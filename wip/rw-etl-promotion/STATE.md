@@ -158,7 +158,10 @@ Done:
   **boundary-tested** (6 allowed / 6 denied, including nodes, kube-system secrets,
   cluster-wide secrets, flux-system). Scope matches the Phase 1 record: namespace
   super-user, not cluster-wide.
-- `variant-inc/iaac-talos-flux-platform#150` → `op-dev`, so a rebuild cannot drop them.
+- `variant-inc/iaac-talos-flux-platform#150` → `op-dev`, **merged 2026-09-09 and
+  confirmed reconciled**: both RoleBindings carry
+  `kustomize.toolkit.fluxcd.io/name: rbac`, so Git owns them and a rebuild-to-validate
+  keeps Tim's access. Checked at the object, not at the merge.
 - Cert carries `O=risingwave-users`, a group with no bindings anywhere. Deliberate: the
   runbook's default `O=onprem-platform-users` picks up cluster-wide read, and
   `infrastructure/rbac/` on op-dev really does carry those tiers.
