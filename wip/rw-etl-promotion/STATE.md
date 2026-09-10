@@ -416,3 +416,56 @@ database is refused with exit 1.
 its source was our own design doc rather than the running system.
 **Trap:** a claim that originates in a document you wrote reads back exactly like a finding.
 The person operating the thing is the primary source; check which one you are quoting.
+
+### 2026-09-10 — the entity-postgres wedge, settled on the cluster
+
+`scripts/probe-entity-postgres.sh qa` (read-only, no value printed). **The blocker is not a
+missing secret. It is a mandatory requirement for a database that does not exist.**
+
+`app-risingwave/etl-pipeline-endpoints` on op-qa:
+
+| key | value |
+|---|---|
+| `PG_HOST` | `pg-postgresql.risingwave.svc.cluster.local` |
+| `PG_DB` | `risingwave` |
+| `POSTGRES_SERVER` | **empty** |
+| `POSTGRES_ENTITY_DB` | **empty** |
+
+`PG_HOST`/`PG_DB` are the meta store's own endpoint and database — identical to the meta
+pod's `RW_SQL_ENDPOINT` / `RW_SQL_DATABASE`. The application-database fields are present and
+blank. QA has exactly three services on 5432: istio's passthrough gateway,
+`ghostunnel-rw-postgres`, and `pg-postgresql`. There is no second Postgres.
+
+And on the Job (`etl-pipeline-apply`, active=1):
+
+    env POSTGRES_ENTITY_USER      <- secret etl-pipeline-credentials/POSTGRES_ENTITY_USER   optional=False
+    env POSTGRES_ENTITY_PASSWORD  <- secret etl-pipeline-credentials/POSTGRES_ENTITY_PASSWORD optional=False
+
+**Both corrections in one place.**
+❌ Mine — "entity-postgres is a separate host with its own credentials." It is not; it came
+from `WRITEUP-FOR-IDRIS-2026-08-31.md`, our own design document.
+❌ Idris's — "the `.sql` goes to the Postgres created for RisingWave." Directionally right
+about the instance, but `POSTGRES_SERVER` is blank, so no `.sql` file can run at all today.
+✅ His account of the credentials is exact: two records, `root` (RisingWave login) and
+`postgres` (the instance). Both exist and both already sync.
+
+**The fix is not the Terraform change we had on the critical path.** Creating
+`entity-postgres/{username,password}` produces a pod that starts and then exits 1 on the
+blank `POSTGRES_SERVER` the moment a `.sql` file appears — the failure moves, it does not go.
+
+Cheapest correct fix, in `risingwave-pipeline` overlays:
+1. drop `POSTGRES_ENTITY_USER` / `_PASSWORD` from the ExternalSecret `data:` (ESO stops
+   erroring and writes a complete Secret);
+2. drop the two `env` entries from the apply Job, or set `optional: true`;
+3. delete the wedged Job so Argo recreates the hook.
+
+No Terraform, no Octopus run, no credential invented for a server that does not exist.
+Reinstate all three the day an application database actually exists — which is Tim's design
+question, not a QA blocker.
+
+**Proven:** one Postgres instance on QA; entity fields blank; both entity env vars mandatory.
+**Killed:** "create the SM records" as the critical path — it was the answer to the error
+message, not to the problem.
+**Trap:** a missing credential reads as "create the credential". It can equally mean the
+system it authenticates to was never built. The error names the key, never the absence
+behind it. Nine days of QA sat behind that reading.
