@@ -508,3 +508,33 @@ fails loudly (this time) or silently retargets a different entry — which would
 repointed `PG_USER` at `entity-postgres` and broken a credential that works today.
 Patch by value, not position. `kubectl kustomize` on the overlay is the only check that
 sees it; no diff review would.
+
+### 2026-09-10 — #22 fixed by us and APPROVED at 9c63bc4
+
+Doke asked for the fix rather than another round-trip. `scripts/pr22-fix-and-push.sh`
+removed the four stale patch entries (2 qa, 2 prod), rendered both overlays, and pushed
+`b04a394 -> 9c63bc4` to Idris's branch after confirmation.
+
+**Rendered QA is correct:** 3 ExternalSecret entries, `RW_PASSWORD` from
+`risingwave/root`, `PG_PASSWORD` and `PG_USER` from `risingwave/postgres`; no mandatory
+`POSTGRES_ENTITY_*` env on the Job. Prod renders clean.
+
+⚠️ **The first run of the gate failed on its own bad checks, not on the change.**
+`grep entity-postgres` matched **`entity-postgresql`** inside a ConfigMap comment, and
+the entry regex assumed `secretKey` precedes `remoteRef` — kustomize sorts keys
+alphabetically, so `remoteRef` comes first and it counted zero entries. Replaced with
+`scripts/verify-rendered-qa.py`, which parses the YAML and is tested three ways: good
+render passes, a render with `PG_USER` repointed at `entity-postgres` fails, a qa render
+verified as prod fails.
+
+**Still open on #22, stated in the approval:** the three `%KAFKA_…%` tokens. If the apply
+Job is a **PreSync** hook, a failing hook means the sync never completes and #20/#23's
+digest still is not applied — QA would stay on the 19 August image by a different route.
+Asked Idris to read `.metadata.annotations.argocd\.argoproj\.io/hook` before merging.
+
+**Proven:** the render is correct at 9c63bc4.
+**Killed:** "merging #22 unblocks QA" — not until the Kafka tokens resolve, and possibly
+not even then depending on the hook phase.
+**Trap:** a verifier tested only against fixtures the author wrote will encode the
+author's assumptions about the format. Real `kustomize` output sorts keys; my fixture
+did not. Feed a gate the real artifact before trusting its verdict either way.
