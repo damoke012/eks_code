@@ -2,18 +2,41 @@
 # Read-only. Answers ONE question: is POSTGRES_ENTITY_* the same Postgres that backs
 # RisingWave's meta store, and is it the same database and the same user?
 #
-#   bash scripts/probe-entity-postgres.sh op-usxpress-qa
-#   bash scripts/probe-entity-postgres.sh op-usxpress-dev
+#   bash scripts/probe-entity-postgres.sh qa
+#   bash scripts/probe-entity-postgres.sh dev
+#
+# Takes dev|qa|prod and resolves the kubeconfig FILE and CONTEXT by endpoint
+# (10.10.82.50/.51/.52) -- never by filename, never by current-context.
 #
 # Never prints a secret VALUE -- key names, and equality by hash, only.
 set -uo pipefail
 
-CTX="${1:-}"
-if [ -z "$CTX" ]; then
-  echo "usage: bash scripts/probe-entity-postgres.sh <kube-context>"
-  echo "       contexts: op-usxpress-dev | op-usxpress-qa | op-usxpress-prod"
-  exit 2
-fi
+ENV_ARG="${1:-}"
+case "$ENV_ARG" in
+  dev|qa|prod) ;;
+  *)
+    echo "usage: bash scripts/probe-entity-postgres.sh dev|qa|prod"
+    echo "       (resolves the kubeconfig + context BY ENDPOINT -- context names on this"
+    echo "        machine are not the cluster names, and merged files hold several clusters)"
+    exit 2 ;;
+esac
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESOLVED="$(python3 "$HERE/kube-resolve-onprem.py" "$ENV_ARG")" || {
+  echo
+  echo "No kubeconfig on this machine serves on-prem $ENV_ARG."
+  case "$ENV_ARG" in
+    dev)  echo "  rebuild: it is cert-based; see wsl-kubeconfig-churn (op-usxpress-dev-fresh.yaml)" ;;
+    qa)   echo "  rebuild: aws s3 cp s3://lazy-tf-state-425rbol87rmn6c7m/iaac/talos/op-usxpress-qa.tfstate - \\"
+          echo "             --profile usx-qa | jq -r '.outputs.kubeconfig.value' > ~/.kube/op-usxpress-qa.yaml" ;;
+    prod) echo "  rebuild: bash scripts/onprem-prod-kubeconfig.sh ops-controller" ;;
+  esac
+  exit 4
+}
+KCFG="$(printf '%s' "$RESOLVED" | cut -f1)"
+CTX="$(printf '%s' "$RESOLVED" | cut -f2)"
+SRV="$(printf '%s' "$RESOLVED" | cut -f3)"
+export KUBECONFIG="$KCFG"
 K() { kubectl --context "$CTX" "$@"; }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -136,10 +159,25 @@ echo "=============================================================="
 echo " entity-postgres probe   context: $CTX   $(date -u '+%Y-%m-%dT%H:%MZ')"
 echo "=============================================================="
 
+echo "kubeconfig : $KCFG"
+echo "context    : $CTX"
+echo "endpoint   : $SRV"
+echo
+
+HOSTPORT="${SRV#*://}"; H="${HOSTPORT%%:*}"; P="${HOSTPORT##*:}"; [ "$P" = "$H" ] && P=6443
+if ! timeout 5 bash -c "exec 3<>/dev/tcp/$H/$P" 2>/dev/null; then
+  echo "ABORT: $H:$P is not reachable -- corp VPN is down or the cluster is."
+  echo "       Transport failure, not a finding. Nothing below would mean anything."
+  exit 3
+fi
+echo "tcp $H:$P  : open"
+
 if ! K version -o json >/dev/null 2>&1; then
-  echo "ABORT: cannot reach the API server on context '$CTX'."
-  echo "       Transport failure, not a finding. Fix the connection first."
-  kubectl config get-contexts 2>/dev/null | head -20
+  echo "ABORT: port is open but the API refused us -- this is CREDENTIALS, not the network."
+  echo "       op-dev is cert-based; op-qa authenticates through aws-iam-authenticator and"
+  echo "       needs BOTH sso logins:  aws sso login --profile op-qa   (cluster)"
+  echo "                               aws sso login --profile usx-qa  (AWS API)"
+  K version -o json 2>&1 | tail -5
   exit 3
 fi
 echo "api reachable: yes"; echo
