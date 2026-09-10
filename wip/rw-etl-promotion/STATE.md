@@ -381,3 +381,38 @@ apply (`TfApply` false outside production; the proof is the `terraform_outputs.y
 artifact), a release freezes its variables at creation, and check the account the plan
 resolves to — plus a warning that his QA test step will fail on the unrelated
 `entity-postgres` wedge.
+
+### 2026-09-10 — #62 merged; and the entity-postgres blocker may be much smaller
+
+**#62 merged by Doke.** Deploy is Idris's, via a **new** release (an existing one is frozen
+at its creation commit + variable snapshot). Only `development` offered in the dropdown —
+normal lifecycle phase gating, QA unlocks after dev runs.
+
+⚠️ **Correction — `TfApply` is `true` on qa.** Idris read it off the project. The note in
+`octopus-green-but-no-apply` said "false everywhere but production"; that is now wrong.
+It was set during the July AWS SSO work and never scoped back, so **every QA deploy applies
+for real** while dev stays plan-only. Whether QA *should* be apply-enabled is still an
+unmade decision — it is true by inheritance, not by intent.
+
+⚠️ **Correction — "entity-postgres is a different host with different credentials" was
+mine, not Idris's.** I took it from `WRITEUP-FOR-IDRIS-2026-08-31.md`, a design document I
+wrote. Idris, who runs it, says the `.sql` files go **to the Postgres deployed for
+RisingWave — 5432, the same instance backing RisingWave meta**.
+
+Both can be true if it is one instance holding two databases, which is what the merged
+routing already assumes: it compares `HOST:DB`, so same host is allowed and same host **and**
+database is refused with exit 1.
+
+**Three questions to Idris settle the size of the blocker** (asked 2026-09-10):
+
+| answer | consequence |
+|---|---|
+| `POSTGRES_ENTITY_USER` == `PG_USER` | **no Terraform, no Octopus** — point the ExternalSecret at the existing `postgres/{username,password}` records and QA unwedges the same day |
+| separate role on the same instance | a role Idris creates on a Postgres we already run; still needs the SM records, but no unknown upstream system and no dependency on Tim |
+| `POSTGRES_ENTITY_DB` == the meta database | the #20 guard refuses the file (exit 1) and must change before anything applies |
+
+**Proven:** #62 merged; QA `TfApply=true`.
+**Killed:** "entity-postgres is an external system nobody has identified" — unverified, and
+its source was our own design doc rather than the running system.
+**Trap:** a claim that originates in a document you wrote reads back exactly like a finding.
+The person operating the thing is the primary source; check which one you are quoting.

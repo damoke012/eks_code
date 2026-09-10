@@ -1,11 +1,12 @@
 ---
 name: proxy-is-not-the-property
-description: The recurring self-inflicted error — measuring something adjacent to the property in question and reporting the proxy's answer as the property's; seven instances, each reversed by one direct check
+description: The recurring self-inflicted error — measuring something adjacent to the property in question and reporting the proxy's answer as the property's; eight instances, each reversed by one direct check. Instance 8: a diagnostic script is itself an instrument, and running it against a KNOWN-GOOD machine is what exposes its proxies — review did not
 metadata:
   type: feedback
 ---
 
-Seven times now a confident wrong answer has come from measuring a proxy instead of the thing:
+Repeatedly, a confident wrong answer has come from measuring a proxy instead of the thing.
+The count in this line kept going stale, so it is gone; the instances below are the record:
 
 | Question | Proxy used | Verdict | Direct check that reversed it |
 |---|---|---|---|
@@ -77,3 +78,35 @@ on prod. The commit message asserts the write; only the board witnesses it.
 for a side effect on a remote system. Read the remote. For Jira that is one read-only
 command (`scripts/list-open-tickets.py`, `check-sprint-membership.py`), and it is what
 separates "we filed that ticket" from "we drafted that ticket".
+
+**Instance 8 — 2026-09-08. Three of them in one script, and the control found all three.**
+`scripts/triage-user-cluster-access.sh` was written to tell a NETWORK failure from an ACCESS
+one for Tim. Run on Doke's WSL box — a machine already known to reach the cluster — it was
+wrong three times:
+
+| Proxy it measured | Verdict it gave | The property |
+|---|---|---|
+| the egress **interface name** (`eth0`, not `utun*`) | "ROUTING problem, credentials cannot fix it" | whether the port opens — it did, 3 sections later, plus HTTP 200 from two dashboards |
+| **one** missing DNS record | "corporate DNS is not answering" | a control lookup — the resolver was fine, `rw2-pg` simply does not exist |
+| `kubectl config` at the **default path** | "no contexts at all on this machine" | this team keeps one kubeconfig **per cluster** (`op-usxpress-prod-breakglass.yaml`), by design, so `~/.kube/config` is empty and proves nothing |
+
+The interface one is the worst shape: an **inference contradicted the direct measurement
+printed 15 lines below it**, and because outcomes were pooled into a single `NETFAIL` flag,
+it also suppressed the credential section — the one part being asked for. In WSL2 (and any
+container or NAT'd VM) all traffic leaves via the virtual interface and the host applies the
+VPN, so the tunnel is invisible from inside; the check had no valid reading there at all.
+
+**How to apply — this is a procedure change, not just another instance.**
+
+1. **Run a new diagnostic against a machine whose answer you already know**, before sending
+   it to the person with the problem. The control is what exposes the proxies; reading the
+   script did not, and three rounds of review did not.
+2. **Order the checks so measurement precedes inference.** Probe the thing; interpret the
+   environment afterwards, and only to *explain* a failure that was independently observed.
+   Never let an inferred cause set an outcome flag.
+3. **Keep outcomes per-subject.** One pooled failure flag lets an irrelevant finding
+   (a missing record for an endpoint nobody asked about) withhold the useful section.
+4. **A check must know where it does not apply** — WSL2, containers, NAT — and withdraw,
+   rather than answering confidently from a reading that cannot mean anything there.
+
+Related: [[transport-failure-not-a-verdict]], [[adjacent-step-green-signals]].

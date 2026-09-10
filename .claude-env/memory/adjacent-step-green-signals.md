@@ -101,3 +101,36 @@ is trusted — if it cannot produce a pass, it is not a check, it is a constant.
 column position (`$NF`, `awk '{print $3}'`) in kubectl output; read the field by name or by
 jsonpath. And a gate that reports absence must distinguish "not there" from "I looked under
 the wrong name". See [[proxy-is-not-the-property]].
+
+**2026-09-09 — an ad-hoc one-liner is still a check, and it got the opposite verdict from
+the script written for the same job an hour later.**
+
+Classifying one line of `employee/100-Sources.rw` as safe or unsafe, two artifacts
+disagreed:
+
+| | verdict | tested first? |
+|---|---|---|
+| an inline `sed` with two chained expressions | **LITERAL — false positive** | no |
+| `scripts/scan-pipeline-plaintext.sh`, ordered `case` | placeholder — correct | yes, 4-case fixture |
+
+The sed was `s/'%[A-Z0-9_]+%'/'<SAFE>'/g; s/'[^']*'/'<UNSAFE>'/g`. Both expressions run on
+the same line in order, so the second matched **the first's own output** and overwrote the
+safe verdict. Every placeholder in the repository would have read as a literal — one
+reachable verdict, the same shape as the `rw-prod-status.sh` gate 5 that could not pass six
+days earlier. It produced a security ticket against a colleague's work (INFRA-1690, filed
+and withdrawn within the hour).
+
+**The two artifacts differed in exactly one respect: whether a known-safe input was fed
+through before the check was trusted.** The script got a fixture with a secret reference, a
+placeholder, a literal password, a literal username and an unrelated quoted option, and was
+right. The sed got nothing, and was wrong.
+
+**How to apply.** The four-case discipline from `authoring-gate-hooks` is not only for
+committed guards — it applies to the one-liner typed into a terminal to answer a question,
+because that answer is what gets reported. Before believing any classifier, run a case whose
+answer you already know and confirm it says so. It costs one line.
+
+**And in a transformation pipeline, a later rule can overwrite an earlier rule's verdict.**
+Chained `sed` expressions, stacked `case` branches without `break`, successive `.replace()`
+calls: order them so the specific match wins and stops, or evaluate each input once and
+emit a single decision. Never let the fallback rule run over the output of the precise one.

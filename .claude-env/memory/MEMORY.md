@@ -26,6 +26,7 @@
 - [Shared ECR registry posture](ecr-shared-registry-posture.md) — 515/517 repos grant org-wide push, no registry policy; on-prem safe only via digest pinning; EKS unverified (INFRA-1655)
 - [Adjacent-step green signals](adjacent-step-green-signals.md) — the recurring family: a true success report about the step NEXT to the one that matters; 17 instances, including checks that share the defect they test for
 - [ESO SecretSynced ≠ valid content](eso-secretsynced-not-content-check.md) — green ExternalSecret proves the sync ran, not that the value works; bit us on Wiz + QA etcd-backup
+- [ESO writes PARTIAL secrets](eso-writes-partial-secrets.md) — SecretSyncedError still writes the keys it could resolve; the pod dies at container creation with RESTARTS 0 (invisible to restart alerts), and a wedged Argo sync-hook Job blocks every later sync — QA ran a 3-week-old image behind a merged promotion
 - [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
 - [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod
 - [DX deploy failure ≠ clean release](dx-deploy-failure-not-clean-release.md) — the three real DX-Apply failure modes and their identity-safe fixes
@@ -51,7 +52,7 @@
 - [TF import blocks block new envs](terraform-import-blocks-block-new-envs.md) — five bare `import` blocks in secrets.tf fail prod's first plan; delete them (state no-op for dev/QA)
 - [On-prem ingress/DNS convention](onprem-ingress-dns-convention.md) — DNS is OURS and automatic: external-dns from VirtualService annotations, zone in network acct 155768531003, owner-id per cluster; targets are THIS cluster's own worker IPs, count differs per cluster (dev 7, QA 3, prod 10); Gateways shared-http (80/443) + tcp-passthrough (4567/5432); a copied VS fails SILENTLY
 - [RW Dex shares one Entra app reg](rw-dex-entra-shared-app-registration.md) — clientID e112d6ce across dev/QA/prod, only the redirect URI differs; a new env is a URI addition and the secret is a COPY, not an identity request
-- [A proxy is not the property](proxy-is-not-the-property.md) — four confident wrong answers from measuring something adjacent: %-counts, resource tags, grep without -P, the wrong CRD
+- [A proxy is not the property](proxy-is-not-the-property.md) — 8 instances of measuring something adjacent and reporting it as the property; #8 adds the fix: run a new diagnostic against a KNOWN-GOOD machine first, and never let an inference outrank the measurement beside it
 - [Kustomization enumerates resources](kustomization-enumerates-resources.md) — a file dropped into a Flux dir applies only if that dir's kustomization.yaml lists it; velero and risingwave-routes enumerate, istio-ingress does not
 - [Conventional commits drive releases](conventional-commits-drive-releases.md) — no `fix:`/`feat:` prefix = no version bump = no new package, and the workflow still goes green; check package version == release version
 - [TF state bucket is per-account](terraform-state-bucket-is-per-account.md) — dev/QA/prod each have their own `lazy-tf-state-*`; a copied backend 403s on first state read, never at init
