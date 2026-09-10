@@ -14,7 +14,7 @@
 - [Prod stand-up](prod-standup.md) — INFRA-1589/1621; ✅ cluster UP + full platform reconciled 2026-07-29 (ESO/IRSA/Istio/ArgoCD green); 4 source gaps open before destroy→rebuild
 - [EKS human access model](eks-human-access-model.md) — grant kubectl via AWS SSO permission set mapped to aws-auth `view` group; NEVER hand-edit aws-auth
 - [On-prem human access model](onprem-human-access-model.md) — ✅ AWS SSO LIVE on op-usxpress-qa 2026-07-28 via self-hosted aws-iam-authenticator; certs demoted to break-glass; Entra OIDC dropped for CLUSTER access; ⚠️ "no Azure access" corrected 2026-08-25 — app-reg update is proven
-- [Octopus green ≠ applied](octopus-green-but-no-apply.md) — iaac-talos deploys print the plan, skip apply, report Success; TfApply=false everywhere but production
+- [Octopus green ≠ applied](octopus-green-but-no-apply.md) — iaac-talos deploys print the plan, skip apply, report Success; TfApply=false by default BUT **qa is true since July — QA applies live** (confirmed 2026-09-10)
 - [Cloud EKS platform doc](cloud-eks-platform-doc.md) — Confluence + artifact refs; ⚠️ idris-kt KT repo trees are STALE (real iaac-eks / terraform-variant-apps structure)
 - [RW/platform SSO via Entra](rw-platform-sso-entra.md) — NEW 2026-07-13: reusable dev service-account Entra SSO pattern, RisingWave first consumer
 - [Wiz sensor on-prem dev](wiz-sensor-onprem-dev.md) — INFRA-1586: eBPF sensor live on op-dev, CP exclusion verified (7 wk/0 CP), blocked on real Wiz token
@@ -27,6 +27,7 @@
 - [Adjacent-step green signals](adjacent-step-green-signals.md) — the recurring family: a true success report about the step NEXT to the one that matters; 17 instances, including checks that share the defect they test for
 - [ESO SecretSynced ≠ valid content](eso-secretsynced-not-content-check.md) — green ExternalSecret proves the sync ran, not that the value works; bit us on Wiz + QA etcd-backup
 - [ESO writes PARTIAL secrets](eso-writes-partial-secrets.md) — SecretSyncedError still writes the keys it could resolve; the pod dies at container creation with RESTARTS 0 (invisible to restart alerts), and a wedged Argo sync-hook Job blocks every later sync — QA ran a 3-week-old image behind a merged promotion
+- [Missing credential may mean missing system](missing-credential-may-mean-missing-system.md) — a "missing secret" can mean the system it authenticates to was never built; QA sat wedged 9 days because POSTGRES_SERVER was empty and nobody read it
 - [DX Entra app recreation](dx-entra-app-recreation.md) — every DX deploy DESTROYS the app registration (new client ID, role grants lost); consumers need a full RELEASE, not a config change
 - [Prod incident: check the instrument](prod-incident-instrument-check.md) — validate the measuring tool before trusting a finding; prove the fix before changing prod
 - [DX deploy failure ≠ clean release](dx-deploy-failure-not-clean-release.md) — the three real DX-Apply failure modes and their identity-safe fixes

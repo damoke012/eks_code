@@ -56,3 +56,15 @@ present.
 
 `scripts/setup-octopus-rw-prod.py` does the read-back and refuses if `TfApply` is already
 scoped to the target environment.
+
+## QA is apply-enabled (confirmed 2026-09-10)
+
+The open question above is answered: **`TfApply = true` is scoped to `qa`** — Idris read it
+off the project during the iaac-talos #62 deploy. It was set during the July AWS SSO work and
+never scoped back, so **every QA deploy applies for real**. Dev remains plan-only under the
+`(all)` default.
+
+**How to apply:** on QA, read the plan before letting a deploy run — the safety catch that
+makes a dev mistake harmless is not there. Whether QA *should* stay apply-enabled is Doke's
+decision and is still unmade; it is currently true by inheritance from an old task, not by
+intent.
