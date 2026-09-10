@@ -134,6 +134,32 @@ if not found:
     print("  concluding absence:  kubectl --context CTX get crd | grep external-secrets")
 PY
 
+cat > "$T/job.py" <<'PY'
+import json,sys
+items=json.load(sys.stdin).get("items",[])
+if not items:
+    print("  no Job/CronJob found in this namespace")
+for it in items:
+    m=it["metadata"]
+    st=it.get("status",{})
+    tmpl=(it.get("spec",{}).get("template") or
+          (it.get("spec",{}).get("jobTemplate",{}).get("spec",{}).get("template")) or {})
+    conts=(tmpl.get("spec",{}) or {}).get("containers",[])
+    print("  %s/%s   active=%s succeeded=%s failed=%s" %
+          (m["namespace"], m["name"], st.get("active",0), st.get("succeeded",0), st.get("failed",0)))
+    for c in conts:
+        for e in c.get("env",[]):
+            skr=(e.get("valueFrom") or {}).get("secretKeyRef")
+            if not skr: continue
+            print("      env %-30s <- secret %s/%s   optional=%s" %
+                  (e.get("name"), skr.get("name"), skr.get("key"), skr.get("optional", False)))
+        for ef in c.get("envFrom",[]):
+            sr=ef.get("secretRef") or {}
+            cr=ef.get("configMapRef") or {}
+            if sr: print("      envFrom secret    %s   optional=%s" % (sr.get("name"), sr.get("optional", False)))
+            if cr: print("      envFrom configMap %s   optional=%s" % (cr.get("name"), cr.get("optional", False)))
+PY
+
 cat > "$T/secnames.py" <<'PY'
 import json,sys
 for s in json.load(sys.stdin).get("items",[]):
@@ -207,6 +233,9 @@ else
 fi
 echo
 
+echo "--- [6] the apply Job: which Secret keys it demands, and are they optional? --"
+K get job,cronjob -A -o json 2>/dev/null | python3 "$T/job.py"
+echo
 cat <<'EOF'
 --- READ THIS ---------------------------------------------------------
   Verdict is [1] POSTGRES_SERVER against [2] the meta store's --pg-host:
