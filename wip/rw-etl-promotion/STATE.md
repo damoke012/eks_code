@@ -469,3 +469,42 @@ message, not to the problem.
 **Trap:** a missing credential reads as "create the credential". It can equally mean the
 system it authenticates to was never built. The error names the key, never the absence
 behind it. Nine days of QA sat behind that reading.
+
+### 2026-09-10 later — #22 Round 3 posted at b04a394 (NOT approvable)
+
+Idris force-pushed three commits: the cutover, the empty-`PIPELINE_DIR` fix, and
+"drop entity-postgres refs that block ESO in QA" — acting on the finding above within
+the hour.
+
+**Cleared, each verified rather than read:** rebase real (`merge-base --is-ancestor`,
+`ae5176c` ancestor of `b04a394`); digest revert gone (`5108f32…` on both sides); empty
+`PIPELINE_DIR` exits 1 at `apply.sh:57-58`; base `externalsecret.yaml` −8 and
+`job.yaml` −6.
+
+❌ **BLOCKER — the QA overlay no longer renders.** He removed data entries 3 and 4 from
+the base; `deploy/overlays/qa/kustomization.yaml` still patches those indexes:
+
+    $ kubectl kustomize deploy/overlays/qa      # b04a394
+    error: replace operation does not apply: doc is missing path: /spec/data/3/remoteRef/key: missing value
+
+Argo would report a sync error and apply nothing — QA stays wedged through a different
+door. `deploy/overlays/prod/kustomization.yaml` carries the identical pair.
+
+❌ **BLOCKER — Brand's Kafka tokens.** `100-sources.rw` needs `%KAFKA_TOPIC_BRAND%`,
+`%KAFKA_STARTUP_MODE%`, `%KAFKA_SCHEMA_REGISTRY_MESSAGE%`; the branch's
+`qa/endpoints.yaml` defines none and the ExternalSecret maps no Kafka key. Kafka
+credentials are not in QA Secrets Manager either — same hole as `entity-postgres`.
+`200-ingest.rw` carries no tokens.
+
+⚠️ Correction: I reported `200-ingest.rw` as missing from the branch. It exists — my
+`git show` invocation was wrong, not the file.
+
+**Proven:** the render fails; the three Kafka tokens are unsupplied.
+**Killed:** "he addressed both change requests, so it can merge" — two of the three
+commits are right and the third broke the build.
+**Trap:** an index-based JSON patch (`/spec/data/3/...`) is coupled to the LENGTH of a
+list another file owns. Shortening the base moves every later index; the patch either
+fails loudly (this time) or silently retargets a different entry — which would have
+repointed `PG_USER` at `entity-postgres` and broken a credential that works today.
+Patch by value, not position. `kubectl kustomize` on the overlay is the only check that
+sees it; no diff review would.
