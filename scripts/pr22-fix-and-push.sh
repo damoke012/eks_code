@@ -27,30 +27,7 @@ fi
 echo "kustomize build deploy/overlays/qa: OK"
 
 FAIL=0
-if grep -q 'entity-postgres\|POSTGRES_ENTITY' "$T/qa.yaml"; then
-  echo "  FAIL: entity-postgres still present in the rendered QA output"; FAIL=1
-else
-  echo "  ok: no entity-postgres anywhere in the rendered output"
-fi
-python3 - "$T/qa.yaml" <<'PY'
-import sys,re
-docs=open(sys.argv[1]).read()
-want={"RW_PASSWORD":"risingwave/root","PG_PASSWORD":"risingwave/postgres","PG_USER":"risingwave/postgres"}
-blocks=re.findall(r'- secretKey:\s*(\S+)\s+remoteRef:\s+key:\s*(\S+)\s+property:\s*(\S+)', docs)
-print("  rendered ExternalSecret entries: %d (expected 3)" % len(blocks))
-bad=0
-for k,key,prop in blocks:
-    ok = k in want and want[k] in key
-    print("     %-14s <- %-40s %s" % (k, key, "ok" if ok else "UNEXPECTED"))
-    if not ok: bad=1
-if len(blocks)!=3 or bad: print("  FAIL: mapping is not what QA needs"); sys.exit(9)
-PY
-[ $? -ne 0 ] && FAIL=1
-if grep -qE 'name: POSTGRES_ENTITY' "$T/qa.yaml"; then
-  echo "  FAIL: the Job still demands POSTGRES_ENTITY_* env"; FAIL=1
-else
-  echo "  ok: the Job no longer demands POSTGRES_ENTITY_* env"
-fi
+python3 "$HERE/verify-rendered-qa.py" qa < "$T/qa.yaml" || FAIL=1
 echo
 
 echo "########## 3. render prod (it inherits the same base change) ##########"
