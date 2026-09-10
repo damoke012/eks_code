@@ -565,3 +565,56 @@ differs. Do not tell anyone "it will refuse and name them" as established.
 **The Kafka gap is probably Tim-shaped too.** Brand's credentials come from Confluent
 Cloud, and the Confluent Cloud administrator is Tim — the same person INFRA-1637 is
 blocked on for the old key's revocation. A second Confluent admin unblocks both.
+
+### 2026-09-10 — #22 MERGED, QA unwedged after nine days, and stopped by the right guard
+
+Merged at `9c63bc4` (squash). Argo could not act on it: the old hook Job held
+`argocd.argoproj.io/hook-finalizer`, marked for deletion at **19:31Z** and never
+finishing, because **Argo will not release the finalizer until the hook completes and
+the hook could not complete** — its pod carried the pre-merge spec demanding
+`POSTGRES_ENTITY_USER`. The fixed manifest could not reach that pod; the new Job was
+never created. **The broken thing was holding the door for its own replacement.**
+
+Released by Doke on QA: cleared `.operation` on the `risingwave-etl` Application, then
+dropped the Job's finalizer (guarded: only because it already carried a
+`deletionTimestamp` and its pod had never started a container).
+
+**Result — real progress:**
+
+| | before | after |
+|---|---|---|
+| ExternalSecret | `SecretSyncedError`, 9 days | `Ready=True SecretSynced` |
+| Secret | 3 of 5 keys, partial | 3 of 3, complete |
+| Image | `d616242…` (19 August) | `5108f32…` |
+| Pod | `CreateContainerConfigError`, 45,497 attempts | runs, produces output |
+
+Then it refused, correctly:
+
+    ERROR: POSTGRES_SERVER is required when .sql files are present but is not set.
+
+❌ **My first explanation was wrong.** I said `EXCLUDE_RE`'s `^pipelines/Brand/...`
+anchor could not match at runtime. It matches fine — `rel="${f#/pipeline/}"` yields
+`pipelines/Brand/300-transform.sql`.
+
+✅ **The actual cause: the running image predates the feature.** `EXCLUDE_RE` is absent
+from `build/apply.sh` at `4873de43`, the commit behind `5108f32…`. Verified:
+
+    gh api ... contents/build/apply.sh?ref=4873de43 | grep EXCLUDE_RE   ->  no match
+
+So the image ignored the exclusion, selected all 24 files, saw a `.sql`, and refused.
+The overlay is correct; **the binary is a version behind it**. The tell was in the log's
+absence, not its content — not one `exclude` line was printed.
+
+⚠️ **Correction to a claim I made on 2026-09-08.** I reported `EXCLUDE_RE` "verified
+exact — 24 discovered, 22 excluded". That verification was against the repo tree with my
+own `grep`. It said nothing about whether the deployed image implements `EXCLUDE_RE` at
+all. Testing a regex is not testing the code that runs it.
+
+**Next:** promote the newer build (#23 promotes `ae5176cb`, and the #22 merge should have
+opened another). The Kafka tokens remain unresolved and will be the next refusal.
+
+**Proven:** QA is off the 19 August image; the Secret is complete; the guard works.
+**Killed:** the anchor theory; and "EXCLUDE_RE is verified" as a statement about QA.
+**Trap:** config can be promoted ahead of the code that reads it. A key the running
+image does not know about is silently ignored — this one only surfaced because an
+unrelated guard tripped.
