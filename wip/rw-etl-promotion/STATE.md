@@ -286,7 +286,7 @@ lines and gives the command to diff the branch against master. Verified against 
 password}` through the Octopus Terraform run. Until then nothing reaches QA — not #22, not
 #23, and #20's image is still not running.
 
-### 2026-09-09 — `variant-inc/iaac-talos` #62, blocked
+### 2026-09-09 — `variant-inc/iaac-talos` #62, blocked — ✅ **APPROVED 2026-09-10 at `3441ae9`**
 
 `fix(INFRA-1672): widen GHA OIDC trust policy for risingwave-pipeline`, +16/-18 in
 `deploy/terraform/modules/irsa/gha-risingwave-pipeline-secrets-role.tf`. Review requested
@@ -351,3 +351,33 @@ code, because the finding was checked before anyone was asked to act on it.
 
 **Still open and unaffected:** the old Confluent key was replaced, never revoked. That needs
 a Confluent Cloud administrator other than Tim.
+
+### 2026-09-10 — #62 approved
+
+`3441ae9` fixed both blockers, verified in the diff rather than from the commit title —
+which mattered, because the title described exactly what had been asked for and that is
+when a title is most tempting to trust.
+
+- **Subject** is now an explicit allowlist: `master` plus `environment:dev|qa|prod`. No
+  wildcard, so `repo:…:pull_request` no longer matches.
+- **`/risingwave/*` removed.** Only `${cluster_name}/risingwave-2/*` remains, so Tim's
+  production path stays with Tim's role and the two are independently rotatable again.
+
+He went past the ask: rather than restoring the deleted scope comment he rewrote it for the
+new shape and added `This role MUST NOT include /risingwave/*.` — turning an argument that
+had to be quoted back at him into a standing instruction for the next person.
+
+**Stated in the approval rather than glossed:** the policy has a second `Statement` block
+that neither diff shows and which has therefore never been read. Approved on the change,
+not as a certification of the whole role. Blocking a strict narrowing over unchanged
+adjacent code would have been scope creep.
+
+Advisories carried forward, neither blocking: `risingwave-2` scope granted in every
+environment though it is dev-only, and `data.aws_caller_identity.current` letting a
+wrong-account apply succeed quietly.
+
+The approval also carries the three Octopus traps for the deploy — a green deploy is not an
+apply (`TfApply` false outside production; the proof is the `terraform_outputs.yml`
+artifact), a release freezes its variables at creation, and check the account the plan
+resolves to — plus a warning that his QA test step will fail on the unrelated
+`entity-postgres` wedge.
