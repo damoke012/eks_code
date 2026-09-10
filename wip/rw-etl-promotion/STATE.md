@@ -538,3 +538,30 @@ not even then depending on the hook phase.
 **Trap:** a verifier tested only against fixtures the author wrote will encode the
 author's assumptions about the format. Real `kustomize` output sorts keys; my fixture
 did not. Feed a gate the real artifact before trusting its verdict either way.
+
+### 2026-09-10 — the apply Job is a **Sync**-phase hook (read from the cluster)
+
+    $ bash scripts/kq.sh qa -n app-risingwave get job etl-pipeline-apply \
+        -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/hook}'
+    Sync
+
+So the hook runs as part of the sync and its failure fails the sync — which is why
+#20's digest never landed while the Job sat in `CreateContainerConfigError`.
+
+**What merging #22 does, stated carefully.** The Job *is* the hook and carries the image
+digest, so a new sync creates it at `5108f32…` rather than the 19 August image. ESO
+writes a complete three-key Secret and the container starts. Then `apply.sh` reaches
+`Brand/100-sources.rw` and cannot resolve `%KAFKA_TOPIC_BRAND%`,
+`%KAFKA_STARTUP_MODE%`, `%KAFKA_SCHEMA_REGISTRY_MESSAGE%`.
+
+Merging therefore converts a nine-day invisible wedge (45,497 container-creation
+attempts, RESTARTS 0, no alert) into a named failure on the first run. That is worth
+having. It does **not** put Brand live on QA.
+
+⚠️ **Not verified:** which check catches the unresolved tokens — the placeholder
+refusal, or RisingWave rejecting the rendered statement. Either fails; the message
+differs. Do not tell anyone "it will refuse and name them" as established.
+
+**The Kafka gap is probably Tim-shaped too.** Brand's credentials come from Confluent
+Cloud, and the Confluent Cloud administrator is Tim — the same person INFRA-1637 is
+blocked on for the old key's revocation. A second Confluent admin unblocks both.
