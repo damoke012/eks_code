@@ -956,3 +956,46 @@ applies its source and not its sink looks identical to a working one from the sy
 
 **Next:** merge #29 (approved), let Argo sync the ConfigMap and re-run the hook Job, then
 confirm by value: `SELECT name FROM rw_catalog.rw_sources;` should show `kafka_brand`.
+
+### 2026-09-11 (night) — Brand is BUILT on QA. Two reasons it holds no rows, only one is a defect.
+
+#29 merged -> Argo synced in seconds -> the hook Job applied Brand. Confirmed by value:
+
+    rw_sources    : kafka_brand
+    rw_relations  : kafka_brand (source), mv_brand (mv), mv_brand_state (mv)
+    mv_brand      : 0 rows
+
+**The 4-vs-2 file question is answered, and it is deliberate.** The Job log shows
+`exclude pipelines/Brand/300-transform.sql` and `exclude pipelines/Brand/400-sink.rw` — they
+are in `EXCLUDE_RE`, not missed by selection. Correct: the `.sql` routes to the app database
+and the sink targets it, and `POSTGRES_SERVER` is empty because entity-postgres does not exist
+([[missing-credential-may-mean-missing-system]]). Brand's Kafka half applies; its
+app-database half is held back on purpose. **Not a bug — stop re-raising it.**
+
+**Defect: `GroupAuthorizationFailed (Broker: Group authorization failed)`**, in
+`risingwave-compute-default-0`, every ~2s, `source_name="kafka_brand" source_id=25`.
+
+What this is NOT: a bad credential. The same run **fetched watermarks successfully** and the
+batch scan `SELECT * FROM kafka_brand LIMIT 1` returned cleanly — batch scans use no consumer
+group. So SASL cluster auth and topic read both work. The service account lacks a Confluent
+role binding on the **consumer group** prefix, which the source sets from
+`secret kafka_group_id_prefix` = `qa_kafka_prefix`. Needs `DeveloperRead` on
+`group=qa_kafka_prefix*` (PREFIXED). Look in `iaac-confluent-cloud` before asking an admin —
+that is what worked for the registry this afternoon ([[ccloud-registry-master-per-account]]).
+
+**Not a defect: the topic is empty.** `low: 194, high: 194`, `NoDataToBackfill`. Low == high
+means zero retained messages; 194 were produced historically and aged out. With
+`scan.startup.mode = earliest` the source starts at 194, which is already the end. **Even
+with the binding fixed, `mv_brand` stays 0 until someone produces to
+`qa_brand_management_cdc_brand_avro`.** Anyone expecting rows in a demo needs to know this
+now, not during it.
+
+⚠️ **Still unproven: Avro decode.** The registry credentials were verified out-of-band by REST
+this afternoon (HTTP 200, correct record name), but no message has been decoded through them,
+because there are no messages. Do not report the Avro path as working until a row lands.
+
+**Traps this session paid for:** a count of 0 from a materialized view is the same shape as a
+working pipeline with an empty topic, a pipeline with no group authorization, and a pipeline
+with a broken schema registry. The count alone cannot tell them apart — the compute log can.
+Add [[adjacent-step-green-signals]] instance: `SELECT * FROM source LIMIT 1` succeeding proves
+the *batch* path, not the *streaming* path, and they use different authorization.
