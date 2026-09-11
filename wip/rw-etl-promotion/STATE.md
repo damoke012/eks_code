@@ -618,3 +618,48 @@ opened another). The Kafka tokens remain unresolved and will be the next refusal
 **Trap:** config can be promoted ahead of the code that reads it. A key the running
 image does not know about is silently ignored — this one only surfaced because an
 unrelated guard tripped.
+
+### 2026-09-11 — the delivery path is PROVEN on QA, and the canary found a third blocker
+
+`pod/etl-pipeline-apply-xp2hp  Completed`, Job self-deleted on `HookSucceeded`,
+`sync=Synced health=Healthy phase=Succeeded`. **First pipeline file ever applied to QA's
+RisingWave through this path.** August's "proven" run carried a smoke payload.
+
+**What the canary found — nobody was looking for it.** `deploy/base/job.yaml` ran with
+`readOnlyRootFilesystem: true` and **no volumes at all**, while `apply.sh` renders every
+file through `mktemp` before applying it:
+
+    mktemp: Read-only file system
+
+So **no pipeline file could be applied on QA, ever** — Brand included. The Kafka values
+would have landed and it would still have failed. Invisible until now because the render
+step arrived with #21 and nothing had called `mktemp` on this path before.
+Fixed in #28: an `emptyDir` at `/tmp` plus `TMPDIR`, with `readOnlyRootFilesystem`,
+`runAsNonRoot`, dropped capabilities and seccomp all left intact.
+
+**Three blockers in series, each hidden behind the last:**
+
+| # | blocker | how it was found |
+|---|---|---|
+| 1 | ExternalSecret demanded `entity-postgres`, a database that does not exist | reading the ConfigMap's empty `POSTGRES_SERVER` |
+| 2 | the image predated `EXCLUDE_RE`, so it selected all 24 files | the **absence** of `exclude` lines in the log |
+| 3 | no writable `/tmp`, so `mktemp` failed on the first file | running a file that depends on nothing |
+
+None was findable by reading a diff. Each only became visible once the previous cleared.
+
+⚠️ **New Argo behaviour worth knowing: a failed hook Job makes the next sync a no-op that
+replays the old failure.** `started == finished` (same second), the syncResult carries the
+previous Job's `backoff limit` message, and nothing re-runs — even after the fix is
+merged. It clears once the failed Job is deleted (by `ttlSecondsAfterFinished` or
+`BeforeHookCreation`). We chased this twice today before spotting the timestamps.
+
+**Proven:** the full chain — commit → build → promotion PR → Argo → `apply.sh` →
+RisingWave.
+**Not verified:** the canary's objects by *value*. `phase=Succeeded` is a green sync, and
+by our own rule that is not a value check; `canary_promotion_mv` has not been selected.
+No SQL session to `risingwave-frontend:4567` is set up.
+**Remaining for Brand:** three strings from Tim — `KAFKA_TOPIC_BRAND`,
+`KAFKA_STARTUP_MODE`, `KAFKA_SCHEMA_REGISTRY_MESSAGE` — and confirmation that
+`secret.yaml` has created the nine `kafka_*` SECRET objects on QA (its last run, 9 days
+ago, **failed**).
+**Cleanup owed:** `PIPELINE_DIR` back to `/pipeline/pipelines`, canary file removed.
