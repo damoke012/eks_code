@@ -42,9 +42,19 @@ def val(suffix):
         die("%s%s is empty -- fix the record before creating secrets from it" % (prefix, suffix))
     return str(v)
 
-# group_id_prefix is derived, not stored -- matching secret.yaml exactly,
-# including prod's missing underscore.
-gid = "prodkafka_prefix" if env == "prod" else "%s_kafka_prefix" % env
+# group_id_prefix comes FROM THE RECORD, not derived. risingwave-pipeline #31
+# (2026-09-11) moved the source of truth into Secrets Manager so both this script
+# and secret.yaml read the same value. Deriving it here would silently disagree
+# with the workflow the moment either rule changed.
+#
+# It must equal what ix-kafka-topics-users grants:
+#   users.tf:44  group = "dx__${local.prefix}${group.prefix}"
+#   main.tf:4    prefix = confluent_prefix != "" ? "<confluent_prefix>_" : ""
+# so QA is dx__qa_risingwave and prod (empty prefix) is dx__risingwave.
+gid = val("group_id_prefix")
+if not gid.startswith("dx__"):
+    die("group_id_prefix is %r -- every consumer-group ACL in ix-kafka-topics-users "
+        "is granted as dx__<env>_<name>, so this value can never match one" % gid)
 
 mapping = {
     "%KAFKA_BOOTSTRAP_SERVER%":          val("bootstrap_server"),
