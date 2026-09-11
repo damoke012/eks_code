@@ -660,7 +660,7 @@ by our own rule that is not a value check; `canary_promotion_mv` has not been se
 No SQL session to `risingwave-frontend:4567` is set up.
 **Remaining for Brand:** three strings from Tim — `KAFKA_TOPIC_BRAND`,
 `KAFKA_STARTUP_MODE`, `KAFKA_SCHEMA_REGISTRY_MESSAGE` — and confirmation that
-`secret.yaml` has created the nine `kafka_*` SECRET objects on QA (its last run, 9 days
+`secret.yaml` has created the twelve `kafka_*` SECRET objects on QA (corrected 2026-09-11: twelve, not nine — nine come from AWS keys, three are literals in the file) (its last run, 9 days
 ago, **failed**).
 **Cleanup owed:** `PIPELINE_DIR` back to `/pipeline/pipelines`, canary file removed.
 
@@ -816,7 +816,7 @@ All five queries returned; no value was printed.
 **New blocker, found by the same run:**
 
 3. **`rw_catalog.rw_sources` -> 0 rows.** No Kafka source exists on QA at all.
-4. **`rw_catalog.rw_secrets` -> 0 rows.** The nine `kafka_*` SECRET objects **do not exist**.
+4. **`rw_catalog.rw_secrets` -> 0 rows.** The twelve `kafka_*` SECRET objects **do not exist**.
    `secret.yaml` has never run successfully against QA.
 
 ⚠️ **The ordering trap this exposes:** Brand's source DDL references `SECRET kafka_*`. With
@@ -830,3 +830,52 @@ credentials problem and is actually a **file-selection** problem. Check which si
 (`op-usxpress-qa-sso`); both are QA, so the note is informational. `rw_secrets` returns names
 only — RisingWave will not surrender the values, which is why listing is the only available
 confirmation that `secret.yaml` ran.
+
+### 2026-09-11 (late) — the secrets mechanism already exists. Nobody has pressed it.
+
+Read from GHE, not inferred: `.github/workflows/secret.yaml` in `variant-inc/risingwave-pipeline`.
+
+**What it is:** a `workflow_dispatch` workflow with `environment` as a **choice input —
+dev / qa / prod** — and `connector` as kafka / mongodb / both. It assumes
+`arn:aws:iam::<acct>:role/gha-op-usxpress-<env>-risingwave-pipeline-secrets` by OIDC, reads
+`op-usxpress-<env>/risingwave/kafka`, `sed`-substitutes the `%TOKEN%` placeholders in
+`pipelines/shared/000-secrets.rw`, and runs it through `psql`.
+
+⚠️ **Three framings of this problem in one hour; only this one is from the file.**
+"Nothing in the delivery path creates the secrets" (wrong), then "it's a `PIPELINE_DIR`
+selection-scope fix" (wrong). It is a separate manual workflow, by design, and the QA path
+is a dropdown option that has never been selected. The lesson is the standing one — read the
+artifact before theorising about the mechanism. See [[proxy-is-not-the-property]].
+
+**Counts, corrected:** `000-secrets.rw` creates **12** `kafka_*` secrets, not nine. Nine
+values come from the AWS record; three are literals in the file —
+`kafka_security_protocol = 'SASL_SSL'`, `kafka_sasl_mechanism = 'PLAIN'`, and
+`kafka_group_id_prefix`, which the workflow **derives from the environment name** and does not
+read from AWS (`qa` -> `qa_kafka_prefix`; prod is the odd one, `prodkafka_prefix`, no
+underscore). Plus 3 mongodb secrets = 15 with `connector: both`.
+
+**Today's registry fix was this workflow's prerequisite.** It reads
+`.kafka__schema_registry_api_key`, `…api_secret` and `…endpoint` from the QA record. Those
+were **empty strings** until we populated them this afternoon. Had anyone dispatched this
+against QA last week, `sed` would have substituted empty values, `CREATE SECRET` would have
+succeeded with `AS ''`, the verify step would have listed 12 names, and the workflow would
+have gone green — a perfect instance of [[eso-secretsynced-not-content-check]] one layer up.
+
+**Independent confirmation of `RW_DB`:** every `psql` invocation in this workflow is `-d dev`,
+on all three environments. That is a second source for
+[[rw-database-is-named-dev-everywhere]].
+
+**Traps before dispatching it against QA:**
+- Use `connector: kafka`, **not** the `both` default. The mongodb *fetch* is guarded by
+  `describe-secret`, but the mongodb *substitution* is guarded only by `$CONNECTOR` — so with
+  no `op-usxpress-qa/risingwave/mongodb` record, `both` creates three secrets holding `''`.
+- `CREATE SECRET` has **no `IF NOT EXISTS`**. This is one-shot: a re-run errors, and a secret
+  already referenced by a source may refuse to `DROP`. Get the inputs right the first time.
+- `RISINGWAVE_HOST` / `RISINGWAVE_PORT` are **GitHub environment secrets**, so a `qa`
+  environment must exist in repo settings and carry them.
+- `runs-on: risingwave-pipeline` is a self-hosted ARC runner. It must have a route to QA's
+  frontend, most likely `rw-sql.op-qa.usxpress.io:4567` via the tcp-passthrough Gateway
+  (verified serving on QA 2026-08-20, INFRA-1645).
+
+**Open, checkable:** does `gha-op-usxpress-qa-risingwave-pipeline-secrets` exist in account
+`527101283767`, and does a `qa` GitHub environment exist with both host secrets.
