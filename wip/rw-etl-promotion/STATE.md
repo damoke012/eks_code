@@ -879,3 +879,55 @@ on all three environments. That is a second source for
 
 **Open, checkable:** does `gha-op-usxpress-qa-risingwave-pipeline-secrets` exist in account
 `527101283767`, and does a `qa` GitHub environment exist with both host secrets.
+
+### 2026-09-11 (night) — QA's secret sync: the workflow assumes the wrong role. Three one-liners.
+
+Chased to ground from the live accounts, not from the repo's intent.
+
+**There are two GHA OIDC roles per cluster, deliberately separated:**
+
+| role | Secrets Manager path | trust subject |
+|---|---|---|
+| `gha-op-usxpress-<env>-risingwave-poc-secrets` | `…/risingwave/*` (Tim's) | `…:environment:dev\|qa\|prod` ✅ |
+| `gha-op-usxpress-<env>-risingwave-pipeline-secrets` | `…/risingwave-2/*` | `…:ref:refs/heads/master` + the three environments (after iaac-talos #62) |
+
+`secret.yaml` reads `op-usxpress-<env>/risingwave/root` and `…/risingwave/kafka` — **Tim's
+path**. So the poc role is the correct one, and its trust already accepts `environment:qa`.
+
+**The regression:** before 2026-09-01 the workflow assumed
+`gha-op-usxpress-${ENV}-risingwave-poc-secrets` (with the account hardcoded to dev's
+`700736442855`, which is why it only ever worked on dev). The INFRA-1675 commit of
+2026-09-01 correctly parameterised the account **and** changed the role name to
+`-pipeline-secrets`. That one word is why the 2026-09-01 run died at `Configure AWS via OIDC`
+with every later step skipped.
+
+**Both roles carry the same copy-paste defect in their resource ARN** — QA's poc role grants
+`arn:aws:secretsmanager:us-east-2:700736442855:secret:op-usxpress-dev/risingwave/*`: dev's
+account, in QA's role. iaac-talos #62 fixed exactly this pattern on the *pipeline* role's file
+and never touched the poc role's. See [[manifests-copied-across-branches]].
+
+**The fix — three one-liners:**
+1. `risingwave-pipeline` `.github/workflows/secret.yaml`: role name back to
+   `-risingwave-poc-secrets`, keeping the Sept 1 per-env account block. A revert of one string.
+2. `iaac-talos` `deploy/terraform/modules/irsa/gha-risingwave-poc-secrets-role.tf`: ARN to
+   `${data.aws_caller_identity.current.account_id}` + `${var.cluster_name}`, mirroring #62.
+3. GitHub repo settings: the `qa` environment has **zero** secrets; add `RISINGWAVE_HOST`
+   and `RISINGWAVE_PORT` (dev has 4 — those two plus `POSTGRES_HOST`/`POSTGRES_PORT`).
+
+**Proven, by enumeration:** QA holds seven `op-usxpress-qa/risingwave/*` secrets and **zero**
+`risingwave-2` — so the pipeline role's path does not exist in QA at all, and widening its
+trust could never have been enough. Confirms [[risingwave-onprem]]'s dev-only rule from the
+account side.
+
+⚠️ **Correction to this afternoon:** I hung a QA-destroy warning on iaac-talos #62. Its diff
+touches only the GHA role file. The duplicate bucket/role came from **#60**
+(`feat(irsa): add RisingWave on-prem IRSA role and S3 state bucket`, merged), and **no open PR
+removes it** — the four `terraform state rm` addresses are a plan, not a change. The risk in
+[[two-projects-one-resource]] is live and unmitigated, but nothing imminent will trigger it.
+
+**Deploy:** #62 is merged and **not deployed**. iaac-talos reaches AWS only through an Octopus
+release from master — dev first (`TfApply` false, so it prints the plan and changes nothing),
+then QA (`TfApply` **true**, applies for real).
+
+**Still blocked beyond QA:** prod has no `prod` GitHub environment at all (only
+`user-access-prod`), and no `op-usxpress-prod/risingwave/*` records yet.
