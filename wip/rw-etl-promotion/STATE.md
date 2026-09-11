@@ -1042,3 +1042,36 @@ hardcoding: prod's empty `confluent_prefix` yields `dx__risingwave` on both side
 convention". `iaac-confluent-cloud` owns clusters; `ix-kafka-topics-users` owns ACLs;
 `risingwave-pipeline` owns the consumer. The bug lived in the gap between the last two, which
 is exactly where nobody's tests look. See [[ccloud-registry-master-per-account]].
+
+### 2026-09-11 (late) — RisingWave's Kafka credential is a COPY of a rotating master. Today it matches.
+
+Idris: `op-usxpress-qa/risingwave/kafka` was populated by hand from
+**`dx__risingwave-kafka-creds`**, the record `ix-kafka-topics-users` writes for the service
+account it creates from `users/risingwave.yml` (named `dx__<prefix>risingwave`, `main.tf:35`).
+Same copy-the-master pattern as the schema registry
+([[ccloud-registry-master-per-account]]).
+
+**Compared by sha256, no value printed, 2026-09-11 — all six shared fields IDENTICAL:**
+`api_key`, `api_secret`, `bootstrap_server`, `rest_endpoint`, `resource_id`,
+`service_account`. So the copy is current and **INFRA-1637's stale key is not this one.**
+
+Expected differences: the three `schema_registry_*` fields exist only on the target (added by
+`scripts/copy-registry-creds-to-rw.sh` this afternoon); `KAFKA__misc_rotation` exists only on
+the source.
+
+⚠️ **The exposure: `ix-kafka-topics-users` runs an `aws_lambda_function` named
+`ccloud-kafka-key-rotation`** (seen updating in-place in the 1.8.36 plan, account
+937464026810). RisingWave holds a **copy**, so a rotation updates the master and silently
+leaves RisingWave behind. The symptom would be SASL auth failing at an arbitrary later date,
+looking like a broken cluster rather than a stale credential — and `KAFKA__misc_rotation` on
+the master proves the machinery touches this exact record.
+
+**Durable fix (ticket, not tonight):** point RisingWave's ExternalSecret at
+`dx__risingwave-kafka-creds` directly instead of a hand-copied record, so a rotation
+propagates. Note the casing differs (`KAFKA__` on the master, `kafka__` on the target) and the
+master does **not** carry the schema-registry fields — so it is a two-source mapping, not a
+straight swap. Prod inherits this shape unless it is fixed first.
+
+**Trap for the comparison itself:** the key prefix differs in CASE between the two records, so
+a name-based diff reports everything as different while every value matches. Compare hashes of
+VALUES and normalise the key case — a name diff here answers the wrong question.
