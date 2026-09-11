@@ -32,16 +32,23 @@ for c in aws jq gh python3 psql; do
   command -v "$c" >/dev/null 2>&1 || { echo "missing: $c"; exit 3; }
 done
 
-# ── 1. refuse to run twice ────────────────────────────────────────────────
-# CREATE SECRET has no IF NOT EXISTS. A second run errors, and a secret already
-# referenced by a source may refuse to DROP.
-echo "checking what $ENVN already has..." >&2
-EXISTING=$(bash "$HERE/rw-sql.sh" "$ENVN" "SELECT name FROM rw_catalog.rw_secrets;" 2>/dev/null) || {
+# ── 1. refuse only when a LIVE SOURCE would block the drop ────────────────
+# Corrected 2026-09-11: an earlier version refused whenever kafka_* secrets
+# existed, on the belief that CREATE SECRET has no IF NOT EXISTS. It does not,
+# but 000-secrets.rw pairs every CREATE with a DROP SECRET IF EXISTS, so the
+# file is idempotent and re-running is the normal way to pick up a rotated or
+# corrected value. The real constraint is different: RisingWave refuses to drop
+# a secret that a live SOURCE references. So gate on sources, not on secrets.
+echo "checking $ENVN for sources that would block a secret drop..." >&2
+SRC=$(bash "$HERE/rw-sql.sh" "$ENVN" "SELECT name FROM rw_catalog.rw_sources;" 2>/dev/null) || {
   echo "could not reach RisingWave on $ENVN -- is the VPN up?"; exit 4; }
-if grep -q 'kafka_' <<<"$EXISTING"; then
-  echo "refusing: $ENVN already has kafka_* secrets. CREATE SECRET has no IF NOT EXISTS."
-  echo "$EXISTING" | grep kafka_
-  echo "Drop them deliberately first if you mean to replace them."
+if grep -qE '^ +[a-z]' <<<"$SRC"; then
+  echo "refusing: $ENVN has live source(s); RisingWave will not drop a secret they reference."
+  echo "$SRC" | grep -E '^ +[a-z]'
+  echo
+  echo "Drop the source(s) first, e.g.:"
+  echo "  bash scripts/rw-sql.sh $ENVN \"DROP SOURCE IF EXISTS <name> CASCADE;\""
+  echo "then re-run this. The pipeline re-creates them on the next apply."
   exit 5
 fi
 

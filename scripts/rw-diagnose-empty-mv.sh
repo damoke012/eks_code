@@ -22,10 +22,27 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG=$(mktemp); trap 'rm -f "$LOG"' EXIT
 
 echo "=== 1. does the source exist, and what does the view hold ==="
+# Check reachability FIRST, with a query that cannot fail for content reasons.
+# Corrected 2026-09-11: an earlier version ran the real query and, on any error,
+# printed "could not query -- VPN, or the view does not exist". Those are
+# completely different findings and it reported them as one. A missing relation
+# is a RESULT; an unreachable cluster is a failure to measure.
+# See [[transport-failure-not-a-verdict]].
+bash "$HERE/rw-sql.sh" "$ENVN" "SELECT 1;" >/dev/null 2>&1 || {
+  echo "ABORT: cannot reach RisingWave on $ENVN at all -- VPN or kubeconfig."
+  echo "       This says nothing about $MV. Fix the connection and re-run."; exit 4; }
+
 bash "$HERE/rw-sql.sh" "$ENVN" \
-  "SELECT name FROM rw_catalog.rw_sources WHERE name = '$SRC';
-   SELECT count(*) AS rows_now FROM $MV;" 2>/dev/null || {
-  echo "could not query $ENVN -- VPN, or the view does not exist"; exit 4; }
+  "SELECT name FROM rw_catalog.rw_sources WHERE name = '$SRC';" 2>/dev/null
+
+if ! bash "$HERE/rw-sql.sh" "$ENVN" "SELECT count(*) AS rows_now FROM $MV;" 2>/dev/null; then
+  echo
+  echo "  $MV does not exist on $ENVN. The cluster is reachable -- this is a real"
+  echo "  finding, not a connection problem. The pipeline has not created it yet,"
+  echo "  or it was dropped (DROP SOURCE ... CASCADE takes its views with it)."
+  echo "  Re-apply the pipeline, then run this again."
+  exit 0
+fi
 
 echo
 echo "=== 2. what the compute node says (last 400 lines) ==="
