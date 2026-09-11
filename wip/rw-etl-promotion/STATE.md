@@ -869,8 +869,11 @@ on all three environments. That is a second source for
 - Use `connector: kafka`, **not** the `both` default. The mongodb *fetch* is guarded by
   `describe-secret`, but the mongodb *substitution* is guarded only by `$CONNECTOR` — so with
   no `op-usxpress-qa/risingwave/mongodb` record, `both` creates three secrets holding `''`.
-- `CREATE SECRET` has **no `IF NOT EXISTS`**. This is one-shot: a re-run errors, and a secret
-  already referenced by a source may refuse to `DROP`. Get the inputs right the first time.
+- ~~`CREATE SECRET` has no `IF NOT EXISTS`, so this is one-shot.~~ **Wrong — corrected
+  2026-09-11 by running it.** `000-secrets.rw` pairs every `CREATE` with a
+  `DROP SECRET IF EXISTS`, so it is idempotent and safe to re-run after a credential
+  rotation. The one real constraint: once a source references a secret, RisingWave refuses
+  to drop it, so re-running after Brand exists will fail on those names.
 - `RISINGWAVE_HOST` / `RISINGWAVE_PORT` are **GitHub environment secrets**, so a `qa`
   environment must exist in repo settings and carry them.
 - `runs-on: risingwave-pipeline` is a self-hosted ARC runner. It must have a route to QA's
@@ -931,3 +934,25 @@ then QA (`TfApply` **true**, applies for real).
 
 **Still blocked beyond QA:** prod has no `prod` GitHub environment at all (only
 `user-access-prod`), and no `op-usxpress-prod/risingwave/*` records yet.
+
+### 2026-09-11 (night) — QA has its twelve Kafka secrets. Done locally, not by the workflow.
+
+`bash scripts/rw-create-kafka-secrets.sh qa` — every gate passed (9 keys read from
+`op-usxpress-qa/risingwave/kafka`, 12 rendered, no empty value, no surviving placeholder, QA
+held none already), then `DROP … / CREATE_SECRET` twelve times, then the verifier listed
+**12 rows** from `rw_catalog.rw_secrets`. Listed, not inferred from an exit code.
+
+This is the same DDL from the same file with the same values the GHA workflow would have used
+— it bypasses only the broken OIDC role, not the mechanism. The workflow remains the durable
+path and still needs its three one-liners ([[two-gha-roles-one-pipeline-repo]]).
+
+**Proven by doing it:** `000-secrets.rw` is idempotent (`DROP SECRET IF EXISTS` before each
+`CREATE`). Correction recorded above.
+
+**Open, and unresolved all day:** Brand's directory holds four applicable files
+(`100-sources.rw`, `200-ingest.rw`, `300-transform.sql`, `400-sink.rw`) but this morning's
+apply reported selecting **two**. Resolve before calling Brand delivered — a pipeline that
+applies its source and not its sink looks identical to a working one from the sync status.
+
+**Next:** merge #29 (approved), let Argo sync the ConfigMap and re-run the hook Job, then
+confirm by value: `SELECT name FROM rw_catalog.rw_sources;` should show `kafka_brand`.
