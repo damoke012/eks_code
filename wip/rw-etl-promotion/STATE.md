@@ -663,3 +663,53 @@ No SQL session to `risingwave-frontend:4567` is set up.
 `secret.yaml` has created the nine `kafka_*` SECRET objects on QA (its last run, 9 days
 ago, **failed**).
 **Cleanup owed:** `PIPELINE_DIR` back to `/pipeline/pipelines`, canary file removed.
+
+### 2026-09-11 later — Brand's three values found without Tim; two new blockers behind them
+
+Idris said "only Tim knows the topic name". He was wrong, and so was the premise:
+**every value was already in a system of record.**
+
+| key | value | where it came from |
+|---|---|---|
+| `KAFKA_TOPIC_BRAND` | `qa_brand_management_cdc_brand_avro` | Confluent topic list on `lkc-19mn63`, via the api_key in `op-usxpress-qa/risingwave/kafka` — 14 topics, exactly one Brand |
+| `KAFKA_STARTUP_MODE` | `earliest` | Idris's decision |
+| `KAFKA_SCHEMA_REGISTRY_MESSAGE` | `USXpress.Standard.Types.Brand.V1.company_master` | the schema of subject `qa_brand_management_cdc_brand_avro-value`, namespace + record joined |
+
+**#29 must not merge as written** — it sets `KAFKA_SCHEMA_REGISTRY_MESSAGE: unknown`, a literal
+placeholder that passes `apply.sh`'s non-empty check and then fails inside RisingWave at
+decode time. A blank fails loudly; `unknown` fails quietly. Commented, not approved.
+
+❌ **New blocker — QA's schema-registry credentials are hollow.**
+`op-usxpress-qa/risingwave/kafka` lists nine keys, but `kafka__schema_registry_endpoint`
+is an **empty string**. Dev's `op-usxpress-dev/risingwave/kafka` has all nine populated
+(endpoint 48 chars). **The QA subject lives in DEV's registry** — `qa_brand_…-value` is
+listed there — so QA needs dev's endpoint value, not one of its own. Without it,
+`secret.yaml` creates a `kafka_schema_registry_endpoint` SECRET containing nothing and the
+Avro source cannot decode. Same shape as `POSTGRES_SERVER`: the key exists, the value is
+empty, and everything downstream looks configured.
+
+⚠️ **Casing differs between environments:** dev's keys are `KAFKA__…`, QA's are
+`kafka__…`. If `secret.yaml` reads one casing it silently gets nothing from the other —
+a candidate explanation for its failed run on 2026-09-02.
+
+❌ **iaac-talos and iaac-risingwave-onprem declare the SAME resources.** The #62 QA deploy
+failed with `BucketAlreadyOwnedByYou: risingwave-state-op-usxpress-qa` and
+`EntityAlreadyExists: op-usxpress-qa-risingwave`. Idris found the cause:
+`iaac-risingwave-onprem/deploy/terraform/main.tf` creates `aws_s3_bucket.risingwave` and
+`aws_iam_role.risingwave_irsa` (`${cluster_name}-risingwave`) — and `iaac-talos`'s
+`module.irsa[0]` declares both. **Do not import them into the iaac-talos state**: two
+owners of RisingWave's Hummock bucket means a destroy or replace on either side deletes
+the object store. Fix by removing the declaration from `iaac-talos`. The apply failing is
+what protected us; QA has `TfApply=true`, so it was a real apply and it reached
+`Creating...` on four resources first.
+
+⚠️ **A standing claim of mine needs re-checking.** That module enables
+`aws_s3_bucket_versioning` on the RisingWave bucket. I have been carrying "the Hummock S3
+state store has no versioning" as an open risk — that may be wrong for buckets this
+project created. Verify per cluster before repeating it.
+
+**Proven:** all three Brand values, from Confluent and the schema registry rather than
+from anyone's memory.
+**Killed:** "only Tim knows the topic name", and "the Kafka gap needs a Confluent admin".
+**Trap:** a placeholder that satisfies a validator. `unknown` is worse than empty
+precisely because the guard lets it through.

@@ -63,3 +63,5 @@
 - [Policy cannot fix what stops it running](policy-cannot-fix-what-stops-it-running.md) — Prometheus retention could not recover a full disk; free the resource from OUTSIDE first, then set the policy, then make Git match
 - [GitOps has four stale layers](gitops-has-four-stale-layers.md) — GitRepository → Kustomization → HelmRelease → Pod; each says Ready while the next is behind. lastAppliedRevision ≠ live; finish at the pod start time
 - [Config can outrun the image](config-can-outrun-the-image.md) — a ConfigMap key the running image predates is silently ignored; the tell is the absent log line, and verifying a regex is not verifying the code that runs it
+- [Failed hook Job makes the next sync a no-op](failed-hook-job-makes-sync-a-noop.md) — the operation returns in 0s replaying the OLD failure; compare startedAt with finishedAt before believing a failed sync
+- [Read-only rootfs needs a /tmp volume](readonly-rootfs-needs-a-tmp-volume.md) — readOnlyRootFilesystem + no emptyDir broke every `mktemp`; the QA ETL Job could not apply a single file for weeks
