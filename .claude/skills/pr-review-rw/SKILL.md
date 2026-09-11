@@ -197,6 +197,18 @@ Two scripts live under `scripts/` to speed up Phase 3:
       "are there unguarded DROPs", and `kubectl get gateway` standing in for "does this
       cluster have Istio Gateways". Every one returned a clean result and answered a
       different question. Name the direct evidence before reporting the property.
+- [ ] **Did I treat a zero as a diagnosis?** A materialized view reading 0 rows has at least
+      four indistinguishable causes: still backfilling, a topic retaining no messages, a
+      consumer group that is not authorised, and a failing Avro decode. On 2026-09-11 QA's
+      `mv_brand` was 0 for **two** of them at once — `GroupAuthorizationFailed` in the compute
+      log, and a topic at `low: 194, high: 194`. Neither is visible from the count, and one of
+      them is not a defect. Worse, `SELECT * FROM <source> LIMIT 1` came back **clean**,
+      because a batch scan uses no consumer group and so cannot fail the way the streaming
+      path was failing — a green check that shares none of the defect it appears to test.
+      Run `scripts/rw-diagnose-empty-mv.sh <env> <mv> <source>`, which reads the compute log
+      and names which cause applies. Never report "the pipeline works" from a row count alone,
+      and never report "it is broken" without saying which of the four.
+
 - [ ] **Did the resource kind I queried actually resolve?** `kubectl get gateway` hits the
       **Gateway API** CRD and returns zero rows while `gateways.networking.istio.io` has
       several. Zero rows from the wrong kind is not absence. Fully qualify the kind
