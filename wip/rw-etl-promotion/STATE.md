@@ -713,3 +713,33 @@ from anyone's memory.
 **Killed:** "only Tim knows the topic name", and "the Kafka gap needs a Confluent admin".
 **Trap:** a placeholder that satisfies a validator. `unknown` is worse than empty
 precisely because the guard lets it through.
+
+### 2026-09-11 — two checks, one correction
+
+✅ **CORRECTION: the Hummock buckets DO have versioning.** Verified directly, all three:
+
+    dev    Enabled
+    qa     Enabled
+    prod   Enabled       (risingwave-state-op-usxpress-<env>, get-bucket-versioning)
+
+I have repeated "no versioning on the Hummock S3 state store" as an unowned risk for
+weeks. **It is wrong** — `iaac-risingwave-onprem` sets `aws_s3_bucket_versioning` on the
+bucket it creates, and every environment shows Enabled. The claim was never checked after
+that Terraform landed. The Velero gap on prod RisingWave is a separate question and is
+NOT covered by this check.
+
+❌ **QA has no schema-registry access at all** — not one empty field, three:
+
+    kafka__schema_registry_endpoint   = EMPTY
+    kafka__schema_registry_api_key    = EMPTY
+    kafka__schema_registry_api_secret = EMPTY
+
+while `kafka__api_key`, `_secret`, `bootstrap_server`, `rest_endpoint`, `resource_id` and
+`service_account` are all populated. Dev's equivalents are all populated (endpoint 48
+chars). So QA can reach Kafka and cannot reach the registry — and `Brand/100-sources.rw`
+is `FORMAT PLAIN ENCODE AVRO`, which needs the registry to decode anything.
+
+**This is a decision, not a lookup.** Either copy dev's registry credentials into QA's
+secret (fast, but shares one credential across two environments — the opposite of what
+INFRA-1637 has been about), or mint a QA-specific schema-registry API key in Confluent
+Cloud, which needs an administrator. Doke's call.
