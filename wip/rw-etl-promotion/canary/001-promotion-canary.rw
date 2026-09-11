@@ -1,0 +1,30 @@
+/*
+==============================================================================================================================
+ Author:        Dare Oke
+ Create date:   09/11/2026
+ Description:   Promotion canary. Proves the path author -> build -> promotion PR -> Argo CD -> apply.sh -> RisingWave
+                end to end, using nothing outside RisingWave itself.
+==============================================================================================================================
+ Notes:
+   - No Kafka, no application PostgreSQL, no secrets. Deliberately self-contained so a failure
+     here is a failure of the PATH, not of a dependency.
+   - TEMPORARY. Remove once the path is proven; it is not part of the Brand cutover.
+   - Re-runnable: the DROPs make a repeat apply produce the same end state.
+==============================================================================================================================
+*/
+
+DROP MATERIALIZED VIEW IF EXISTS canary_promotion_mv;
+DROP TABLE IF EXISTS canary_promotion;
+
+CREATE TABLE canary_promotion (
+  id          int,
+  note        varchar,
+  applied_at  timestamptz
+);
+
+INSERT INTO canary_promotion VALUES (1, 'promotion canary 2026-09-11', now());
+FLUSH;
+
+CREATE MATERIALIZED VIEW canary_promotion_mv AS
+SELECT count(*) AS row_count, max(applied_at) AS last_applied
+FROM canary_promotion;
