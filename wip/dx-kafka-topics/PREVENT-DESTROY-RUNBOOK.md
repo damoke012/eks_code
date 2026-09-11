@@ -19,27 +19,31 @@ for all ~130 production topics for that apply.
 
 ## Where the variable is
 
-**Not** a project variable — Project Variables holds only `topics:<domain>:<name>:<fmt>:*`
-entries (partitions and config, scoped per environment). `tf:prevent_destroy` lives in a
-**Library Variable Set**: Octopus → project → *Variable Sets*, or *All Variables* to see the
-merged view.
+**A PROJECT variable on `ix-kafka-topics-users`**, scoped to **production**:
 
-⚠️ **Our scripts cannot find it, and both return empty — that is a tooling gap, not absence.**
-Verified 2026-09-11: `octopus-project-state.py` enumerates only the project's own variable set
-(`variableset-Projects-4801`) and `octopus-release-snapshot-vars.py` prints only unencrypted
-project variables. Neither walks Library Variable Sets. An empty result from either says
-nothing about whether `tf:prevent_destroy` exists — see [[proxy-is-not-the-property]].
+    tf:prevent_destroy  =  lifecycle { prevent_destroy = true }     [scope: production]
 
-**Use the UI:** Octopus -> project -> **All Variables** (the merged view), search
-`prevent_destroy`. It names the owning set and shows the block.
+Confirmed in the UI 2026-09-11 (All Variables, name filter `prevent`, Source column =
+`ix-kafka-topics-users`). Scoped to production only, so non-prod deploys already run without
+the guard.
 
-TODO for the tooling: teach `octopus-project-state.py` to follow
-`project.IncludedLibraryVariableSetIds` and print those sets too. Until then an empty grep
-here is meaningless.
+❌ **Corrected in place:** an earlier version of this note said it lived in a Library Variable
+Set. Wrong. That came from two of our scripts returning empty, which I read as "not a project
+variable" when it only meant "our scripts do not show it" — the exact inversion
+[[proxy-is-not-the-property]] warns about, made twice in one evening.
+
+⚠️ **Our scripts cannot see it.** `octopus-project-state.py` truncates and
+`octopus-release-snapshot-vars.py` returned nothing for it — the second is unexplained and
+worth a look (it may mean the variable postdates the 1.8.36 snapshot, which would matter).
+Until then, **use the UI**: project -> All Variables -> filter by name. One click, and the
+Source column answers the ownership question directly.
+
+TODO for the tooling: make `octopus-project-state.py` filterable rather than head-truncated,
+and find out why the snapshot script misses this variable.
 
 ## If it genuinely has to come down
 
-1. **Copy the current value verbatim first.** It is a whole `lifecycle { ... }` block — it may
+1. **Copy the current value verbatim first.** Here it is exactly `lifecycle { prevent_destroy = true }` with nothing else in the block, so flipping the one word is safe — but check, because a block carrying `ignore_changes` would be silently dropped by blanking it.
    carry `ignore_changes` or more. **Do not blank it**; change only the one word, or you will
    silently drop the rest and produce spurious diffs in a production plan.
 2. Change `true` -> `false` in the Library Variable Set.
