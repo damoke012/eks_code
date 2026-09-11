@@ -743,3 +743,47 @@ is `FORMAT PLAIN ENCODE AVRO`, which needs the registry to decode anything.
 secret (fast, but shares one credential across two environments — the opposite of what
 INFRA-1637 has been about), or mint a QA-specific schema-registry API key in Confluent
 Cloud, which needs an administrator. Doke's call.
+
+### 2026-09-11 — QA registry access FIXED, and it never needed Confluent at all
+
+**The house pattern, found by looking for the repo rather than for a person:**
+`variant-inc/iaac-confluent-cloud` manages Confluent (environments, clusters, service
+accounts, `confluent_api_key.schema_registry`, `confluent_role_binding.schema_registry_rw`
+— ResourceOwner on `subject=*`). The credentials land in **one secret per AWS account**:
+`dx--ccloud-schema-registry-master`, carrying exactly the three fields we needed. No
+per-app secret in the estate carries registry fields — checked `dx__analyticsconsumer-`
+and `dx__orders-kafka-creds`, both seven keys, no registry.
+
+**Proof before acting:** dev's `op-usxpress-dev/risingwave/kafka` holds values
+byte-identical to dev's master (compared by sha256, no value printed). So copying is the
+convention, not a shortcut.
+
+**Done:** `scripts/copy-registry-creds-to-rw.sh qa` wrote the three values into
+`op-usxpress-qa/risingwave/kafka`, preserving the six populated fields and the target's
+lowercase `kafka__` casing (the master is uppercase `KAFKA__`).
+
+**Verified, not assumed:**
+
+    GET /subjects -> HTTP 200
+    subjects visible: 23
+      'qa_brand_management_cdc_brand_avro-value' is visible
+    GET the Brand schema -> HTTP 200
+      record: USXpress.Standard.Types.Brand.V1.company_master
+
+That record name independently confirms the value given to Idris for #29.
+
+❌ **Killed, and it was mine:** "QA needs a schema-registry key from a Confluent admin."
+I had written a request document and a wizard to mint a key. Both would have worked and
+left a **second** credential for the same service account — more sprawl, in the middle of
+INFRA-1637 reducing exactly that. The correct answer was a copy that every other consumer
+already does.
+
+**Trap:** when access is missing, the reflex is to ask who can grant it. The better first
+question is how the organisation already grants it — `gh repo list` found
+`iaac-confluent-cloud` in one command. Doke asked for the repo; I was drafting an email.
+
+**Remaining for Brand:** #29 updated with the real record name (Idris), then
+`secret.yaml` against QA, then merge and sync.
+**Prod note:** `op-usxpress-prod/risingwave/kafka` still does not exist — that record is
+Terraform's, in `iaac-risingwave-onprem`. Prod's account has its own
+`dx--ccloud-schema-registry-master` to copy from once the record exists.
