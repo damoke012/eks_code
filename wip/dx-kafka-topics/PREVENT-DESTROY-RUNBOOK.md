@@ -24,10 +24,18 @@ entries (partitions and config, scoped per environment). `tf:prevent_destroy` li
 **Library Variable Set**: Octopus → project → *Variable Sets*, or *All Variables* to see the
 merged view.
 
-Read-only discovery:
+⚠️ **Our scripts cannot find it, and both return empty — that is a tooling gap, not absence.**
+Verified 2026-09-11: `octopus-project-state.py` enumerates only the project's own variable set
+(`variableset-Projects-4801`) and `octopus-release-snapshot-vars.py` prints only unencrypted
+project variables. Neither walks Library Variable Sets. An empty result from either says
+nothing about whether `tf:prevent_destroy` exists — see [[proxy-is-not-the-property]].
 
-    python3 scripts/octopus-project-state.py ix-kafka-topics-users | grep -iE "variable set|library"
-    python3 scripts/octopus-release-snapshot-vars.py ix-kafka-topics-users <version> | grep -B2 -A6 -i prevent_destroy
+**Use the UI:** Octopus -> project -> **All Variables** (the merged view), search
+`prevent_destroy`. It names the owning set and shows the block.
+
+TODO for the tooling: teach `octopus-project-state.py` to follow
+`project.IncludedLibraryVariableSetIds` and print those sets too. Until then an empty grep
+here is meaningless.
 
 ## If it genuinely has to come down
 
