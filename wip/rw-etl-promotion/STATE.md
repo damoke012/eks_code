@@ -787,3 +787,46 @@ question is how the organisation already grants it — `gh repo list` found
 **Prod note:** `op-usxpress-prod/risingwave/kafka` still does not exist — that record is
 Terraform's, in `iaac-risingwave-onprem`. Prod's account has its own
 `dx--ccloud-schema-registry-master` to copy from once the record exists.
+
+### 2026-09-11 (evening) — first SQL session into QA RisingWave. Four answers, one new blocker.
+
+`bash scripts/rw-verify-canary.sh qa`, run by Doke on WSL. Port-forward to
+`svc/risingwave-frontend`, root password read from `app-risingwave/etl-pipeline-credentials`.
+All five queries returned; no value was printed.
+
+**Proven:**
+
+1. **`SHOW DATABASES` -> one row: `dev`.** On the **QA** cluster. So `RW_DB` must stay `dev`
+   in every environment — the name is a database inside RisingWave, not an environment label.
+   This is the evidence behind the objection to #29's `RW_DB: qa`, which would have failed at
+   connect time. Previously this was an inference from a log line; it is now a query.
+2. **The canary landed, by value.**
+
+       name                 | relation_type
+       canary_promotion     | table
+       canary_promotion_mv  | materialized view
+
+       row_count | last_applied
+       1         | 2026-09-11 13:02:10.526+00:00
+
+   The delivery path (commit -> GHA -> ECR -> promotion PR -> Argo sync -> Job -> RisingWave)
+   is proven end to end with data in a materialized view, not with `phase=Succeeded`.
+   See [[eso-secretsynced-not-content-check]] — this is the check that rule asks for.
+
+**New blocker, found by the same run:**
+
+3. **`rw_catalog.rw_sources` -> 0 rows.** No Kafka source exists on QA at all.
+4. **`rw_catalog.rw_secrets` -> 0 rows.** The nine `kafka_*` SECRET objects **do not exist**.
+   `secret.yaml` has never run successfully against QA.
+
+⚠️ **The ordering trap this exposes:** Brand's source DDL references `SECRET kafka_*`. With
+`PIPELINE_DIR` restored, `EXCLUDE_RE` selects exactly **two Brand files** and excludes 22 —
+and `secret.yaml` is one of the excluded 22 unless it sits inside the Brand directory. If it
+does not, the Brand source will fail at apply with a missing-secret error that reads like a
+credentials problem and is actually a **file-selection** problem. Check which side of
+`EXCLUDE_RE` `secret.yaml` falls on **before** merging #29, not after the apply fails.
+
+**Traps:** `rw-sql.sh` reports two contexts serving 10.10.82.51 and uses the first
+(`op-usxpress-qa-sso`); both are QA, so the note is informational. `rw_secrets` returns names
+only — RisingWave will not surrender the values, which is why listing is the only available
+confirmation that `secret.yaml` ran.
