@@ -1,3 +1,7 @@
+> **SUPERSEDED 2026-09-11.** The wedge described below is resolved: QA was unblocked
+> 2026-09-10 and Brand was built on QA 2026-09-11. Do not send this. Kept for the
+> reasoning; current state is in STATE.md.
+
 Idris — one more, and it is the important one.
 
 **QA's apply Job has been failing for 6 days 20 hours. 45,497 attempts.**
