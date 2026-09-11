@@ -999,3 +999,46 @@ working pipeline with an empty topic, a pipeline with no group authorization, an
 with a broken schema registry. The count alone cannot tell them apart — the compute log can.
 Add [[adjacent-step-green-signals]] instance: `SELECT * FROM source LIMIT 1` succeeding proves
 the *batch* path, not the *streaming* path, and they use different authorization.
+
+### 2026-09-11 (late) — the group-authz fix, found in the topics repo. Two conventions that never met.
+
+`GroupAuthorizationFailed` has a precise cause, confirmed from source in
+`variant-inc/ix-kafka-topics-users` (the repo that owns Confluent topics, users and ACLs —
+**not** `iaac-confluent-cloud`, which only builds clusters and service accounts; my earlier
+steer there was wrong).
+
+**Cause 1 — `users/risingwave.yml` has no `consumer_groups:` block at all.** It grants only
+topic READ. Every other consuming user has one (`analyticsconsumer`, `geoservices`, `graph`,
+`trailers`, `fivetran`, `driverexperiencetechnology`). RisingWave was never granted a group.
+
+**Cause 2 — and this is why adding one naively still fails.** `deploy/terraform/users.tf:44`
+renders every group ACL as:
+
+    group = "dx__${local.prefix}${group.prefix}"
+
+with `main.tf:4` -> `prefix = var.confluent_prefix != "" ? "${var.confluent_prefix}_" : ""`
+(QA `qa_`, **prod empty** — which is why prod's topics are unprefixed). So the ACL always
+grants **`dx__<env>_<name>`**.
+
+RisingWave's consumer group comes from `secret kafka_group_id_prefix`, which
+`risingwave-pipeline`'s `.github/workflows/secret.yaml` **derives** as `${ENV}_kafka_prefix`
+(prod: `prodkafka_prefix`). There is no `dx__`. The two never intersect, in any environment.
+
+**The fix is two changes, and neither side is wrong alone:**
+1. `users/risingwave.yml`: add `consumer_groups` with `prefix: risingwave` (+ `used_by`, as
+   the neighbours do) -> grants `dx__qa_risingwave*` / `dx__risingwave*`.
+2. `secret.yaml`: derive `kafka_group_id_prefix` as `dx__` + (`""` for prod else `${ENV}_`) +
+   `risingwave` — mirroring `local.prefix` exactly. Then re-run
+   `scripts/rw-create-kafka-secrets.sh qa` (idempotent) so the secret carries the new value.
+
+**Trap:** adding only #1 grants `dx__qa_kafka_prefix*` while RisingWave joins
+`qa_kafka_prefix*`. Same error, now with a merged PR and a green Octopus deploy behind it —
+[[adjacent-step-green-signals]]. Change both or neither.
+
+**Prod gets fixed by the same rule**, which is the point of deriving it rather than
+hardcoding: prod's empty `confluent_prefix` yields `dx__risingwave` on both sides.
+
+**Method note:** three repos in, the answer was always "find the repo that owns the
+convention". `iaac-confluent-cloud` owns clusters; `ix-kafka-topics-users` owns ACLs;
+`risingwave-pipeline` owns the consumer. The bug lived in the gap between the last two, which
+is exactly where nobody's tests look. See [[ccloud-registry-master-per-account]].
