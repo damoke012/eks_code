@@ -42,9 +42,11 @@ done
 echo "checking $ENVN for sources that would block a secret drop..." >&2
 SRC=$(bash "$HERE/rw-sql.sh" "$ENVN" "SELECT name FROM rw_catalog.rw_sources;" 2>/dev/null) || {
   echo "could not reach RisingWave on $ENVN -- is the VPN up?"; exit 4; }
-if grep -qE '^ +[a-z]' <<<"$SRC"; then
+# psql always prints "(N rows)"; match that rather than trying to tell a data
+# row from the column header -- the header ' name ' looked exactly like a row.
+if ! grep -q '(0 rows)' <<<"$SRC"; then
   echo "refusing: $ENVN has live source(s); RisingWave will not drop a secret they reference."
-  echo "$SRC" | grep -E '^ +[a-z]'
+  echo "$SRC" | sed -n '3,$p' | grep -v '^(' | grep -v '^$'
   echo
   echo "Drop the source(s) first, e.g.:"
   echo "  bash scripts/rw-sql.sh $ENVN \"DROP SOURCE IF EXISTS <name> CASCADE;\""
