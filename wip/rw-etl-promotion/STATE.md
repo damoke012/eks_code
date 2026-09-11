@@ -1075,3 +1075,53 @@ straight swap. Prod inherits this shape unless it is fixed first.
 **Trap for the comparison itself:** the key prefix differs in CASE between the two records, so
 a name-based diff reports everything as different while every value matches. Compare hashes of
 VALUES and normalise the key case — a name diff here answers the wrong question.
+
+### 2026-09-11 (night) — on-prem CI/CD: everything we own is merged; the release is blocked elsewhere.
+
+**Done and merged tonight:**
+| change | where | why |
+|---|---|---|
+| role name -> `-risingwave-poc-secrets` | `risingwave-pipeline` #32 | the Sept 1 INFRA-1675 commit switched it to the pipeline role, which covers `/risingwave-2/*` (dev-only). Every run since died at `Configure AWS via OIDC`. |
+| `kafka_group_id_prefix` read from the record + `jq -er` guard | `risingwave-pipeline` #31 | derivation moved into Secrets Manager; guard verified by test to fire on a missing key |
+| `RISINGWAVE_HOST` / `RISINGWAVE_PORT` on the `qa` GH environment | repo settings | it had **zero** secrets; dev has four. Host is `rw-sql.op-qa.usxpress.io`, **4567 confirmed open** |
+| poc role ARN -> `${account_id}` + `${var.cluster_name}` | `iaac-talos` #63 | QA's role granted `700736442855:secret:op-usxpress-dev/risingwave/*` — dev's account, inside QA's role |
+| deleted the duplicate RisingWave bucket/role | `iaac-talos` #64 | see below |
+
+**⛔ Blocked on `iaac-talos` releases, two unrelated faults:**
+
+1. **QA's Terraform has been failing since 2026-09-10.** Release `0.1.3` on QA:
+   `Plan: 4 to add, 0 to change, 0 to destroy`, then
+   `409 BucketAlreadyOwnedByYou` on `risingwave-state-op-usxpress-qa` and
+   `409 EntityAlreadyExists` on `op-usxpress-qa-risingwave`. That is
+   [[two-projects-one-resource]] live. **Corrects the earlier plan:** QA's state does **not**
+   hold those four, so `state rm` on QA is wrong — removing the config (#64) is the fix and is
+   a no-op there. **Dev is the opposite**: dev's state *does* hold them, so after #64 a dev
+   apply would DESTROY the Hummock bucket. Dev needs the four
+   `terraform state rm 'module.irsa[0].…'` first. Dev's `TfApply` is false, so it can only
+   plan today — but this must happen before that ever changes. `iaac-risingwave-onprem`
+   confirmed to own both (`deploy/terraform/main.tf:31` and `:91`), so nothing is orphaned.
+
+2. **`TF_VAR_talosconfig_secret_arn` has no `development` value** (scoped to qa + production
+   only), so today's dev plan failed before reaching any of our changes. Dev's value is
+   `arn:aws:secretsmanager:us-east-2:700736442855:secret:op-usxpress-dev/talosconfig-jZx93J`.
+   **`production` is empty too** — prod fails the same way whenever it is next deployed.
+   ⚠️ **Unexplained:** the variable arrived with #62's merge (11:02 Sep 10) and release
+   `0.1.3` was assembled at 15:24Z **after** it, yet dev succeeded. Do not assume this is
+   understood.
+
+3. **Release numbering runs backwards.** Today's master release is `0.1.2`, cut *after*
+   yesterday's `0.1.3`. Family of [[conventional-commits-drive-releases]]. Releases from
+   branch pushes are prereleases (`0.1.x-<branch>.N`) and deploy nowhere; only the master
+   version matters.
+
+**New tool:** `scripts/octopus-latest-releases.py <project> [n]` — versions, assembly time and
+where each deployed. Written because every other Octopus script needs a release VERSION and
+there was no way to get one without the UI, which produced a `<version>` placeholder in a
+runnable command twice in one evening.
+
+**Traps recorded tonight:** an empty `kubectl get virtualservice -n risingwave` said "no TCP
+route on QA" when `rw-sql-passthrough` was in `istio-ingress` all along; `kubectl get gateway`
+returns zero rows because it queries the Gateway API CRD, not `gateways.networking.istio.io`;
+and `curl -s` without `-f` exits 0 on a 403, so an ACL query "returned nothing" when it was
+actually `40301 DESCRIBE_ACLS needs DESCRIBE permission`. Three instruments, three wrong
+readings, all in one evening — [[proxy-is-not-the-property]].
