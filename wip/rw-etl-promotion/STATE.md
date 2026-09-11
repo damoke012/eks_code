@@ -1125,3 +1125,53 @@ returns zero rows because it queries the Gateway API CRD, not `gateways.networki
 and `curl -s` without `-f` exits 0 on a 403, so an ACL query "returned nothing" when it was
 actually `40301 DESCRIBE_ACLS needs DESCRIBE permission`. Three instruments, three wrong
 readings, all in one evening — [[proxy-is-not-the-property]].
+
+### 2026-09-11 (close) — where RisingWave QA actually stands, and the exact resume sequence.
+
+**Merged and verified tonight:**
+- `risingwave-pipeline` #31 — `kafka_group_id_prefix` read from Secrets Manager, with a
+  `jq -er` guard proven by test to fire on a missing key
+- `risingwave-pipeline` #32 — OIDC role back to `-risingwave-poc-secrets`
+- `iaac-talos` #63 — poc role ARN scoped to its own account and cluster
+- `iaac-talos` #64 — duplicate RisingWave bucket/role removed (the 409s failing QA since 09-10)
+- `qa` GitHub environment — `RISINGWAVE_HOST=rw-sql.op-qa.usxpress.io`, `PORT=4567`,
+  **4567 confirmed open**
+- `op-usxpress-qa/risingwave/kafka` — `kafka__group_id_prefix = dx__qa_risingwave` ✅
+
+**State of QA RisingWave right now:** `kafka_brand` and both MVs were **dropped**
+(`DROP SOURCE ... CASCADE`) to allow the secrets to be recreated. The twelve `kafka_*` secrets
+still hold the OLD derived prefix `qa_kafka_prefix`, which no ACL grants. **QA Brand is
+deliberately mid-flight, not broken.**
+
+**⏸ Blocked on a review:** `ix-kafka-topics-users` **#303** — five lines adding
+`consumer_groups: prefix: risingwave` to `users/risingwave.yml`. All ten checks green,
+`REVIEW_REQUIRED`, auto-merge disabled on that repo, so it needs a human approve + merge.
+Verified safe: all twenty `consumer_groups` prefixes in `users/*.yml` are distinct (no
+`for_each` key collision), and no netradyne topics exist on QA so the 1.8.36 production
+`prevent_destroy` block does not apply to a QA deploy. 1.8.37 shipped to **all** environments
+16:38 today, so their queue is clear.
+
+**Resume sequence, in this order:**
+1. Get #303 approved and merged; wait for a plain `1.8.38` with `qa=Success`
+   (`scripts/octopus-latest-releases.py ix-kafka-topics-users`)
+2. `bash scripts/rw-create-kafka-secrets.sh qa` — now proceeds (no live source), and refuses
+   any prefix not starting with `dx__`
+3. Argo sync the ETL app so the Job recreates Brand
+4. `bash scripts/rw-diagnose-empty-mv.sh qa mv_brand kafka_brand` —
+   **`GroupAuthorizationFailed: 0` is the finish line**, not a green sync
+
+**Separately, for `iaac-talos` releases to reach QA:** add a `development`-scoped
+`TF_VAR_talosconfig_secret_arn` in Octopus
+(`arn:aws:secretsmanager:us-east-2:700736442855:secret:op-usxpress-dev/talosconfig-jZx93J`).
+`production` is empty too and will fail identically.
+
+**Still nobody's:** `qa_brand_management_cdc_brand_avro` retains zero messages
+(`low: 194, high: 194`). No platform change produces a row.
+
+**Three of my own instruments were wrong tonight**, all fixed and committed: the secrets
+script refused on a belief I had already disproven (`000-secrets.rw` IS idempotent); the
+empty-MV diagnostic reported "VPN" for a view that simply did not exist; and a source check
+matched psql's column header as though it were data. Plus three read errors — a VirtualService
+found in the wrong namespace, `kubectl get gateway` hitting the Gateway API CRD, and `curl -s`
+without `-f` hiding a 403. Every one produced a confident wrong statement before the real
+measurement. [[proxy-is-not-the-property]], [[transport-failure-not-a-verdict]].
