@@ -14,6 +14,7 @@ Read-only until the final POST, which is gated on a typed confirmation.
     python3 scripts/file-prod-sso-ticket.py
 """
 import base64
+import os
 import json
 import sys
 import urllib.error
@@ -25,13 +26,24 @@ EMAIL = "doke@usxpress.com"
 PROJECT = "INFRA"
 SITE = "https://usxpress.atlassian.net"
 
-TOKEN = ""
-for ln in (REPO_ROOT / "scripts/push-to-confluence.sh").read_text().splitlines():
-    if ln.startswith("CONFLUENCE_TOKEN="):
-        TOKEN = ln.split("=", 1)[1].strip().strip('"').strip("'")
-        break
+# scripts/push-to-confluence.sh is GITIGNORED -- it carries the Atlassian token and
+# exists only where someone put it. A fresh clone does not have it, so read the env
+# var first and name both sources when neither is present. The old filers assumed the
+# file and died with a bare FileNotFoundError on any other machine.
+TOKEN = os.environ.get("JIRA_API_TOKEN", "")
+src = "JIRA_API_TOKEN"
+tokfile = REPO_ROOT / "scripts/push-to-confluence.sh"
+if not TOKEN and tokfile.exists():
+    for ln in tokfile.read_text().splitlines():
+        if ln.startswith("CONFLUENCE_TOKEN="):
+            TOKEN = ln.split("=", 1)[1].strip().strip('"').strip("'")
+            src = str(tokfile)
+            break
 if not TOKEN:
-    sys.exit("ERROR: no token in scripts/push-to-confluence.sh")
+    sys.exit("ERROR: no Atlassian token. Set JIRA_API_TOKEN, or create "
+             "scripts/push-to-confluence.sh with a CONFLUENCE_TOKEN= line "
+             "(gitignored, so it is absent in a fresh clone).")
+print(f"token from {src}")
 AUTH = "Basic " + base64.b64encode(f"{EMAIL}:{TOKEN}".encode()).decode()
 
 SUMMARY = "Enable AWS SSO cluster access on op-usxpress-prod (INFRA-1661)"
