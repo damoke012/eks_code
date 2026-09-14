@@ -63,3 +63,12 @@ for rel in releases:
         where.append(f"{envs.get(d['EnvironmentId'], d['EnvironmentId'])}={t['State']}")
     print(f"  {rel['Version']:<12} {rel['Assembled'][:19]}  "
           f"{', '.join(where) if where else 'NOT DEPLOYED ANYWHERE'}")
+    # A release freezes its COMMIT as well as its variables, so "is my merge in this
+    # release?" is answered here and nowhere else. Assembly time is a proxy and a merge
+    # landing seconds either side of it flips the answer -- do not reason from the clock.
+    for bi in (rel.get("BuildInformation") or []):
+        commit = (bi.get("VcsCommitNumber") or "")[:12] or "?"
+        branch = bi.get("Branch") or "?"
+        print(f"{'':>15}commit {commit}  branch {branch}  ({bi.get('PackageId', '?')})")
+    if not rel.get("BuildInformation"):
+        print(f"{'':>15}no build information attached -- commit unknown to Octopus")
