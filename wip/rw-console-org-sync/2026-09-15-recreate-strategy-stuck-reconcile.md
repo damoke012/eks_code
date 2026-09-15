@@ -164,3 +164,32 @@ duration, because nothing will report it.
 **Still unmeasured on prod:** whether its console has the RWO PVC and `replicas: 1` that made
 `Recreate` necessary on QA. If it does not, the promotion's premise is worth re-checking for
 prod specifically rather than assumed from QA. One sample is not a population.
+
+### Trap in the "patch first, merge second" sequence — found 2026-09-15 after applying it
+
+The prod live object was patched to `Recreate` ahead of the promotion PR. **That patch is
+only durable if Git already declares `Recreate`.** Flux reconciles prod from `main`; if
+`manifests/op-usxpress-prod/risingwave-console.yaml` still says `RollingUpdate`, the next
+reconcile applies it back and Kubernetes re-defaults the `rollingUpdate` block — restoring
+the exact stale field the patch removed, within one interval.
+
+So the window matters. The repair is **not** a durable pre-mitigation that can sit for days:
+
+- If the prod manifest declares `RollingUpdate` → the patch reverts. Re-apply it at merge time.
+- If the prod manifest declares `Recreate` already → the patch holds, and merging is safe.
+- If the prod manifest declares **no** `strategy` at all → Flux does not manage the field,
+  and the patch holds.
+
+Read the manifest before relying on the patch:
+
+```bash
+gh api repos/variant-inc/iaac-risingwave-onprem/contents/manifests/op-usxpress-prod/risingwave-console.yaml \
+  --jq .content | base64 -d | grep -n -B2 -A4 'strategy:'
+```
+
+Prod's console shape IS confirmed to need `Recreate`, so the promotion premise holds:
+`replicas: 1`, volume `risingwave-console-data`, PVC `ReadWriteOnce` — a rolling update
+deadlocks on multi-attach exactly as on QA. Measured on op-usxpress-prod, 2026-09-15.
+
+Generalisation worth keeping: **a live-object repair that contradicts Git has a shelf life of
+one reconcile interval.** It is a step in a sequence, never a standalone mitigation.
