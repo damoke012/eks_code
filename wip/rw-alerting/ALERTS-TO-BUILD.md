@@ -157,6 +157,20 @@ up**.
   schedule is absent. The absence case is the one that bit us.
 - **Severity:** medium.
 
+### B7. Console metrics datasource unreachable
+QA's console pointed at `prometheus-server.monitoring.svc.cluster.local:9090` for weeks — a
+namespace that **does not exist on that cluster**. The only record was a `TODO: confirm` in the
+config, and a PR nearly deleted the TODO while leaving the address wrong (iaac-risingwave-onprem
+#36, caught in review 2026-09-15). Corrected to
+`prometheus-stack-kube-prom-prometheus.prometheus.svc.cluster.local:9090`.
+
+- **Signal:** resolve and probe every datasource address the console config declares, per
+  cluster. A config value naming a non-existent Service or namespace should fail loudly.
+- **Severity:** low for data, high for trust — a console showing no metrics is usually read as
+  "the cluster is idle".
+- **Generalise:** any hardcoded cross-namespace address in a ConfigMap is worth a resolve check.
+  The addresses differ per cluster and get copied between environments.
+
 ### B6. Certificate expiry
 QA RW's routes are served by the `*.op-qa.usxpress.io` wildcard; the two per-host Certificates
 in `risingwave-routes` are issued but unused.

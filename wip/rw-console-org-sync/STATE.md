@@ -1,6 +1,6 @@
 # iaac-risingwave-onprem #36 — console org sync + Recreate strategy
 
-**Status: Round 1 posted 2026-09-15, awaiting Idris.**
+**Status: ✅ APPROVED 2026-09-15 at e0d9d9f. Round 2 verified all 8 items.**
 Comment: https://github.com/variant-inc/iaac-risingwave-onprem/pull/36#issuecomment-5686295192
 
 Author: ifagbemi-usxpress. Head `fix/console-org-sync-and-recreate-strategy` @ d8623b6, base
@@ -44,3 +44,39 @@ gate between a merge and prod.
 
 What was the QA symptom? The review covers whether the fix is SAFE. Whether it is the RIGHT
 fix depends on what was seen, which is still unstated.
+
+
+## Round 2 — e0d9d9f, APPROVED 2026-09-15
+
+Idris addressed all eight. Each was verified against the branch or the live QA cluster rather
+than the summary; the two claims most worth doubting both held:
+
+- **Prometheus service exists** — `prometheus-stack-kube-prom-prometheus` in namespace
+  `prometheus` on QA, ports 9090/8080. The old address named a `monitoring` namespace that does
+  not exist on that cluster at all.
+- **The RWO PVC is real** — `kind: PersistentVolumeClaim` (90), `accessModes:
+  ["ReadWriteOnce"]` (95), `claimName: risingwave-console-data` (459). With `replicas: 1`,
+  RollingUpdate would deadlock on multi-attach, so `Recreate` is required and the inline
+  comment states a true reason.
+
+Also confirmed: prod reverted out of scope (QA file only), `ON_ERROR_STOP` on all three psql
+calls with `BEGIN`/`COMMIT` around **both** INSERTs, the guard schema-qualified and covering
+`anclax` via `information_schema.schemata`, the tag replaced by a digest rather than appended.
+
+Comments: round 1 `#issuecomment-5686295192`, round 2 `#issuecomment-5687097636`.
+
+## Left open deliberately
+
+**Advisory — a connection failure still reports as a benign skip.** `HAS_TABLES=$(psql …)`
+captures output through command substitution; there is no `set -e` and the exit status is not
+tested. `ON_ERROR_STOP` makes psql exit non-zero, but the script carries on with an empty
+variable, the `if` matches, and it logs *"schema not yet initialized … skipping"* and exits 0.
+An unreachable database is then indistinguishable from a first deploy. Same shape as the bug
+the PR fixes, one layer out. Raised, not blocked on.
+
+**The prod promotion PR still has to happen**, carrying the same eight fixes — and it needs a
+reviewer, because a merge to `main` here IS a production deploy. See
+[[rw-prod-blocked-on-manifests-path]].
+
+**Never answered:** what Doke actually saw in QA. The review establishes the change is safe and
+well made; that it addresses the observed symptom is still unconfirmed.
