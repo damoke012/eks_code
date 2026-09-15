@@ -455,3 +455,30 @@ is a `.sql` file, and every `.sql` file runs against Postgres. Two ways out:
 
 ⚠️ Note the QA service is named `pg-postgresql`; dev has BOTH `pg-postgresql` and
 `postgres-postgresql` as two Services over one pod. Do not copy dev's host value to QA.
+
+## ✅ 2026-09-15 — an empty change set no longer looks like a deploy
+
+Third control added to `pipeline.yaml`, alongside the approval gate and the prod fixture
+guard. Two faults shared one symptom:
+
+1. The changed-files step ends every branch with `|| true`, so a `git diff` that FAILS —
+   empty `github.event.before`, a force-push, a base commit absent from the checkout —
+   produced an EMPTY list rather than an error. "Could not determine what changed" became
+   "nothing changed", and the run went green.
+2. An empty set still ran `execute`: credentials pulled, psql installed, both apply steps
+   silently skipped, success reported. **That exact shape was used earlier the same day as
+   proof the pipeline worked** — it proved only that the steps BEFORE the apply worked.
+
+Fix: a `Verify change detection ran` step that fails CLOSED when detection cannot have run,
+and `if: needs.validate.outputs.changed_count != '0'` on BOTH `approve` and `execute`.
+
+✅ Proven by running it, run 35000081648 on dev: validate green with the notice, approve and
+execute both **skipped**, no human involved. The first attempt gated only `execute`, which
+left every README change parked on a required reviewer — caught by running it, not reviewing
+it. See [[authoring-gate-hooks]].
+
+⚠️ **Patch-script trap, worth more than the fix.** `patch-rw-pipeline-approve-gate.py` had a
+replacement that BEGAN with the same three lines it anchored on, so the anchor survived its
+own substitution and a second run applied the block twice — duplicate `if:` keys, invalid
+YAML. An anchor that survives its own replacement is not an anchor. Every patch script here
+should either consume its anchor or check for its own marker first.
