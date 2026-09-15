@@ -43,6 +43,16 @@ NEW = """  approve:
     if: needs.validate.outputs.changed_count != '0'
 """
 
+# IDEMPOTENCY. NEW begins with the same three lines as OLD, so the anchor still matches
+# after a successful run and a second invocation applies the block AGAIN -- producing
+# duplicate `if:` keys, which is invalid YAML and breaks the workflow. That happened on
+# 2026-09-15 when a failed `git checkout -b` left a patched working tree behind and the
+# next attempt re-applied on top. Refuse when the marker is already present.
+if "changed_count != '0'" in text.split("  execute:")[0].split("  approve:")[-1]:
+    sys.exit("ERROR: the approve job already has the changed_count gate. Nothing to do.\n"
+             "       If the file looks wrong, reset it: git checkout -- "
+             ".github/workflows/pipeline.yaml")
+
 n = text.count(OLD)
 if n != 1:
     sys.exit(f"ERROR: expected exactly 1 approve job header, found {n}.\n"
