@@ -407,3 +407,26 @@ produces this identical silent outage, and QA is where the Brand demo runs.
 ⚠️ Tim's four Brand objects (`brand_source_kafka`, `brand_mv_raw/state/flat`) were frozen at a
 July epoch this entire time. They are in the catalog but processed nothing for 54 days — worth
 telling him rather than letting him discover stale data.
+
+## ✅ 2026-09-15 (end of day) — DDL PROVEN through the pipeline on dev
+
+Run 34993084502, branch `dev`, all green including `Refuse test fixtures on production` (which
+correctly ALLOWED on dev — the guard's wiring proven, not just its logic). Confirmed by
+catalog, not by a green step: `ddl_probe_mv` exists in schema `pipeline_canary`.
+
+So the full chain is proven on dev: push trigger -> env-detect -> prod fixture guard -> SQL
+guardrails -> approval gate -> OIDC with the environment claim -> the computed poc role ->
+Secrets Manager -> in-cluster connection -> CREATE SCHEMA/TABLE/INSERT/MATERIALIZED VIEW.
+
+**Still NOT proven, and the order matters:**
+1. **QA has never run.** Every fix is on the `qa` branch but no QA run exists. QA's coordinates
+   differ — external `rw-sql.op-qa.usxpress.io`, NodePort 32567, not in-cluster DNS — so its
+   first run exercises a path dev did not.
+2. **QA and prod compactors** may carry the same missing-IRSA fault, silently. Check before the
+   Brand demo: [[irsa-webhook-fails-open-at-pod-creation]].
+3. `CREATE SOURCE` is untested anywhere — it needs live Kafka credentials and a topic, and it
+   is what the Brand pipeline actually does first.
+
+Cleanup owed on dev: `pipeline_canary` schema and its two objects, plus
+`pipelines/_connectivity/` on the `dev` branch, once QA is proven and they are no longer the
+reference for what a working run looks like.
