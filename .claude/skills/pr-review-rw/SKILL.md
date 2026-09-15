@@ -217,6 +217,22 @@ Two scripts live under `scripts/` to speed up Phase 3:
       solved it?** RisingWave's prod Entra "app registration request" evaporated on
       2026-08-31 once dev and QA turned out to share one registration — prod was a redirect
       URI and a copied secret. Grep the sibling clusters' manifests first.
+- [ ] **Can this change apply to the object that ALREADY EXISTS?** Reviewing whether a change
+      is *correct* is a different question from whether it can *land*. Server-side apply keeps
+      a field the manifest stops mentioning, so a change to a mutually-exclusive field is
+      rejected forever on a live object while being perfectly valid on a fresh one.
+      `iaac-risingwave-onprem#36` (2026-09-15) switched the QA console to `strategy: Recreate`;
+      the live Deployment still carried the `rollingUpdate` block Kubernetes defaulted onto it,
+      and `spec.strategy.rollingUpdate: Forbidden: may not be specified when strategy type is
+      'Recreate'` failed the dry-run on every reconcile for ~4 hours. **A dry-run failure fails
+      the WHOLE Kustomization**, so every other resource in it froze too, and the PR looked
+      merged and done. Two review rounds asked *why* `Recreate` and never asked *whether it
+      could apply*. The field families to check: `strategy.type` vs `strategy.rollingUpdate`,
+      `spec.selector` and other immutable fields, `clusterIP`, `serviceName`, a Job's
+      `template`, a PVC's `resources.requests.storage` shrinking. Confirm with the live object
+      before approving:
+      `kubectl --context <ctx> -n <ns> get <kind> <name> -o jsonpath='{.spec.strategy}{"\n"}'`
+      and after the merge confirm the **pod** moved, not that the Kustomization says Ready.
 - [ ] **Do the container's listen flags agree with the Service's `targetPort`?** A numeric
       `targetPort` needs no matching `containerPort`, so Kubernetes will not complain about a
       Service that points at a port nothing binds.

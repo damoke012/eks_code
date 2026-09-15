@@ -80,3 +80,23 @@ reviewer, because a merge to `main` here IS a production deploy. See
 
 **Never answered:** what Doke actually saw in QA. The review establishes the change is safe and
 well made; that it addresses the observed symptom is still unconfirmed.
+
+## Postscript — approved, merged, and then it did not apply (2026-09-15)
+
+#36 merged and Flux could not apply it for ~4 hours. The live Deployment still carried
+`spec.strategy.rollingUpdate`, which is Forbidden alongside `type: Recreate`, so the
+server-side-apply dry-run failed and froze the whole `risingwave-onprem` Kustomization —
+not just the console. Repaired by removing the field from the live object; the new template
+then landed (`sync-orgs` present, pod age 118s).
+
+**The review missed it across both rounds.** Item 8 asked *why* `Recreate`, and round 2
+established the reason was sound (RWO PVC, `replicas: 1`, multi-attach deadlock). Neither
+round asked the different question: **can this change apply to the object that already
+exists?** That question is now a checklist item in `pr-review-rw`.
+
+Full write-up, including the dev divergence left open and the PodSecurity warning this
+surfaced: [2026-09-15-recreate-strategy-stuck-reconcile.md](2026-09-15-recreate-strategy-stuck-reconcile.md).
+
+**#37 (`rollingUpdate: null`) is now redundant** — recommend closing rather than merging.
+It fixes the manifest side of a problem that lived in the live object, it carries two
+unexplained red checks, and whether `kustomize build` preserves the null was never tested.

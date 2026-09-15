@@ -224,6 +224,24 @@ A wedged sync-hook Job makes the next sync return in 0s replaying the OLD failur
   a failure.
 - **Severity:** medium.
 
+### C6. A Flux Kustomization stuck in dry-run failure
+On 2026-09-15 `risingwave-onprem` on op-usxpress-qa failed its server-side-apply dry-run on
+every reconcile for ~4 hours — `spec.strategy.rollingUpdate: Forbidden: may not be specified
+when strategy type is 'Recreate'` — because the live Deployment carried a field the manifest
+had stopped mentioning. **A dry-run failure fails the whole Kustomization**, so `risingwave-onprem`
+and `risingwave-operator` were both frozen while the merged PR looked done. Nobody was told;
+it was found by a human looking at QA.
+
+- **Signal:** `gotk_reconcile_condition{type="Ready",status="False"}` on any `Kustomization`
+  for > 15 minutes. Distinct from C4: C4 is a stale revision, this is a reconcile that is
+  actively erroring. Route the condition **message** into the alert — `dry-run failed (Invalid)`
+  names the resource and the field, which is the whole diagnosis.
+- **Severity:** high. This is the alert that turns "merged" into "applied", and its absence is
+  why a four-hour outage of the delivery path went unnoticed on a cluster we look at daily.
+- **Note:** C4's *stale revision* check would NOT have fired here — `lastAppliedRevision` sat
+  at the previous good sha and the GitRepository had moved, so a trailing-revision rule needs
+  the not-Ready condition alongside it to be useful.
+
 ---
 
 ## 4. Do not alert on these — they are the signals that misled us
@@ -238,6 +256,8 @@ A wedged sync-hook Job makes the next sync return in 0s replaying the OLD failur
 | `rw_catalog` object presence | Tim's Brand objects existed throughout a 54-day freeze. |
 | A readinessProbe on a management port | ghostunnel's 9090 probe cannot see the 5432 data port. |
 | An empty query result | Three times in one day an empty result was an expired token or a wrong kubeconfig, not an absence. |
+| A merged PR | #36 merged and was **never applied** for 4 hours; QA kept running the pre-merge pod. Merged is not deployed. |
+| `Applied revision: <sha>` | A claim about the apply attempt. Finish at the **pod**: its age, and a field only the new template has. |
 
 **The pattern behind all of them:** a true success report about the step *next to* the one that
 matters. Prefer alerts that measure the property the user cares about — can a query run, can an
