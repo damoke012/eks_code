@@ -48,9 +48,15 @@ Flux then reconciled on its own interval and the new template landed.
 - After: `risingwave-console-5cb7cfb7c6-dvqbz`, age 118s, init containers
   `fix-data-dir init-db sync-orgs render-config gen-dex-cert`, `strategy.type=Recreate`,
   both RisingWave Kustomizations Ready at `main@62e56b3d`.
-- **Only pre-existing Deployments can hit this.** A freshly created object has no stale
-  field, so prod's console (no `manifests/op-usxpress-prod/` yet, INFRA-1674) will apply
-  clean first time.
+- **Only pre-existing Deployments can hit this.** A freshly created object has no stale field.
+  ~~So prod's console (no `manifests/op-usxpress-prod/` yet, INFRA-1674) will apply clean first
+  time.~~ **WRONG, corrected 2026-09-15 by measuring instead of inferring.** op-usxpress-prod
+  *already runs* `deploy/risingwave-console` and its live strategy is
+  `{"rollingUpdate":{"maxSurge":"25%","maxUnavailable":"25%"},"type":"RollingUpdate"}` —
+  identical to QA before the repair. INFRA-1674 is about the *platform* manifests path; the
+  console has had `manifests/op-usxpress-prod/risingwave-console.yaml` since #36 round 1.
+  **Prod will hit this wall, and on this repo a merge to `main` is a production deploy with no
+  gate — so it would fail unattended and freeze `risingwave-onprem` on prod.**
 
 ## Tested and killed
 
@@ -120,3 +126,41 @@ Ready condition message, which for this failure names the resource and the exact
 field. Its self-test (`flux-kustomization-health.test.sh`, 8 cases) exists because the first
 version printed *"all 4 Kustomizations Ready"* from a SyntaxError in its own parser — the
 [[prod-incident-instrument-check]] trap, caught by testing the instrument rather than shipping it.
+
+## Prod: the same trap, armed, on a repo with no gate (2026-09-15)
+
+```
+op-usxpress-prod  ns risingwave  deploy/risingwave-console
+{"rollingUpdate":{"maxSurge":"25%","maxUnavailable":"25%"},"type":"RollingUpdate"}
+```
+
+Byte-identical to QA before the repair. The prod promotion PR carries `strategy: Recreate`,
+so on merge Flux's dry-run fails, `risingwave-onprem` freezes on **prod**, and every resource
+in it stops applying. No Octopus release, no approval environment, no promotion gate — a merge
+to `main` here IS the deploy. And no Alertmanager on prod either, so the only signal would be
+someone noticing, exactly as on QA.
+
+**Sequence that avoids it — the patch first, the merge second:**
+
+1. Remove the stale field from the live prod object. **This is non-disruptive on its own** —
+   proven on QA today: a `strategy` change does not alter the pod template, so no new
+   ReplicaSet and no restart. This is a PRODUCTION MUTATION and is not run from this repo
+   (standing rule 1); it is drafted here for whoever runs it under the normal change process.
+
+   ```bash
+   kubectl --kubeconfig /home/doke/.kube/op-usxpress-prod.yaml -n risingwave \
+     patch deploy risingwave-console --type=json \
+     -p '[{"op":"remove","path":"/spec/strategy/rollingUpdate"},
+          {"op":"replace","path":"/spec/strategy/type","value":"Recreate"}]'
+   ```
+
+2. Confirm `{"type":"Recreate"}` and that the pod did **not** restart.
+3. Then merge the promotion PR. The new template lands, the console restarts once — which
+   `Recreate` implies anyway and which the promotion was always going to cause.
+
+Doing it the other way round — merge first, repair after — means a prod freeze of unknown
+duration, because nothing will report it.
+
+**Still unmeasured on prod:** whether its console has the RWO PVC and `replicas: 1` that made
+`Recreate` necessary on QA. If it does not, the promotion's premise is worth re-checking for
+prod specifically rather than assumed from QA. One sample is not a population.
