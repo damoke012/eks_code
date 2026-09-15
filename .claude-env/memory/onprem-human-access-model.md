@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: e3125f37-c991-4364-adf2-b40770a2d61c
-  modified: 2026-08-24T20:15:00.000Z
+  modified: 2026-09-14T17:02:26.679Z
 ---
 
 **✅ LIVE on `op-usxpress-qa` 2026-07-28.** `kubectl auth whoami` → `sso:doke@usxpress.com`, groups
@@ -35,6 +35,67 @@ is the flag. Confirmed in `iaac-talos` `feat/aws-iam-authenticator`:
 `"authentication-token-webhook-config-file" = "/var/lib/aws-iam-authenticator/kubeconfig.yaml"`
 with `# HOST path. The authenticator's own log prints the in-container path; not this one.`
 An apiserver pointed at a missing file will not start.
+
+⛔ **2026-09-14 — and the assignment needs the MANAGEMENT account, proven not assumed.**
+Tracked as **INFRA-1691**. `aws sso-admin list-instances --profile usx-prod --region us-east-1`
+works from the prod account and returns instance `ssoins-7223eb10c0b8ac39`, identity store
+`d-90676260a8`, owner `660075424663` — `ListInstances` is readable from any member account, so a
+result there proves nothing about write access. The very next call,
+`ListPermissionSetsProvisionedToAccount`, returns `AccessDeniedException` for
+`AWSReservedSSO_AWSAdministratorAccess_0b53d95be3ef34c5`. **Being an administrator of the prod
+account grants nothing in Identity Center.** Same wall as
+[[argocd-sso-blocked-on-management-account]]. Home region is **us-east-1**; us-east-2 returns an
+empty `Instances` list, which reads like "no access" and is really "wrong region".
+
+⛔ **2026-09-14 — prod SSO is blocked on an ASSIGNMENT, not on the cluster.** Prod passes every
+cluster-side pre-flight: authenticator DaemonSet 3/3 (20d), `kubeconfig.yaml` present on all three
+CPs (10.10.82.186/.187/.188, 1909 bytes, Aug 24), and `aws-auth` mapping prod's own ARN
+`937464026810:role/AWSReservedSSO_usx-on-prem-admins_837df2a43495aaf1`. But a profile assuming
+that permission set fails at login: `ForbiddenException ... No access` from `GetRoleCredentials`.
+The ROLE EXISTS (visible via `aws iam list-roles --profile usx-prod`) — existence is not
+assignment, and `list-roles` succeeding proves only the former. Doke holds
+`AWSAdministratorAccess` on prod, which `aws-auth` deliberately does not map. So enabling
+`TF_VAR_enable_aws_iam_authenticator` on production today would flip a prod control-plane setting
+and grant nobody anything. **Order: assign `usx-on-prem-admins` in Identity Center FIRST, prove
+`aws sts get-caller-identity --profile op-prod`, then enable the flag.** Prod stays break-glass
+until then, which matches the recorded posture. Dev is untested and likely the same shape.
+
+✅ **2026-09-14 (same day) — FIXED, and QA SSO is proven at the apiserver for the first time.**
+`iaac-talos` **#65** lifted the five Terraform files off `feat/aws-iam-authenticator` onto current
+master (the branch was diverged 10/9 and also carried `deploy/deploy.ps1` and two octopus scripts —
+left behind deliberately). Merged, 8/8 checks, released as `0.2.0`.
+⚠️ **`0.2.0` could not reach qa**: the `iaac-release` lifecycle makes `development` phase 1, dev's
+deploy failed, and qa stayed locked. Deploying the **branch prerelease**
+`0.2.0-feat-INFRA-1661-apiserver-authenticator-webhook.1.243` (same commit `25b8ba3`) went straight
+to qa — prereleases sit on a different channel with its own lifecycle. That is the way past a jammed
+master lifecycle, and it is how QA also got the RisingWave IRSA fixes earlier the same day.
+`Apply complete! Resources: 0 added, 3 changed, 0 destroyed.` All three CP apiservers restarted
+(2m47s–3m15s, 1/1, 0 restarts) and now carry
+`--authentication-token-webhook-config-file=/var/lib/aws-iam-authenticator/kubeconfig.yaml` plus
+`--authentication-token-webhook-cache-ttl=2m0s`. `kubectl auth whoami` →
+`sso:doke@usxpress.com`, groups `[onprem-platform-admins system:authenticated]`.
+**Pre-flight that made this safe, do it again for dev and prod:** `talosctl ls -l
+/var/lib/aws-iam-authenticator` on EVERY control plane IP (qa: 10.10.82.24/.25/.177) and confirm
+`kubeconfig.yaml` is present — the apiserver will not start without it, and the VIP only answers
+for one node, so one listing is not the population. Dev and prod still lack the flag; they need
+their own Octopus `TF_VAR_enable_aws_iam_authenticator` (the `envs/*.tfvars` line does nothing,
+Octopus never reads `-var-file`).
+
+🔴 **2026-09-14 — THE PREDICTED REGRESSION HAPPENED.** QA was deployed from master
+(`0.1.3-fix-drop-duplicate-risingwave-irsa.1.240`, TfApply=true) at 14:18Z to ship the
+RisingWave IRSA fixes. Master has no `enable_aws_iam_authenticator` anywhere, so the apply
+rewrote the Talos apiServer config without the webhook flag. **QA SSO died silently**, exactly
+as the paragraph below said it would. Measured after the fact: all three QA apiservers run only
+`--anonymous-auth=false` and `--authorization-config=…`; no `--authentication-token-webhook-config-file`.
+`aws-auth` is intact and correct, the DaemonSet is 3/3 with 0 restarts and 47d uptime, cluster
+IDs match, client is 0.7.18 — and the authenticator logs **nothing** on a login attempt, because
+the apiserver never calls it. The tell in its log is at `14:19:43Z`:
+`Unable to re-establish watch … dial tcp 10.96.0.1:443: connect: operation not permitted`,
+the apiserver reloading mid-apply. Dev and prod lack the flag too (they never had it).
+**Fix: merge `feat/aws-iam-authenticator` to master, then redeploy QA.** Until then every
+iaac-talos deploy to QA re-breaks SSO. Break-glass `~/.kube/op-usxpress-qa.yaml` (x509) is
+unaffected and is how QA was diagnosed. I first blamed an expired SSO session, then a recreated
+permission set, then exonerated the deploy entirely — all three wrong; the note below had it.
 
 ⚠️ **QA's apiserver flag is on an UNMERGED branch.** `variant-inc/iaac-talos`
 `feat/aws-iam-authenticator` (head `ca5479f`) holds the whole Talos half —

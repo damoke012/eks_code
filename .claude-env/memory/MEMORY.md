@@ -58,6 +58,8 @@
 - [Kustomize index patches are fragile](kustomize-index-patches-are-fragile.md) — `/spec/data/3/...` breaks or silently retargets when the base list changes length; render every overlay, patch by value not position
 - [Conventional commits drive releases](conventional-commits-drive-releases.md) — no `fix:`/`feat:` prefix = no version bump = no new package, and the workflow still goes green; check package version == release version
 - [TF state bucket is per-account](terraform-state-bucket-is-per-account.md) — dev/QA/prod each have their own `lazy-tf-state-*`; a copied backend 403s on first state read, never at init
+- [Two projects, one resource](two-projects-one-resource.md) — iaac-talos and iaac-risingwave-onprem both declare RisingWave's Hummock bucket + IRSA role; NEVER import to fix a 409, remove the duplicate or a destroy deletes the object store
+- [Confluent registry master per account](ccloud-registry-master-per-account.md) — schema-registry creds are ONE secret per AWS account that consumers copy; Confluent is managed in iaac-confluent-cloud, so look for the repo before looking for an admin
 - [Octopus releases freeze variables](octopus-release-freezes-variables.md) — a release snapshots project variables at creation; correcting a variable never reaches an existing release until the snapshot is refreshed
 - [Jira board 322 / sprint topology](jira-board-sprint-topology.md) — sprint ids incl. UI Sprint 4 = 1041 (state=future, never started); bad token reads as 404/permissions, API-created tickets land in the backlog, openSprints() misses an unstarted sprint
 - [Policy cannot fix what stops it running](policy-cannot-fix-what-stops-it-running.md) — Prometheus retention could not recover a full disk; free the resource from OUTSIDE first, then set the policy, then make Git match
@@ -65,3 +67,6 @@
 - [Config can outrun the image](config-can-outrun-the-image.md) — a ConfigMap key the running image predates is silently ignored; the tell is the absent log line, and verifying a regex is not verifying the code that runs it
 - [Failed hook Job makes the next sync a no-op](failed-hook-job-makes-sync-a-noop.md) — the operation returns in 0s replaying the OLD failure; compare startedAt with finishedAt before believing a failed sync
 - [Read-only rootfs needs a /tmp volume](readonly-rootfs-needs-a-tmp-volume.md) — readOnlyRootFilesystem + no emptyDir broke every `mktemp`; the QA ETL Job could not apply a single file for weeks
+- [RW database is named `dev` everywhere](rw-database-is-named-dev-everywhere.md) — verified by SQL on QA; RW_DB must never be set to the environment name
+- [Two GHA roles, one pipeline repo](two-gha-roles-one-pipeline-repo.md) — secret.yaml must assume the *poc* role (/risingwave/*), not the pipeline role (/risingwave-2/*, dev-only)
+- [RW Kafka SA lacks a group binding](rw-kafka-sa-lacks-group-binding.md) — sa-81m660q reads topics but cannot join a consumer group; empty MV is authz, not a bad key

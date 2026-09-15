@@ -200,3 +200,42 @@ so it is never touched again.
 user and grant, then dies reconciling console UI ownership against `anclax.users`, a
 schema only the console creates. The users and grants DO get applied; what you get is a
 permanently red Job, not a missing service account.
+
+## ✅ 2026-09-15 — settled by SQL: dev's pipeline target `risingwave-2` is EMPTY, and that is not a mapping bug
+
+`risingwave-pipeline`'s `pipeline.yaml` maps dev -> `risingwave-2`. Challenged on 2026-09-15
+("it's supposed to be the RW namespace, we use RW-2 for platform"). The mapping is **correct**
+and must not be changed. Two independent proofs, neither of them anyone's recollection:
+
+1. **Object inventory over `rw_catalog`, both dev instances, same session:**
+
+| namespace | sources | MVs | sinks |
+|---|---|---|---|
+| `risingwave` | `brand_source_kafka` | `brand_mv_raw`, `brand_mv_state`, `brand_mv_flat` | none |
+| `risingwave-2` | **none** | **none** | **none** |
+
+2. **Namespace ages arithmetic to the May record.** `risingwave` 138d -> created ~2026-04-30;
+   `wip/rw2-sql-cicd/risingwave_2_progress_log.md` on 2026-05-26 records "Tim's `risingwave` ns
+   RUNNING=True, **26d**, completely untouched" -> ~2026-04-30. Same namespace.
+   `risingwave-2` 111d -> ~2026-05-27, the day after that log created it.
+
+**So the four Brand objects on dev are TIM's**, built by hand from the `CREATE SOURCE` pattern he
+shared in Teams on 2026-05-26 — not pipeline output. `risingwave-2` is empty because the pipeline
+has **never completed a run** (three runs ever, all on master, all failed at "Pull Postgres
+credentials"), not because it is pointed at the wrong place.
+
+⛔ **Repointing dev to `risingwave` would put Tim's working objects inside the blast radius of
+every merge to `dev`** — the workflow issues DROP and CREATE. Protect-RW applies: that namespace
+is Tim's and coordination is mandatory. See [[two-gha-roles-one-pipeline-repo]].
+
+⚠️ **The naming is the trap, and it is permanent.** dev's platform instance is `risingwave-2`;
+QA's and prod's are `risingwave`. So the role named **poc** (grants `.../risingwave/*`) is the one
+QA and prod's *platform* pipeline must assume, and the role named **pipeline**
+(grants `.../risingwave-2/*`) is dev-only. The names mean the opposite of what they read like.
+Anyone "tidying" this will break QA.
+
+🔴 **Real gap this exposed: dev is not a rehearsal environment for QA.** The platform instance on
+dev has zero sources, MVs and sinks, and `op-usxpress-dev/risingwave-2/*` holds only postgres,
+root, console_license_key and secret_store_private_key — **no kafka, no mongodb**. So a pipeline
+change cannot be proven on dev before it reaches QA today. Closing that needs the Kafka
+credential at `op-usxpress-dev/risingwave-2/kafka` and one successful dev run.
