@@ -31,9 +31,21 @@ kubectl --kubeconfig "$KCFG" -n "$NS" get svc -o name | sed 's|^service/||' \
   | grep -E '^(pg|postgres)-postgresql$' | tee /tmp/rw-pg-candidates.txt
 echo
 
-PORT=15432
+# A LOCAL PORT PER CANDIDATE, and the port must be FREE before we start. The first
+# version of this script reused one port and killed the previous forward without waiting
+# for the socket to be released. A still-listening forward makes the next `port-forward`
+# fail to bind while the readiness probe succeeds -- against the STALE tunnel. Both
+# servers then report the first server's contents, byte for byte, and it reads as
+# "they are identical" rather than "the instrument lied".
+PORT=15431
 for SVC in $(cat /tmp/rw-pg-candidates.txt); do
-  echo "===== $SVC.$NS.svc.cluster.local"
+  PORT=$((PORT + 1))
+  echo "===== $SVC.$NS.svc.cluster.local  (local :$PORT)"
+
+  if (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
+    echo "  local port $PORT is ALREADY in use -- refusing to probe through someone"
+    echo "  else's tunnel. Close it and re-run."; echo; continue
+  fi
 
   # Find a credential secret that actually opens THIS server. Try each, keep the first
   # that authenticates -- an unusable password looks identical to a wrong host otherwise.
@@ -42,8 +54,9 @@ for SVC in $(cat /tmp/rw-pg-candidates.txt); do
   for _ in $(seq 1 20); do (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null && break; sleep 0.5; done
   if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
     echo "  port-forward never came up -- skipping, NOT concluding anything about $SVC"
-    kill $PF 2>/dev/null; echo; continue
+    kill $PF 2>/dev/null; wait $PF 2>/dev/null; echo; continue
   fi
+  kill -0 $PF 2>/dev/null || { echo "  port-forward died; something else holds :$PORT"; echo; continue; }
 
   OPENED=""
   for SEC in pg-credentials risingwave-pg-credentials; do
@@ -69,9 +82,13 @@ for SVC in $(cat /tmp/rw-pg-candidates.txt); do
     done
   done
   [ -n "$OPENED" ] || echo "  no secret in $NS authenticated against $SVC -- credentials live elsewhere"
-  kill $PF 2>/dev/null
+  kill $PF 2>/dev/null; wait $PF 2>/dev/null
   echo
 done
 rm -f /tmp/rw-pg-candidates.txt
+echo "If both servers report IDENTICAL databases and counts, check whether they are two"
+echo "Services in front of ONE Postgres before believing they are two clones:"
+echo "  kubectl -n risingwave get endpoints pg-postgresql postgres-postgresql"
+echo
 echo "Pick the server whose databases hold the application's tables."
 echo "A meta store database (risingwave / risingwave_meta) is RisingWave's own, not the pipeline's."
