@@ -68,7 +68,5 @@
 - [Failed hook Job makes the next sync a no-op](failed-hook-job-makes-sync-a-noop.md) — the operation returns in 0s replaying the OLD failure; compare startedAt with finishedAt before believing a failed sync
 - [Read-only rootfs needs a /tmp volume](readonly-rootfs-needs-a-tmp-volume.md) — readOnlyRootFilesystem + no emptyDir broke every `mktemp`; the QA ETL Job could not apply a single file for weeks
 - [RW database is named `dev` everywhere](rw-database-is-named-dev-everywhere.md) — verified by SQL on QA; RW_DB must never be set to the environment name
-- [GHA OIDC needs the environment claim](gha-oidc-needs-environment-claim.md) — a job's sub carries environment:<name> only if it declares `environment:`; same cause silently empties environment-scoped secrets
-- [Computed value nobody consumes](computed-value-never-consumed.md) — pipeline.yaml computed the role ARN, published it, and assumed a hardcoded dev-account literal; both ends review clean
 - [Two GHA roles, one pipeline repo](two-gha-roles-one-pipeline-repo.md) — secret.yaml must assume the *poc* role (/risingwave/*), not the pipeline role (/risingwave-2/*, dev-only)
 - [RW Kafka SA lacks a group binding](rw-kafka-sa-lacks-group-binding.md) — sa-81m660q reads topics but cannot join a consumer group; empty MV is authz, not a bad key
