@@ -385,3 +385,25 @@ read the current state as "approvals are reviewed".
 Method note: verified by triggering a run and watching it stop, per [[authoring-gate-hooks]] --
 "verify by running it, not by merging it". The API returning the rule proves registration, not
 that the gate blocks.
+
+
+## 🔴→✅ 2026-09-15 — dev RisingWave was storage-dead for 54 days. Fixed by one pod restart.
+
+`risingwave-compactor-default` on op-usxpress-dev had NO AWS credentials — the IRSA webhook
+never injected them at pod creation and `failurePolicy: Ignore` meant nothing said so. Hummock
+compaction was therefore dead since ~2026-07-23: L0 stuck at 359 SSTs, no epoch could commit,
+and every `CREATE TABLE` hung at 0.0% forever. Meta, compute and frontend all HAD credentials —
+only the compactor was affected, and that was enough to freeze the instance.
+
+Everything reported healthy the whole time: 4/4 workers RUNNING, pods 1/1, no alerts.
+
+Fixed with `rollout restart deployment risingwave-compactor-default`; `CREATE TABLE` then
+succeeded in seconds. Full mechanism in [[irsa-webhook-fails-open-at-pod-creation]].
+
+⚠️ **Check QA and prod before their compactors next restart.** Same operator, same webhook,
+same `failurePolicy: Ignore`. A compactor recreated during any webhook blip on either cluster
+produces this identical silent outage, and QA is where the Brand demo runs.
+
+⚠️ Tim's four Brand objects (`brand_source_kafka`, `brand_mv_raw/state/flat`) were frozen at a
+July epoch this entire time. They are in the catalog but processed nothing for 54 days — worth
+telling him rather than letting him discover stale data.

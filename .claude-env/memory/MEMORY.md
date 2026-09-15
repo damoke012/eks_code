@@ -70,6 +70,7 @@
 - [RW database is named `dev` everywhere](rw-database-is-named-dev-everywhere.md) — verified by SQL on QA; RW_DB must never be set to the environment name
 - [Computed value nobody consumes](computed-value-never-consumed.md) — pipeline.yaml computed the role ARN, published it, and assumed a hardcoded dev-account literal; both ends review clean
 - [GHA OIDC needs the environment claim](gha-oidc-needs-environment-claim.md) — a job's sub carries environment:<name> only if it declares `environment:`; same cause silently empties environment-scoped secrets
+- [IRSA webhook fails open at pod creation](irsa-webhook-fails-open-at-pod-creation.md) — failurePolicy Ignore meant one compactor pod ran 88 days with NO AWS credentials; dev RisingWave was storage-dead 54 days, all green
 - [Masked secret reads as a network fault](masked-secret-reads-as-network-fault.md) — a stale port in a masked CI secret times out like a blocked path; re-set coordinates before investigating the network
 - [Two GHA roles, one pipeline repo](two-gha-roles-one-pipeline-repo.md) — secret.yaml must assume the *poc* role (/risingwave/*), not the pipeline role (/risingwave-2/*, dev-only)
 - [RW Kafka SA lacks a group binding](rw-kafka-sa-lacks-group-binding.md) — sa-81m660q reads topics but cannot join a consumer group; empty MV is authz, not a bad key
