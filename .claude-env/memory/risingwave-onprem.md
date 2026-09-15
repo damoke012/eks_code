@@ -430,3 +430,28 @@ Secrets Manager -> in-cluster connection -> CREATE SCHEMA/TABLE/INSERT/MATERIALI
 Cleanup owed on dev: `pipeline_canary` schema and its two objects, plus
 `pipelines/_connectivity/` on the `dev` branch, once QA is proven and they are no longer the
 reference for what a working run looks like.
+
+## ✅ 2026-09-15 — QA PROVEN (RisingWave leg). First QA run in the repo's history.
+
+Run 34994175151, branch `qa`, green: OIDC with the `environment:qa` claim, the qa poc role,
+both Secrets Manager reads, and `Execute RW files` across QA's own path — out of the **dev**
+cluster (where the ARC runner lives), over `rw-sql.op-qa.usxpress.io`, back in on NodePort
+**32567**. Confirmed by catalog: `pipeline_canary.ddl_probe_mv` exists on QA.
+
+✅ **QA's compactor HAS IRSA**, as do meta, compute and frontend. So the 54-day dev outage
+([[irsa-webhook-fails-open-at-pod-creation]]) is dev-only. **Prod is still unchecked.**
+
+🔴 **QA's `.sql` leg CANNOT RUN — no external route to Postgres.** QA has `pg-postgresql` as a
+ClusterIP and `ghostunnel-rw-postgres` as a ClusterIP; there is **no NodePort for Postgres**,
+unlike `risingwave-frontend-ext`. That is why the `qa` GitHub environment has only
+`RISINGWAVE_HOST` and `RISINGWAVE_PORT` and no `POSTGRES_*` — the value could not have existed.
+
+**This blocks the real Brand promotion, not just the canary**: `pipelines/Brand/300-transform.sql`
+is a `.sql` file, and every `.sql` file runs against Postgres. Two ways out:
+1. Fix `ghostunnel-rw-postgres` — it listens on `:4567` while its Service maps 5432
+   (INFRA-1654, unfixed since June), AND add a probe on the data port, or the next copy is
+   equally undetectable. See the 2026-08-20 block above.
+2. Add a Postgres NodePort mirroring `risingwave-frontend-ext`.
+
+⚠️ Note the QA service is named `pg-postgresql`; dev has BOTH `pg-postgresql` and
+`postgres-postgresql` as two Services over one pod. Do not copy dev's host value to QA.
