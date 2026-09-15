@@ -79,3 +79,25 @@ AWS that is `--profile` **and** `--region` on every regional call. A command tha
 hit more than one region is a bug even when it works. Three defects in one new checker
 (tokenising filter, wrong namespace, unpinned region) all produced confident false
 absences — which is why a new probe disagreeing with proven evidence is the suspect.
+
+## 2026-09-15 — a reused local port makes two different targets report the same thing
+
+Probing two Postgres Services on op-usxpress-dev, a script port-forwarded both through the
+same local port and killed the previous forward without waiting for the socket to close. The
+second `kubectl port-forward` then failed to bind while the readiness probe
+(`exec 3<>/dev/tcp/127.0.0.1/$PORT`) **succeeded against the stale tunnel**. Both targets
+printed byte-identical databases and table counts.
+
+That reads as a finding — "the two servers are clones" — and it is not one. The giveaway was
+the previous run of the same script reporting "port-forward never came up" for the second
+target, then the next run reporting full output for it with nothing changed.
+
+**How to apply:** when a probe visits several targets in one loop, give each its own local
+port, refuse to start if the port is already listening, and confirm the forwarder is still
+alive after the readiness check (`kill -0 $PF`). A readiness probe that only asks "is
+something listening here?" cannot tell your tunnel from somebody else's.
+
+**And prefer the check that needs no tunnel.** `kubectl get endpoints svc-a svc-b` answered
+"one server or two?" outright — same pod IP, same selector — while the tunnelled probe was
+still producing a plausible wrong answer. Related: [[proxy-is-not-the-property]],
+[[transport-failure-not-a-verdict]].
