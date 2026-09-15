@@ -193,3 +193,50 @@ deadlocks on multi-attach exactly as on QA. Measured on op-usxpress-prod, 2026-0
 
 Generalisation worth keeping: **a live-object repair that contradicts Git has a shelf life of
 one reconcile interval.** It is a step in a sequence, never a standalone mitigation.
+
+## The IaC fix: `rollingUpdate: null` — TESTED, it survives the build (2026-09-15)
+
+The open question through this whole investigation was whether `kustomize build` strips a
+null-valued field. **It does not.** Measured, not inferred:
+
+```
+$ kubectl kustomize .        # kubectl v1.36.2, Kustomize v5.8.1
+  strategy:
+    rollingUpdate: null
+    type: Recreate
+```
+
+**This reverses the recommendation to close PR #37 on its merits.** `rollingUpdate: null` is
+the declarative way to express "remove this field", it survives the build, and Flux's
+server-side apply treats a null in the applied configuration as a removal. It is the answer
+for every environment whose live object still carries the field — which is dev and prod.
+
+Correcting my own position, stated twice earlier in this investigation: I recommended closing
+#37 because QA no longer needed it after the manual repair. True of QA, and irrelevant to the
+question Doke was actually asking — *make this IaC, not a patch*. A `kubectl patch` is not a
+fix, it is a repair; the fix is the manifest.
+
+### Where each environment stands
+
+| Env | Live object | Git declares | IaC-complete? |
+|---|---|---|---|
+| QA | `Recreate`, field gone | `Recreate` | **Yes** — Git and cluster agree, nothing outstanding |
+| dev | `RollingUpdate` + field | `RollingUpdate` | No — needs `Recreate` + `rollingUpdate: null` |
+| prod | `Recreate` (patched 2026-09-15), field gone | not yet verified | No — the patch is not durable, see the reconcile trap above |
+
+### Dev is the proof, and it costs nothing
+
+Dev's live object still carries the stale field, so it is the only place left where the
+declarative fix can be **observed working end to end**. Ship `Recreate` + `rollingUpdate: null`
+in the dev manifest, merge, run **no** manual patch, and watch whether Flux removes the field
+on its own. That answers the one residual unknown — whether Flux's kustomize-controller build
+behaves like the v5.8.1 binary tested here — on the cluster where being wrong is cheap.
+
+If dev proves it, prod's promotion carries the same null and **needs no `kubectl patch` at
+all**, which also disposes of the reconcile-revert trap: Git declares the removal, so there is
+nothing for a reconcile to undo.
+
+### Residual uncertainty, stated plainly
+
+The test used kubectl's embedded Kustomize v5.8.1. Flux's kustomize-controller ships its own
+build and its version is unverified here. That is exactly why dev goes first.
