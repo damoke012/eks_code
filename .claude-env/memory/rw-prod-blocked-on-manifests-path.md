@@ -53,3 +53,27 @@ op-usxpress-prod has the `shared-http` Istio Gateway (80, 443) but **no `tcp-pas
 exposes both ports, so only the Gateway resource is missing — `rw-sql` and `rw-postgres`
 would resolve, reach a platform node, and route nowhere. Lives in `iaac-talos-flux-platform`,
 `op-prod` branch, under `infrastructure/`. See [[onprem-ingress-dns-convention]].
+
+## ⛔ CORRECTED 2026-09-15 — prod's manifests path EXISTS and prod reconciles it from `main`
+
+The block above (INFRA-1674, "absent by design until iaac-risingwave-onprem gets
+manifests/op-usxpress-prod") is **out of date**. Verified on op-usxpress-prod:
+
+```
+gitrepository/iaac-risingwave-onprem   main@sha1:c4b360…   Ready   13d
+kustomization/risingwave-onprem        Applied revision: main@sha1:c4b360…   Ready  13d
+kustomization/risingwave-operator      Applied revision: main@sha1:c4b360…   Ready  13d
+```
+
+`manifests/op-usxpress-prod/` exists and carries at least `risingwave-console.yaml`.
+
+⚠️ **The consequence is the part to remember: a merge to `main` on
+`variant-inc/iaac-risingwave-onprem` is a PRODUCTION DEPLOY.** No Octopus release, no TfApply
+gate, no approval environment — Flux applies it. That is a different risk model from the
+branch-per-env repos (`iaac-talos-flux-platform` uses `op-<env>` branches, and prod's
+`risingwave-routes` still comes from `op-prod`). Both models are in play on the same cluster
+at the same time; check which one applies before assuming a merge is safe.
+
+First instance found the same day: PR #36 changed the QA and prod console manifests together
+with `strategy: Recreate`, with no reviewer assigned. See
+`wip/rw-console-org-sync/STATE.md`.
