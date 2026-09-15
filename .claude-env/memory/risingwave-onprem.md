@@ -201,7 +201,8 @@ user and grant, then dies reconciling console UI ownership against `anclax.users
 schema only the console creates. The users and grants DO get applied; what you get is a
 permanently red Job, not a missing service account.
 
-## ✅ 2026-09-15 — settled by SQL: dev's pipeline target `risingwave-2` is EMPTY, and that is not a mapping bug
+## ⛔ CORRECTED SAME DAY — see the 2026-09-15 (late) block at the end of this file.
+## ✅ 2026-09-15 — settled by SQL: dev's pipeline target `risingwave-2` is EMPTY
 
 `risingwave-pipeline`'s `pipeline.yaml` maps dev -> `risingwave-2`. Challenged on 2026-09-15
 ("it's supposed to be the RW namespace, we use RW-2 for platform"). The mapping is **correct**
@@ -239,3 +240,39 @@ dev has zero sources, MVs and sinks, and `op-usxpress-dev/risingwave-2/*` holds 
 root, console_license_key and secret_store_private_key — **no kafka, no mongodb**. So a pipeline
 change cannot be proven on dev before it reaches QA today. Closing that needs the Kafka
 credential at `op-usxpress-dev/risingwave-2/kafka` and one successful dev run.
+
+
+## ✅ 2026-09-15 (late) — Idris settled it: the pipeline belongs on `risingwave` in dev too
+
+Asked directly, "should the pipeline be RW or RW-2?" — **"rw. rw-2 is ours."**
+
+This CORRECTS the block above, which read the empty `risingwave-2` as "the pipeline has
+simply never run" and concluded the mapping was fine. The inventory was right; the
+conclusion drawn from it was wrong.
+
+**The axis is purpose, not ownership.** `risingwave` on op-usxpress-dev is the
+APPLICATION's dev environment — it is where Tim's SQL pipeline, the thing under test,
+actually runs, and it holds the only Brand objects that exist on dev. `risingwave-2` was
+stood up 2026-05-27 as the PLATFORM team's sandbox, created precisely so our CI/CD work
+could not disturb Tim's. Pointing the application's own pipeline into our sandbox
+inverted that: it protected Tim from the pipeline that is supposed to drive his objects.
+
+⚠️ **The reasoning trap, worth more than the fact.** "That namespace is Tim's, so keep
+the pipeline out of it" is protective instinct applied one level too high. Tim owns the
+namespace; the pipeline is how his SQL gets deployed INTO it. Blast-radius caution about
+DROP/CREATE is right for a namespace we are not deploying to, and exactly backwards for
+the one we are. Ask *what is this namespace for*, not *whose is it*, before concluding.
+
+**Two changes, not one — and only the first is in code:**
+1. `pipeline.yaml` — `RW_NS` and `ROLE_KIND` become constants (`risingwave` / `poc`) and
+   leave the case statement, which now sets only `AWS_ACCOUNT_ID`. A constant that cannot
+   be set per environment cannot drift per environment.
+   `scripts/patch-rw-pipeline-dev-namespace.py`.
+2. `RISINGWAVE_HOST` / `RISINGWAVE_PORT` on the GitHub **`dev` environment**, documented
+   in `wip/rw2-sql-cicd/risingwave-pipeline-ONPREM_CICD.md:189` as
+   `risingwave-frontend.risingwave-2.svc.cluster.local`. **RW_NS does not decide where
+   psql connects** — it selects the Secrets Manager path and the OIDC role only. Ship
+   only #1 and the job reads Tim's credentials and applies them to our empty instance.
+
+The `risingwave-2` platform sandbox is unaffected and stays. What changes is that the
+application pipeline stops targeting it.
