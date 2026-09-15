@@ -138,6 +138,7 @@ Fix (all on branch `fix/qa-review` → PR #23, commit 047e712, + Octopus API):
 ⚠️ **`TfApply=true` is QA-scoped** — a QA deploy applies for real, no plan gate. First deploy: merge #23→#22→main FIRST (don't deploy an unmerged branch), then watch the Octopus task log to confirm deploy.ps1 runs + TF_VAR_* land + worker role authenticates. First apply = 20 creates / 0 destroys (proven locally). Diff tool: `inspect-octopus-projects.py`.
 
 
+## ⛔ SUPERSEDED 2026-09-15 — `risingwave-2` is being DELETED. See the decommission block at the end.
 ## `risingwave-2` is DEV-ONLY. It is never promoted. (stated 2026-09-01)
 
 `risingwave-2` exists on op-usxpress-dev only, for our own platform work. It is **not** a
@@ -276,3 +277,42 @@ the one we are. Ask *what is this namespace for*, not *whose is it*, before conc
 
 The `risingwave-2` platform sandbox is unaffected and stays. What changes is that the
 application pipeline stops targeting it.
+
+
+## ⛔ 2026-09-15 — `risingwave-2` is being retired. Everything becomes `risingwave`.
+
+Doke's decision, stated plainly: "Forget RW-2 exists, it would be deleted, all should be RW
+only." So the dev cluster stops running two RisingWave instances, and every environment --
+dev, QA, prod -- has exactly one, named `risingwave`. This supersedes the 2026-09-01 block
+above, which described `risingwave-2` as a permanent dev-only fixture.
+
+**The trap that makes this dangerous, and it is not hypothetical.** Some AWS objects are
+NAMED for risingwave-2 but SERVE `risingwave`, on QA and prod. A sweep that deletes by name
+destroys the live object store:
+
+| Name | What it actually is | Action |
+|---|---|---|
+| `op-usxpress-dev/risingwave-2/*` (SM) | the dev RW-2 instance's own secrets | delete with the instance |
+| `op-usxpress-dev-risingwave-2` / `-s3` | the dev RW-2 bucket + old managed policy | delete with the instance |
+| `gha-op-usxpress-dev-risingwave-pipeline-secrets` | grants `.../risingwave-2/*` only | dead once the pipeline moves; delete last |
+| `gha-op-usxpress-qa-risingwave-pipeline-secrets` | same shape, QA | never used by anything after the move |
+| **`risingwave-data-op-usxpress-{qa,prod}`** | **Hummock object store for `risingwave`** | ⛔ **RENAME AT MOST. Deleting these destroys live QA/prod data.** |
+| **`risingwave_2_data`** | a Terraform module/variable name used in ALL envs | ⛔ identifier only — rename is a state migration, not a delete |
+
+See [[two-projects-one-resource]]: `iaac-talos` and `iaac-risingwave-onprem` both declare
+RisingWave's bucket and IRSA role, so a destroy in the wrong project takes the object store
+with it.
+
+⚠️ **Find out what else is squatting in the namespace before deleting it.** `risingwave-2`
+holds at least a `prometheus-server` (CrashLoopBackOff, 1566 restarts as of the dev triage) --
+platform monitoring living inside what everyone calls a RisingWave namespace. Enumerate the
+namespace, do not assume it contains only RisingWave.
+
+**Repos that name it** (from the RW-2 CI/CD notes, as a map of where to look):
+`variant-inc/risingwave-pipeline`, `iaac-talos`, `iaac-talos-flux-platform`,
+`iaac-talos-flux-cluster`, `iaac-risingwave-onprem`, `iaac-risingwave-2`,
+`iaac-risingwave-cicd`.
+
+First step is already done: `scripts/patch-rw-pipeline-dev-namespace.py` takes `RW_NS` and
+`ROLE_KIND` out of the pipeline's case statement entirely, so the workflow has no way to
+name `risingwave-2` again.
