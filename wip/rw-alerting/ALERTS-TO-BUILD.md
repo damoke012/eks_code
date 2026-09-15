@@ -238,6 +238,18 @@ it was found by a human looking at QA.
   names the resource and the field, which is the whole diagnosis.
 - **Severity:** high. This is the alert that turns "merged" into "applied", and its absence is
   why a four-hour outage of the delivery path went unnoticed on a cluster we look at daily.
+- **Status 2026-09-15: NOT BUILDABLE AS AN ALERT YET.** Checked op-usxpress-qa —
+  `kubectl get alertmanagers.monitoring.coreos.com -A` returns **No resources found**, and
+  none of its 45 PrometheusRules covers Flux (`gotk_reconcile_condition`) at all. So this did
+  not fire and reach nobody; **there was nothing to fire**. Both halves are missing. Adding a
+  rule before P1 lands would put alert #46 into a system with no receiver.
+- **Interim detector, working today:** `scripts/flux-kustomization-health.sh --cluster op-qa`,
+  in `weekly-maintenance.sh` section 9. It prints the Ready condition message, exits 3 on
+  not-Ready and 7 when a cluster cannot be assessed, and refuses to report health from an
+  unreachable cluster, zero rows, or its own dead parser. Self-test:
+  `scripts/flux-kustomization-health.test.sh`, 8 cases, both directions.
+  Weekly is a poor substitute for 15 minutes — it is the difference between "caught within a
+  week" and "caught when a human happens to look", which is what actually happened here.
 - **Note:** C4's *stale revision* check would NOT have fired here — `lastAppliedRevision` sat
   at the previous good sha and the GitRepository had moved, so a trailing-revision rule needs
   the not-Ready condition alongside it to be useful.

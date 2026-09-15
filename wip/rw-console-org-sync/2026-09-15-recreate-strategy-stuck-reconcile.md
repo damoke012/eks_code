@@ -96,3 +96,27 @@ Flux then reconciled on its own interval and the new template landed.
   This is *not* a miss in #36 — the digest that round 2 verified was for the `postgres:17`
   init image (advisory 5). The app image was never in scope. Digest pinning is the on-prem
   posture ([[ecr-shared-registry-posture]]), so it is worth raising separately, as its own ask.
+
+## Why nobody was told — checked, 2026-09-15
+
+Two independent gaps, either one sufficient:
+
+- **op-usxpress-qa has no Alertmanager.** `kubectl get alertmanagers.monitoring.coreos.com -A`
+  → `No resources found`. Every rule on that cluster fires into nothing. This matches
+  [[onprem-alerts-not-delivered]], previously recorded for dev; QA is now confirmed the same.
+- **No Flux rule exists to fire.** All 45 PrometheusRules on QA listed; none covers
+  `gotk_reconcile_condition`. The custom ones are cilium-node-divergence, control-plane-memory,
+  dns-health, etcd-backup-staleness, etcd-cluster-health, irsa-health, istio-cert-chain,
+  platform-health, rook-ceph-health. `prometheus-stack-kube-prom-alertmanager.rules` is a rule
+  *about* Alertmanager, not an instance of one.
+
+Correcting an assumption made an hour earlier in this investigation: I expected the alert had
+fired and reached nobody, on the strength of the 2026-08-24 "Flux rules fixed on dev+QA" note.
+Wrong on QA — there is no Flux rule there to fix. Do not reason from that note without listing.
+
+**Built instead:** `scripts/flux-kustomization-health.sh --cluster op-qa`, wired into
+`weekly-maintenance.sh` section 9 alongside the existing revision-drift check. It reports the
+Ready condition message, which for this failure names the resource and the exact forbidden
+field. Its self-test (`flux-kustomization-health.test.sh`, 8 cases) exists because the first
+version printed *"all 4 Kustomizations Ready"* from a SyntaxError in its own parser — the
+[[prod-incident-instrument-check]] trap, caught by testing the instrument rather than shipping it.

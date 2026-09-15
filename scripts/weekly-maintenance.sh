@@ -107,6 +107,13 @@ section "9. Flux revision drift (on-prem)"
 for c in op-dev op-qa op-prod; do
   bash scripts/flux-revision-drift.sh --cluster "$c" || true
 done
+# ...and a reconcile that is actively ERRORING, which drift alone cannot see: on
+# 2026-09-15 op-usxpress-qa's risingwave-onprem failed its dry-run for ~4 hours with
+# lastAppliedRevision parked on the last good sha. No Alertmanager exists on any on-prem
+# cluster, so this script is the only thing that would have said so.
+for c in op-dev op-qa op-prod; do
+  bash scripts/flux-kustomization-health.sh --cluster "$c" || true
+done
 
 
 section "10. Jira scripts that write without proving their token"
@@ -125,6 +132,7 @@ section "12. Do the gates themselves still work?"
 # namespace on 2026-09-03. This replays recorded kubectl output through it, both directions.
 bash scripts/rw-prod-status.test.sh || findings=$((findings+1))
 bash scripts/rw-fleet-licence-status.test.sh || findings=$((findings+1))
+bash scripts/flux-kustomization-health.test.sh || findings=$((findings+1))
 bash scripts/lib-onprem-ctx.test.sh || findings=$((findings+1))
 python3 scripts/lib-pod-health.test.py || findings=$((findings+1))
 
