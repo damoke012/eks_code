@@ -350,3 +350,38 @@ both from the `risingwave-2` era. See [[masked-secret-reads-as-network-fault]].
 The approve job prints a message and proceeds; it passed in 3-5s on every run. So a merge to
 `qa` executes SQL against QA with no human gate, and prod will behave identically. Fix before
 the first real promotion.
+
+## ✅ 2026-09-15 (later) — the approval gate now EXISTS, and self-approval is deliberate
+
+Supersedes the ⛔ block above: `pipeline-approval` no longer has `protection_rules: []`.
+
+Set via the API, not the UI:
+`PUT /repos/variant-inc/risingwave-pipeline/environments/pipeline-approval` with
+`{wait_timer:0, prevent_self_review:false, reviewers:[{type:"User", id:<dare-x>}]}`.
+
+⚠️ **`prevent_self_review: false` is INTENTIONAL and TEMPORARY** — Doke's call, so the person
+who raises a change can approve it while the pipeline is still being stood up. Flipping that
+one flag to `true` makes it a real second pair of eyes and changes nothing else. Nobody should
+read the current state as "approvals are reviewed".
+
+**Proven in BOTH directions on run 34981503792 — a settings page cannot show either:**
+- BLOCKS: validate green in 6s, `approve` pending, `execute` never started. Before the change
+  `approve` completed in 3s and the run went straight through.
+- RELEASES: approving via
+  `POST /actions/runs/<id>/pending_deployments {environment_ids:[20649230238], state:"approved"}`
+  let it proceed and finish green. Self-approval by the same account that pushed, which also
+  confirms `prevent_self_review: false` behaves as set.
+
+⛔ **Boundaries — partial coverage feels like protection, so state them out loud:**
+1. **ONE environment covers all three tiers.** The `approve` job names `pipeline-approval`
+   regardless of branch, so dev, qa and prod share one gate and one reviewer list. Prod cannot
+   have stricter reviewers than dev without splitting this into per-environment gates. That is
+   a design limit of the workflow, not of the setting.
+2. **`secret.yaml` is NOT covered.** The Secret Manager workflow has its own trigger and never
+   passes through `approve`. SQL deployment is gated; secret creation is not. Do not say "the
+   pipeline requires approval" without that caveat.
+3. One reviewer only (`dare-x`). Idris is not on the list and should be before QA promotion.
+
+Method note: verified by triggering a run and watching it stop, per [[authoring-gate-hooks]] --
+"verify by running it, not by merging it". The API returning the rule proves registration, not
+that the gate blocks.
