@@ -89,6 +89,21 @@ Four things in nine lines:
    state is assumed to already hold them.
 4. **`SpacesVariablesTfApply` gates the apply.** Default is a plan. See §6.
 
+> ⚠️ **A push to ANY branch deploys to Octopus, and it applies.** `.github/workflows/deploy.yml`
+> triggers on `branches: ['**']`, packages the repo and has Octopus deploy it to the `dpl`
+> environment. Proved on 2026-09-17: PR #96 added `qa2` to `environments.yaml`, and the
+> environment **`Environments-4281` was created in the live estate while the PR was still open
+> and unapproved**.
+>
+> Two consequences, and the second is the dangerous one:
+>
+> 1. Review is not a gate on this repo. A branch reaches the Octopus estate before anyone reads it.
+> 2. **An object created from an unmerged branch is in Terraform state but not on `master`.** The
+>    next apply from `master` — triggered by any other merge — sees it in state, absent from
+>    config, and plans to **destroy** it. An abandoned branch therefore leaves a live object that
+>    the next unrelated merge deletes. Merge the PR or delete the object; do not leave it.
+
+
 The module then reads the rendered YAML directly:
 
 ```hcl
