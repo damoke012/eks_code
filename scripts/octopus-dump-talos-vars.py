@@ -7,8 +7,7 @@ prints them, with the environment each is scoped to, so they can be moved into g
 
 Sensitive variables come back from the API with a null value, so nothing secret is printed.
 
-    export OCTOPUS_API_KEY=API-XXXXXXXX
-    python3 scripts/octopus-dump-talos-vars.py            # talos projects
+    python3 scripts/octopus-dump-talos-vars.py            # prompts for the key
     python3 scripts/octopus-dump-talos-vars.py --all      # every project
 """
 import json, os, sys, urllib.error, urllib.request
@@ -17,9 +16,17 @@ BASE = os.environ.get("OCTOPUS_URL", "https://octopus.usxpress.io").rstrip("/") 
 KEY = os.environ.get("OCTOPUS_API_KEY", "")
 MATCH = None if "--all" in sys.argv else "talos"
 
+# Prompt rather than demand an export. A command containing a placeholder gets pasted
+# verbatim, and the placeholder becomes the credential -- that happened on 2026-09-17.
 if not KEY:
-    sys.exit("!! OCTOPUS_API_KEY is not set in this shell.\n"
-             "   export OCTOPUS_API_KEY=API-XXXXXXXX   then re-run.")
+    import getpass
+    try:
+        KEY = getpass.getpass("Octopus API key (hidden, starts with API-): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        sys.exit("\n!! no key entered")
+if not KEY.startswith("API-"):
+    sys.exit("!! that does not look like an Octopus API key -- it must start with 'API-'.\n"
+             "   Octopus profile -> My API Keys -> New API Key. Nothing was sent.")
 
 def get(path):
     req = urllib.request.Request(BASE + path, headers={"X-Octopus-ApiKey": KEY})
