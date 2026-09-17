@@ -177,7 +177,24 @@ Small and mechanical, which is the point:
   depends on nothing pointing at them. Unverified.
 - **`.gitkeep` still sits in `op-usxpress-qa/flux-system/`** beside five real files.
 - **`prune: true` on nearly every Kustomization** — removing an entry deletes the workload.
-- **Flux controller version drift across clusters is unchecked.** `gotk-components.yaml` was
-  excluded from the comparison, so whether all clusters run the same Flux is **not known**.
-  Settle it with:
+- **⚠️ Flux controller versions DIFFER, and dev is the one that is ahead.** Measured
+  2026-09-17 from each cluster's `gotk-components.yaml`:
+
+  | Cluster | Flux |
+  |---|---|
+  | `bm-dev` | **v2.8.8** |
+  | `op-usxpress-qa` | v2.7.5 |
+  | `op-usxpress-prod` | v2.7.5 |
+
+  **This breaks "prove it on dev first" for anything Flux-behavioural.** Server-side apply,
+  `removed` block handling and dry-run semantics can change between minors, so a reconcile
+  that behaves one way on dev is not evidence for QA or prod. It cuts the other way too: a
+  fix verified on QA is not proof for dev.
+
+  It also means the promotion order in rule 10 needs a caveat — QA-2 should be bootstrapped
+  on **v2.7.5**, matching QA and prod, or it proves things about a version production does
+  not run. `flux bootstrap` installs whatever the local CLI ships, so the CLI version on the
+  Octopus worker decides this, silently.
+
+  Re-check any time with:
   `for C in bm-dev op-usxpress-qa op-usxpress-prod; do echo -n "$C: "; grep -m1 -o 'app.kubernetes.io/version: [^ ]*' clusters/$C/flux-system/gotk-components.yaml; done`
