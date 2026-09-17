@@ -64,6 +64,8 @@ def main():
     ap.add_argument("--to", dest="dst", required=True, help="new environment name, e.g. qa2")
     ap.add_argument("--vip", required=True, help="control-plane VIP for the new cluster")
     ap.add_argument("--cluster", help="new cluster name (default: <src cluster>-2 style)")
+    ap.add_argument("--library", action="store_true",
+                    help="also add entries to the library variable sets the project includes")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
 
@@ -79,7 +81,14 @@ def main():
     src_id, dst_id = envs[a.src], envs[a.dst]
     print(f"{a.src} = {src_id}   ->   {a.dst} = {dst_id}", file=sys.stderr)
 
-    doc = call(k, f"/{SPACE}/projects/{PROJECT}/variables")
+    project = call(k, f"/{SPACE}/projects/{PROJECT}")
+    targets = [("project", f"/{SPACE}/projects/{PROJECT}/variables")]
+    if a.library:
+        for lib_id in project.get("IncludedLibraryVariableSetIds", []):
+            lib = call(k, f"/{SPACE}/libraryvariablesets/{lib_id}")
+            targets.append((f"library:{lib['Name']}", f"/{SPACE}/variables/{lib['VariableSetId']}"))
+
+    doc = call(k, targets[0][1])
     backup = pathlib.Path(f"/tmp/octopus-{PROJECT}-variables-backup.json")
     backup.write_text(json.dumps(doc, indent=2))
     backup.chmod(0o600)
@@ -138,7 +147,7 @@ def main():
     # name into one invents an ARN for something nobody created, and the failure surfaces much
     # later as a permissions or not-found error. CLUSTER_NAME is the cloud EKS cluster the
     # worker uses, not this Talos cluster; "qa-one" must not become "qa2-one".
-    verbatim = {"CLUSTER_NAME"}
+    verbatim = {"CLUSTER_NAME", "DOMAIN"}
 
     def is_verbatim(name, value):
         return name in verbatim or value.startswith("arn:")
@@ -189,21 +198,68 @@ def main():
             changed = f"   (was: {s['Value'][:44]})"
         print(f"  {v['Name']:<38} = {v['Value'][:52]:<52}{changed}")
 
+    if a.apply and additions:
+        doc["Variables"].extend(additions)
+        call(k, targets[0][1], method="PUT", body=doc)
+        after_doc = call(k, targets[0][1])
+        after = len(after_doc["Variables"])
+        print(f"\nwrote project. {before} -> {after} (expected {before + len(additions)})")
+        if after != before + len(additions):
+            die(f"count mismatch -- restore from {backup} and investigate")
+
+    # ---- library variable sets -----------------------------------------------
+    for origin, path in targets[1:]:
+        lib_doc = call(k, path)
+        lib_rows = lib_doc.get("Variables", [])
+        lib_backup = pathlib.Path(f"/tmp/octopus-{origin.replace(':', '-')}-backup.json")
+        lib_backup.write_text(json.dumps(lib_doc, indent=2))
+        lib_backup.chmod(0o600)
+
+        if any(dst_id in (v.get("Scope") or {}).get("Environment", []) for v in lib_rows):
+            print(f"\n[{origin}] already has {a.dst} entries -- skipping")
+            continue
+
+        lib_src = {}
+        for v in lib_rows:
+            if src_id in (v.get("Scope") or {}).get("Environment", []):
+                lib_src.setdefault(v["Name"], v)
+        if not lib_src:
+            print(f"\n[{origin}] nothing scoped to {a.src} -- nothing to derive")
+            continue
+
+        lib_add = []
+        for name, v in sorted(lib_src.items()):
+            if v.get("IsSensitive"):
+                print(f"   [{origin}] skip {name} (sensitive)", file=sys.stderr)
+                continue
+            val = v.get("Value")
+            if val is None:
+                continue
+            new_val = val if is_verbatim(name, val) else substitute(val)
+            lib_add.append({
+                "Name": name, "Value": new_val, "Type": v.get("Type", "String"),
+                "IsSensitive": False, "IsEditable": v.get("IsEditable", True),
+                "Prompt": None, "Scope": {"Environment": [dst_id]},
+            })
+
+        print(f"\n=== [{origin}] {len(lib_add)} variable(s) to add ===")
+        for v in lib_add:
+            was = lib_src[v["Name"]].get("Value")
+            mark = f"   (was: {was[:40]})" if was != v["Value"] else ""
+            print(f"  {v['Name']:<34} = {v['Value'][:48]:<48}{mark}")
+
+        if not a.apply:
+            continue
+        n_before = len(lib_rows)
+        lib_doc["Variables"].extend(lib_add)
+        call(k, path, method="PUT", body=lib_doc)
+        n_after = len(call(k, path)["Variables"])
+        print(f"  wrote. {n_before} -> {n_after} (expected {n_before + len(lib_add)})")
+        if n_after != n_before + len(lib_add):
+            die(f"count mismatch on {origin} -- restore from {lib_backup}")
+
     if not a.apply:
         print("\ndry run -- nothing written. Re-run with --apply.")
-        return
-
-    doc["Variables"].extend(additions)
-    call(k, f"/{SPACE}/projects/{PROJECT}/variables", method="PUT", body=doc)
-
-    after_doc = call(k, f"/{SPACE}/projects/{PROJECT}/variables")
-    after = len(after_doc["Variables"])
-    print(f"\nwrote. {before} -> {after} variables (expected {before + len(additions)})")
-    if after != before + len(additions):
-        die(f"count mismatch -- restore from {backup} and investigate")
-    still = [v["Name"] for v in after_doc["Variables"]
-             if dst_id in (v.get("Scope") or {}).get("Environment", [])]
-    print(f"{len(still)} variable(s) now scoped to {a.dst}")
 
 
 if __name__ == "__main__":
