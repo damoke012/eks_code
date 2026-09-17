@@ -95,6 +95,18 @@ VARS.write_text(t[:s] + t[b[1]:].lstrip("\n"))
 print("  ok  removed variable talosconfig_secret_arn")
 if TIMP.exists():
     TIMP.unlink(); print("  ok  deleted talosconfig-secret-import.tf")
+# The tfvars still SET the variable we just removed. Harmless while they are inert, and a
+# warning the day TF_USE_VARFILE is switched on. Remove the lines too.
+for tf in ("dev", "qa"):
+    fp = f("deploy/terraform/envs/%s.tfvars" % tf)
+    if not fp.exists():
+        continue
+    lines = fp.read_text().splitlines(keepends=True)
+    kept = [l for l in lines if not l.lstrip().startswith("talosconfig_secret_arn")]
+    if len(kept) != len(lines):
+        fp.write_text("".join(kept))
+        print("  ok  removed talosconfig_secret_arn from %s.tfvars" % tf)
+
 # NOTE: the two grafana ARNs are NOT touched. modules/irsa/grafana-secret.tf has not been
 # read, and those ARNs appear to double as enable-flags (count = arn != "" ? 1 : 0).
 # Removing them blind would change which resources exist. Left for a follow-up.
