@@ -80,6 +80,13 @@ spec:
 Prod's Kustomization additionally sets `wait: true` and `timeout: 10m0s`, and carries its own
 `postRenderer`. **All three clusters track the same branch.**
 
+**Prod joined this pipeline on 2026-09-17**, in `33efcd9` — *INFRA-1674: wire RisingWave into
+op-usxpress-prod (#38)*. Before that commit prod had no RisingWave wiring at all, deliberately: the
+comment it replaced recorded that wiring a path which did not yet exist in
+`iaac-risingwave-onprem` had already cost a 17-day "path not found" failure. So prod went from
+*not deployed* to *deployed from an unpinned branch* in one step, without an intermediate state
+where it tracked a fixed version.
+
 **So a merge to `main` that touches `manifests/op-usxpress-prod/` reaches production within five
 minutes.** There is no release, no tag, no approval, no environment branch. The only pre-merge
 check is `manifest-lint.yaml`, which runs on `pull_request` and does a `kustomize build` — it
@@ -180,7 +187,7 @@ partial for anything touching dashboards or bootstrap.
 
 | # | Gap | Consequence |
 |---|---|---|
-| 1 | **No gate between merge and prod.** One `main`, five-minute interval. | Rule 10 cannot be followed. A prod-affecting change is one merge away, and the only check proves rendering, not applying. |
+| 1 | **No gate between merge and prod.** One `main`, five-minute interval — **prod included since 2026-09-17**. | Rule 10 cannot be followed. A prod-affecting change is one merge away, and the only check proves rendering, not applying. |
 | 2 | **`manifest-lint` cannot catch an apply failure.** `kustomize build` succeeds on a manifest that server-side apply will reject. | The exact 2026-09-17 failure mode ([[server-side-apply-keeps-dropped-fields]]). A `--server-side --dry-run=server` check against a live cluster would catch it; a render never will. |
 | 3 | **No alert on a stuck Kustomization.** | The freeze ran ~4h unnoticed. `scripts/flux-kustomization-health.sh` detects it; alert C6 is blocked on Alertmanager. |
 | 4 | **Not read:** `deploy/terraform/{main,secrets,outputs,variables}.tf`, `deploy/README.md`, `console-ui-enablement-runbook.md`. | §1 and §5 are partial on the Terraform side. |
