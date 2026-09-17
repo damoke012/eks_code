@@ -207,14 +207,32 @@ Option 1 is the one consistent with "no manual steps". **This is yours to call.*
 
 These are the only things a person invents. Everything else is derived.
 
-| Decision | QA (for reference) | QA2 |
+| Decision | QA (live value) | QA-2 |
 |---|---|---|
-| Cluster name | `op-usxpress-qa` | `op-usxpress-qa2` |
-| Control-plane VIP | `10.10.82.51` | **needs allocation** |
-| Worker/CP IP range | — | **needs allocation** |
-| AWS account | `527101283767` | reuse QA's, or a new one |
-| vSphere placement | in Octopus today | must be copied to Git (A4) |
-| Node shape | 3 CP + 10 workers, 3 pools | **1 CP + 1 worker** — see note |
+| Cluster name | `op-usxpress-qa` | **`op-usxpress-qa-2`** — the hyphen is load-bearing, see Step 1.5 |
+| Control-plane VIP | `10.10.82.51` | **the only value still needed** |
+| Worker IPs | DHCP | DHCP — not a decision |
+| AWS account | `527101283767` | reuse QA's |
+| State backend | `lazy-tf-state-425rbol87rmn6c7m`, key `iaac/talos/op-usxpress-qa.tfstate` | same bucket, key `…/op-usxpress-qa-2.tfstate` |
+| Node shape | 3 CP + 10 workers, 3 pools | 1 CP + 1 worker |
+
+**vSphere placement — read from Octopus 2026-09-17, closing A4:**
+
+| Variable | Value | Scope |
+|---|---|---|
+| `datacenter` | `D1-Datacenter` | ALL |
+| `datastore` | `USXD1NTXPROD-SC1` | dev, qa, prod |
+| `vm_cluster_name` | `D1 NTX PROD` | ALL |
+| `vm_folder` | `/KubernetesD1/TalosD1/<cluster>` | per env |
+| `network_name` | `10.10.82 (vLAN 82) Prod` | dev, qa, prod |
+| `content_library_name` | `dev-cluster` | **all three, including production** |
+| `content_library_item_name` | `talos-v#{TF_VAR_talos_version}` | per env |
+| `vsphere_server` | `usxd1vmvcntrapp.usxpress.com` | ALL |
+| `vsphere_user` | `svc_terraform` | ALL |
+
+⚠️ **Production pulls its Talos OVA from a content library named `dev-cluster`.** Either a
+deliberately shared library with a misleading name, or a copied value nobody revisited. Worth
+confirming before the next prod rebuild.
 
 > **Size it small.** QA2 exists to test the *mechanism*, not the capacity. Full QA shape is 13
 > VMs for no extra proof. Keep the three-pool *structure* with `count = 1` each if pool
@@ -299,14 +317,33 @@ cluster. QA2 is the first time it is not.
 `--policy-name "iaac-talos-bootstrap-${CLUSTER_NAME}"`. Inline policies are separate objects,
 so no cluster can clobber another, and it needs no read-modify-write.
 
-### Step 2 — the two things Terraform cannot create for itself
+### Step 2 — what Terraform cannot create for itself
 
-1. **The Terraform state bucket.** `deploy.ps1` runs
-   `terraform init -backend-config="bucket=$S3_BUCKET"` — the bucket must exist before the
-   first `init`. A backend cannot bootstrap itself.
-   → **`.github/workflows/onprem-account-bootstrap.yaml` probably does this. NOT YET READ.**
-2. **The Flux platform branch.** `op-qa2` in `iaac-talos-flux-platform`, branched from `op-qa`.
-   Terraform's flux provider points at a branch; it does not create one.
+**Corrected 2026-09-17 by reading the live Octopus variables.** Both items were wrong.
+
+1. ~~The Terraform state bucket must be created.~~ **Not for a cluster sharing an existing
+   account.** QA's backend is `S3_BUCKET = lazy-tf-state-425rbol87rmn6c7m`, shared per AWS
+   account, with the cluster distinguished by `TF_STATE_KEY = iaac/talos/op-usxpress-qa.tfstate`.
+   QA-2 reuses that bucket with key `iaac/talos/op-usxpress-qa-2.tfstate` — nothing to create.
+   (`octopus/ensure-tfstate-bucket.sh` still matters for a brand-new AWS account. Note dev is
+   the odd one out, on a per-cluster `op-usxpress-dev-tfstate`.)
+2. ~~A branch `op-qa2` in `iaac-talos-flux-platform`.~~ **Wrong repo and wrong branch.** Octopus
+   says, for every environment:
+
+   ```
+   TF_VAR_github_repository = iaac-talos-flux-cluster   [ALL]
+   TF_VAR_github_branch     = master                    [ALL]
+   TF_VAR_flux_target_path  = clusters/op-usxpress-qa   [qa]
+   ```
+
+   Flux bootstraps against the **cluster** repo on `master`, into a per-cluster directory —
+   not the platform repo on a per-environment branch. `envs/qa.tfvars` says
+   `github_repository = "iaac-talos-flux-platform"` and `github_branch = "op-qa"`; both are
+   **wrong**, and harmless only because that file is never read.
+
+   What QA-2 actually needs: a `clusters/op-usxpress-qa-2/` directory on `master` of
+   `iaac-talos-flux-cluster`, holding the Flux `GitRepository` + `Kustomization` objects that
+   point at the platform repo. That is repo 2's job, and it is a PR, not a branch.
 
 ### Step 3 — Octopus scaffolding
 
