@@ -19,6 +19,13 @@ MATCH = None if "--all" in sys.argv else "talos"
 # Three sources, in order: env var, a 0600 key file, then an interactive prompt.
 # The prompt is last because hidden input through a pasted terminal session is unreliable --
 # it silently produced an empty key twice on 2026-09-17.
+# An env var that is not a key must not SHADOW a good key file. On 2026-09-17 a stale
+# OCTOPUS_API_KEY=placeholder, exported an hour earlier, silently outranked a correct
+# ~/.octopus-api-key and produced three identical validation failures.
+if KEY and not KEY.startswith("API-"):
+    print(f"ignoring OCTOPUS_API_KEY: it does not start with 'API-' (value is "
+          f"{len(KEY)} chars). Falling through to the key file.")
+    KEY = ""
 KEYFILE = pathlib.Path.home() / ".octopus-api-key"
 if not KEY and KEYFILE.exists():
     KEY = KEYFILE.read_text().strip()
