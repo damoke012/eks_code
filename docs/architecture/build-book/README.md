@@ -19,7 +19,7 @@ Three environments, each its own AWS account and vSphere footprint:
 | 02 | [`iaac-talos-flux-cluster`](02-iaac-talos-flux-cluster.md) | the Flux `GitRepository` + `Kustomization` wiring | drafted |
 | 03 | [`iaac-talos-flux-platform`](03-iaac-talos-flux-platform.md) | the platform stack, branch per cluster | drafted |
 | 04 | [`iaac-octopus-config`](04-iaac-octopus-config.md) | spaces, environments, worker pools, lifecycles — **not** project variables | drafted |
-| 05 | `iaac-octopus`, `iaac-octopus-server`, `iaac-octopus-onprem` | the Octopus platform itself: server chart, worker tentacle pods, release mirror | not started |
+| 05 | [`iaac-octopus-server` + `iaac-octopus` + `iaac-octopus-onprem`](05-octopus-platform.md) | Octopus itself: the server StatefulSet, the three worker tentacle pods, the release mirror | drafted |
 | 06 | `iaac-networking` | | not started |
 | 07 | `iaac-risingwave-onprem` | RisingWave operator, CR and console | not started |
 | 08 | `risingwave-pipeline` | the ETL, branch per environment | not started |
@@ -30,6 +30,11 @@ Three environments, each its own AWS account and vSphere footprint:
 
 All repos are at `https://github.com/variant-inc/<name>` on corporate GitHub — reachable from
 the WSL box, never from a codespace ([[usx-github-enterprise-not-personal]]).
+
+**Where the build actually runs.** Nothing on-prem builds itself. The Talos clusters are created by
+three Octopus worker pods running in **AWS EKS in the `dpl` account** (`786352483360`), which reach
+out to on-prem vSphere. The Octopus server those workers talk to is itself delivered by Flux from
+`iaac-flux-manifests`. Section 05 has the chain.
 
 ## How to read a section
 
