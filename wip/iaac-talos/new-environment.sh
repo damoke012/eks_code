@@ -398,29 +398,37 @@ cat >&2 <<NEXT
 
 Still to do, in order. None of it is in this file.
 
- 1. Octopus environment, worker pool and lifecycle phase
-       PR to iaac-octopus-config:
-         deploy/config/environments.yaml  append '${ENV_KEY}' (append -- inserting renumbers the rest)
-         deploy/config/worker_pools.yaml  append the pool this cluster deploys from
-         deploy/config/lifecycles.yaml    add '${ENV_KEY}' to a phase -- an environment in no
-                                          phase exists but can never receive a deployment
-       Then set SpacesVariablesTfApply=true, or the run only prints a plan.
+ 1. The Octopus environment -- a PR to iaac-octopus-config:
+         deploy/config/environments.yaml  append '${ENV_KEY}'
+       APPEND. sort_order is derived from list position, so inserting mid-list shows
+       updates against every later environment.
+       NO worker pool line: pools are per environment and each is filled by its own
+       iaac-octopus deployment, so a new pool would be created EMPTY. Reuse an
+       existing pool instead by setting WORKER_POOL to its id.
 
- 2. Octopus project variables on iaac-talos (DevOps space) -- no repo manages these:
-         TF_VAR_env_name      ${ENV_KEY}
-         TF_USE_VARFILE       true          <- makes THIS file authoritative
-         S3_BUCKET            ${TF_STATE_BUCKET}
-         TF_STATE_KEY         per convention
-         AWS_DEFAULT_REGION   ${AWS_REGION}
-         TfApply              false         <- read the plan first
-         TfDestroy            false
-         TF_VAR_vsphere_password, TF_VAR_github_token   (secrets)
+ 2. The lifecycle phase -- OCTOPUS CONSOLE, not a PR. iaac-talos uses the lifecycle
+    'iaac-release', which is not in lifecycles.yaml. An environment that appears in
+    no phase exists in the UI and can NEVER receive a deployment.
 
- 3. Flux wiring -- BOTH, or the cluster bootstraps into nothing:
-         iaac-talos-flux-cluster   PR adding clusters/${CLUSTER}/ on master
-         iaac-talos-flux-platform  a branch named by that directory's infra-source.yaml
+ 3. Variables -- two places, and the second is easy to miss:
+       a) ~33 on the iaac-talos project (DevOps space), including
+            TF_VAR_env_name ${ENV_KEY} | TF_USE_VARFILE true | TfApply false
+       b) ~9 in the LIBRARY variable sets the project includes. Without an entry
+          scoped to this environment each falls back to its [ALL] default, and those
+          point at a DIFFERENT AWS ACCOUNT:
+            DX__Common         WORKER_POOL, env_short, environment_abbreviation
+            DX__AWSAccessKeys  AWS_ROLE_TO_ASSUME, DOMAIN
+            DX__TFState        S3_BUCKET
+            DX__EKSCluster     CLUSTER_NAME
+            DX__AzureAD        ARM_az_prefix
+       scripts/octopus-create-qa2-vars.py derives both from an existing environment.
 
- 4. Before setting TF_USE_VARFILE=true, confirm this environment's state contains
+ 4. Flux -- terraform's flux_bootstrap_git writes clusters/${CLUSTER}/flux-system when
+    enable_flux_bootstrap is true. It does NOT write that directory's infra.yaml, which
+    points the cluster at the platform stack; that is still hand-maintained, and until it
+    exists the cluster reconciles nothing.
+
+ 5. Before setting TF_USE_VARFILE=true, confirm this environment's state contains
     module.irsa[0].aws_secretsmanager_secret.talosconfig.
 
 NEXT
