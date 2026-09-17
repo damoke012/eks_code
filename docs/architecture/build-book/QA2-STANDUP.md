@@ -25,9 +25,24 @@ Line numbers are `master` @ `8c732fc`.
 | 5 | Seed the worker secret | GHA `onprem-cluster-secrets.yaml` → `octopus/ensure-cluster-secrets.sh` | creates `<cluster>/octopus-worker` | ExternalSecrets can resolve |
 | 6 | Branch the platform repo | `iaac-talos-flux-platform`, `op-qa2` from `op-qa` | Terraform points at a branch; it never creates one | Flux has somewhere to read |
 
-> ⚠️ Steps 4 and 5 hardcode `options: [dev, qa, prod]` and read
-> `secrets.ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>`. **A fourth environment cannot be selected.** Add
-> `qa2` to both choice lists and add the matching GitHub secret, or these steps cannot run.
+> ⚠️ **Steps 4 and 5 have never been runnable, for ANY environment.** Proved by dispatch on
+> 2026-09-17 (runs `35229647746` lowercase, `35229975054` uppercase — both stop at the first
+> step). `iaac-talos` holds exactly one repository secret, `OCTOPUS_API_KEY`. There is no
+> `ONPREM_BOOTSTRAP_ROLE_ARN_DEV`, `_QA` or `_PROD`, though both workflow headers document
+> them as a prerequisite.
+>
+> The old code hid this: the `case` had no `*)` branch, so an unmatched or missing value set
+> an **empty** role ARN and failed three steps later inside `configure-aws-credentials`,
+> reading as a permissions problem. Nobody would diagnose that as "the secret was never
+> created".
+>
+> **Fix is not code.** Someone with the `github-actions-onprem-bootstrap` role ARN per account
+> runs `gh secret set ONPREM_BOOTSTRAP_ROLE_ARN_DEV --repo variant-inc/iaac-talos`, and the
+> same for `_QA`, `_PROD`, `_QA2`.
+>
+> **Still unsettled:** whether a lowercase `target_env` resolves an uppercase secret name. It
+> could not be tested with no secret present. One dry-run dispatch answers it the moment one
+> exists; if lowercase fails, the lookup moves to an exact-name match in bash.
 
 ### Octopus — 1 step
 
@@ -362,7 +377,8 @@ days is a worse outcome than not testing.
 
 | # | Open | Needed from |
 |---|---|---|
-| 1 | Octopus variable values, and which space holds them | an authenticated Octopus API call |
+| 1 | Octopus variable values, and which space holds them | an authenticated Octopus API call — **the repo's `OCTOPUS_API_KEY` is 5 months old and Doke's local key is rejected as "account may have been disabled"**. Likely the same expired credential. |
+| 1b | **`ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>` does not exist for any environment** — steps 4 and 5 cannot run | the bootstrap role ARN per account, set as a repo secret |
 | 2 | **Flux bootstrap: restore to Terraform, or accept a manual step?** | Doke |
 | 3 | QA2 IP/VIP allocation and vSphere capacity | networking + vSphere |
 | 4 | ~~Do the bootstrap workflows create the state bucket?~~ **Answered 2026-09-17: no.** `onprem-account-bootstrap.yaml` attaches an IAM policy; `onprem-cluster-secrets.yaml` seeds `<cluster>/octopus-worker`. **The state bucket has no automation at all.** Both also hardcode `options: [dev, qa, prod]` and `ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>`, so a 4th environment cannot be selected. | closed — now 3 fixes |
