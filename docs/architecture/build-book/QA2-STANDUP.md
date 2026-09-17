@@ -216,7 +216,7 @@ These are the only things a person invents. Everything else is derived.
 | Decision | QA (live value) | QA-2 |
 |---|---|---|
 | Cluster name | `op-usxpress-qa` | **`op-usxpress-qa-2`** — the hyphen is load-bearing, see Step 1.5 |
-| Control-plane VIP | `10.10.82.51` | **the only value still needed** |
+| Control-plane VIP | `10.10.82.51` | **`10.10.82.53`** — next in the block, decided 2026-09-17 |
 | Worker IPs | DHCP | DHCP — not a decision |
 | AWS account | `527101283767` | reuse QA's |
 | State backend | `lazy-tf-state-425rbol87rmn6c7m`, key `iaac/talos/op-usxpress-qa.tfstate` | same bucket, key `…/op-usxpress-qa-2.tfstate` |
@@ -533,7 +533,7 @@ Scope every one of these to the new `qa2` environment.
 | `TF_VAR_tf_state_bucket` / `S3_BUCKET` | `lazy-tf-state-425rbol87rmn6c7m` | QA's bucket — shared per account |
 | `AWS_ROLE_TO_ASSUME` | `arn:aws:iam::527101283767:role/octopus-usxpress` | same account as QA |
 | `WORKER_POOL` | `WorkerPools-1522` | `usxpress-qa`, 2 healthy workers. Reuse, don't create |
-| `TF_VAR_control_plane_vip` | `10.10.82.53` | **pending networking** |
+| `TF_VAR_control_plane_vip` | `10.10.82.53` | **decided 2026-09-17** — see below |
 | `TF_VAR_endpoint` | `https://10.10.82.53:6443` | |
 | `TF_VAR_control_plane_name_prefix` | `talos-cp-op-qa-2` | |
 | `TF_VAR_worker_name_prefix` | `talos-wk-op-qa-2` | |
@@ -560,6 +560,26 @@ Inherited from `[ALL]` and correct as-is: `TF_VAR_datacenter` (`D1-Datacenter`),
 `TF_VAR_github_owner`/`_repository`/`_branch` (`variant-inc` / `iaac-talos-flux-cluster` /
 `master`), `AWS_DEFAULT_REGION`, and the two secrets.
 
+### The VIP — how `10.10.82.53` was chosen (2026-09-17)
+
+Taken as the next address in the block: dev `.50`, QA `.51`, prod `.52`, QA2 `.53`. Networking
+never formally confirmed that `.53` is inside the same static reservation.
+
+**The evidence that makes this defensible is not the pattern.** It is that `.51` and `.52` have
+served live control planes for months without a DHCP collision, which is direct evidence that
+this block sits outside the DHCP scope. It is evidence about `.50–.52`, not about `.53` — the
+reservation could end at `.52`.
+
+**Residual risk, stated plainly.** If `.53` is inside the DHCP scope, the collision does not
+appear at build time. It appears whenever DHCP next leases that address, and it presents as an
+unreachable API server that looks like a network fault. The VIP is written into the control-plane
+machine config at bootstrap and into `endpoint`, so correcting it means rebuilding the control
+plane. Accepted here because QA2 is disposable; **do not carry this shortcut into a real
+environment** — for those, get the reservation confirmed before step 9.
+
+⚠️ `ping` and `arp` answer "is anyone on it right now", never "is it reserved". A free address
+inside a DHCP scope is still leasable tomorrow. Do not record a silent ping as confirmation.
+
 ### Still to decide
 
 - `TF_VAR_grafana_admin_secret_arn` and `_azure_ad_secret_arn` are QA-scoped ARNs in the same
@@ -581,7 +601,7 @@ Inherited from `[ALL]` and correct as-is: `TF_VAR_datacenter` (`D1-Datacenter`),
 | 1a | ~~Which space holds the cluster variables, and can they be code?~~ **Answered 2026-09-17.** `iaac-octopus-config` manages `Default` + `DevOps` and creates spaces, environments, worker pools, lifecycles, script modules and library variable *set names* — and **no projects and no project variables**. So the environment is a PR; the cluster's `TF_VAR_*` remain a web form. | closed |
 | 1b | **`ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>` does not exist for any environment** — steps 4 and 5 cannot run | the bootstrap role ARN per account, set as a repo secret |
 | 2 | **Flux bootstrap: restore to Terraform, or accept a manual step?** | Doke |
-| 3 | QA2 IP/VIP allocation and vSphere capacity | networking + vSphere |
+| 3 | ~~QA2 IP/VIP allocation~~ **closed 2026-09-17** — `10.10.82.53`, the next address in the same block. vSphere capacity is still unverified. | vSphere |
 | 4 | ~~Do the bootstrap workflows create the state bucket?~~ **Answered 2026-09-17: no.** `onprem-account-bootstrap.yaml` attaches an IAM policy; `onprem-cluster-secrets.yaml` seeds `<cluster>/octopus-worker`. **The state bucket has no automation at all.** Both also hardcode `options: [dev, qa, prod]` and `ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>`, so a 4th environment cannot be selected. | closed — now 3 fixes |
 | 5 | Whether QA2 reuses QA's AWS account or gets its own | Doke + cloud team |
 | 6 | **There is no `prod.tfvars`.** `deploy/terraform/envs/` holds `dev.tfvars` and `qa.tfvars` only — confirmed 2026-09-17 by running the generator against the branch. So the QA2 → dev → QA → prod rollout of `TF_USE_VARFILE=true` has no last step: prod's file has to be generated before prod can ever use one, and until then prod stays 100% Octopus-variable-driven. | generate it with `new-environment.sh --from qa`, then reconcile every value against prod's live Octopus variables before it is trusted |
