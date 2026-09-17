@@ -97,9 +97,15 @@ def main():
 
     existing_dst = [v for v in doc["Variables"]
                     if dst_id in (v.get("Scope") or {}).get("Environment", [])]
-    if existing_dst:
+    # Already done is not an error when there is more work after it. Without --library there is
+    # nothing else to do, so refusing is right; with it, skip the project and carry on.
+    skip_project = bool(existing_dst)
+    if skip_project and not a.library:
         die(f"{a.dst} already has {len(existing_dst)} variable(s) in this project. "
             "Refusing to add more -- resolve by hand so nothing is duplicated.")
+    if skip_project:
+        print(f"\n[project] already has {len(existing_dst)} {a.dst} variable(s) -- skipping, "
+              "continuing to the library sets")
 
     src_vars = {}
     for v in doc["Variables"]:
@@ -190,13 +196,16 @@ def main():
                 "Scope": {"Environment": [dst_id]},
             })
 
-    print(f"\n=== {len(additions)} variable(s) to add, scoped to {a.dst} ===")
-    for v in additions:
-        changed = ""
-        s = src_vars.get(v["Name"])
-        if s is not None and s.get("Value") != v["Value"]:
-            changed = f"   (was: {s['Value'][:44]})"
-        print(f"  {v['Name']:<38} = {v['Value'][:52]:<52}{changed}")
+    if skip_project:
+        additions = []
+    else:
+        print(f"\n=== {len(additions)} variable(s) to add, scoped to {a.dst} ===")
+        for v in additions:
+            changed = ""
+            srcv = src_vars.get(v["Name"])
+            if srcv is not None and srcv.get("Value") != v["Value"]:
+                changed = f"   (was: {srcv['Value'][:44]})"
+            print(f"  {v['Name']:<38} = {v['Value'][:52]:<52}{changed}")
 
     if a.apply and additions:
         doc["Variables"].extend(additions)
