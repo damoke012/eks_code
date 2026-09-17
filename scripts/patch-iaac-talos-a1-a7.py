@@ -28,6 +28,31 @@ if not PS1.exists():
 if "TF_USE_VARFILE" in PS1.read_text():
     sys.exit("ERROR: already applied (TF_USE_VARFILE present in deploy.ps1).")
 
+# PRE-FLIGHT. This script writes each edit as it goes, so a late failure leaves the tree
+# half-patched -- it did exactly that on 2026-09-17. Check the anchors that are not
+# conditional on earlier edits BEFORE touching anything. If this fails, nothing was written.
+_pre = [
+    (PS1,  r"^\s*ce terraform plan -destroy -out=tfplan -input=false -no-color$", "destroy plan line"),
+    (PS1,  r"^\s*ce terraform plan -out=tfplan -input=false -no-color$",          "plan line"),
+    (PS1,  r"^\$env:S3_BUCKET\s*=\s*\$S3_BUCKET$",                               "S3_BUCKET assignment"),
+]
+_bad = [(f_, lbl, len(re.findall(pat, f_.read_text(), re.M)))
+        for f_, pat, lbl in _pre if len(re.findall(pat, f_.read_text(), re.M)) != 1]
+if _bad:
+    for f_, lbl, n in _bad:
+        print(f"PRE-FLIGHT FAIL: {lbl} matched {n} times in {f_}, expected 1")
+    sys.exit("Nothing was written. Fix the anchors, then re-run.")
+print("pre-flight ok -- all deploy.ps1 anchors present exactly once\n")
+
+def sub_re(path, pattern, repl, label):
+    """Anchor on content, not on indentation. Counting leading spaces off a `cat -n`
+    listing put four where the file had two, and the patch half-applied before failing."""
+    txt = path.read_text()
+    out, n = re.subn(pattern, repl, txt, flags=re.M)
+    if n != 1:
+        sys.exit(f"ERROR {label}: pattern matched {n} times, expected 1 in {path}")
+    path.write_text(out); print(f"  ok  {label}")
+
 def sub(path, old, new, label):
     t = path.read_text(); n = t.count(old)
     if n != 1: sys.exit(f"ERROR {label}: anchor x{n}, expected 1 in {path}:\n{old[:160]}")
@@ -77,12 +102,12 @@ else {
 }
 
 $env:S3_BUCKET           = $S3_BUCKET''', "deploy.ps1 var-file selection")
-sub(PS1, "  ce terraform plan -destroy -out=tfplan -input=false -no-color",
-         "  ce terraform plan -destroy -out=tfplan -input=false -no-color @VarFileArgs",
-         "deploy.ps1 destroy plan")
-sub(PS1, "    ce terraform plan -out=tfplan -input=false -no-color",
-         "    ce terraform plan -out=tfplan -input=false -no-color @VarFileArgs",
-         "deploy.ps1 plan")
+sub_re(PS1, r"^(\s*)ce terraform plan -destroy -out=tfplan -input=false -no-color$",
+       r"\1ce terraform plan -destroy -out=tfplan -input=false -no-color @VarFileArgs",
+       "deploy.ps1 destroy plan")
+sub_re(PS1, r"^(\s*)ce terraform plan -out=tfplan -input=false -no-color$",
+       r"\1ce terraform plan -out=tfplan -input=false -no-color @VarFileArgs",
+       "deploy.ps1 plan")
 
 # ---------------------------------------------------------------- A2 (talosconfig half)
 print("A2  outputs stop being inputs -- talosconfig")
