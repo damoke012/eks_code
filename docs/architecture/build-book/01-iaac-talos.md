@@ -67,9 +67,35 @@ deployment, gated by the `TfApply` variable — see [[octopus-green-but-no-apply
 prints the plan and skips the apply still reports **Success**. `qa` has had `TfApply=true`
 since July, so QA applies live.
 
-> **NOT YET READ — `deploy/deploy.ps1`.** The exact variable precedence (whether
-> `-var-file=envs/<env>.tfvars` is passed, and whether Octopus `TF_VAR_*` overrides it) is
-> unverified. Section 6 depends on it and is marked accordingly.
+### ⚠️ The tfvars files are never read
+
+`deploy.ps1` does **not** pass `-var-file`. Read at `8c732fc`, line 111:
+
+```powershell
+ce terraform plan -out=tfplan -input=false -no-color
+```
+
+Nothing in that script references `envs/`. Every value arrives as an environment variable,
+swept from Octopus parameters at the top of the script:
+
+```powershell
+$OctopusParameters.GetEnumerator() `
+| Where-Object { $_.Key -like "TF_*" } `
+| ForEach-Object { [Environment]::SetEnvironmentVariable($_.Key, $_.Value) }
+```
+
+**So `envs/dev.tfvars` and `envs/qa.tfvars` are inert.** They are dated, commented, committed,
+and have no effect on any deployment. That is why `control_plane_vip = "TBD-qa-vip"` never
+broke anything, and why `manage_platform_secret_values` has never been switchable.
+
+The one-line fix that makes them real:
+
+```powershell
+ce terraform plan -out=tfplan -input=false -no-color -var-file="envs/$($env:TF_VAR_env_name).tfvars"
+```
+
+Until that lands, adding `envs/prod.tfvars` would create a fourth fiction rather than close a
+gap. `ce` is an Octopus-worker wrapper, not a general command — these lines only run there.
 
 ---
 
@@ -102,7 +128,7 @@ deploy/terraform/
     ├── vsphere_vm/   clones the Talos OVA from a content library
     ├── talos/        machine configs, bootstrap, kubeconfig
     ├── cilium/       CNI as an inline manifest
-    ├── flux/         Flux bootstrap into iaac-talos-flux-platform
+    ├── flux/         ⚠️ NO LONGER BOOTSTRAPS FLUX — see §4
     └── irsa/         S3 + CloudFront + IAM OIDC provider + 8 roles
 ```
 
@@ -339,6 +365,69 @@ Port 50000 answering is a proxy for "ready to bootstrap", and the **fixed 30-sec
 the actual readiness guarantee. On a slow day this is a race, and the failure surfaces as a
 bootstrap error rather than a timeout. Candidate for replacement with a real health query.
 
+### ⚠️ The flux module no longer bootstraps Flux
+
+`modules/flux/main.tf` at `8c732fc` contains only a wait-for-API provisioner and two
+tombstones:
+
+```hcl
+removed {
+  from = flux_bootstrap_git.this
+  lifecycle { destroy = false }
+}
+
+removed {
+  from = terraform_data.restore_infra_refs
+  lifecycle { destroy = false }
+}
+```
+
+`removed` with `destroy = false` drops the resource from state **without destroying it** —
+correct for not tearing Flux out of live clusters, but it means **a new cluster gets no Flux
+from Terraform at all.** Whatever bootstraps Flux now is outside this repo's apply; the
+candidate is [`runbooks/flux-bootstrap-from-scratch.md`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/docs/troubleshooting/runbooks/flux-bootstrap-from-scratch.md).
+
+The repo README still describes the flux module as bootstrapping Flux. It does not.
+
+### The design rule this repo breaks
+
+> **Anything Terraform creates, Terraform references. It is never round-tripped through a
+> tfvars file or an Octopus variable.**
+
+`modules/irsa/talosconfig-secret.tf` creates the secret and outputs its ARN. The root module
+*also* takes `talosconfig_secret_arn` as an input variable, and the import block in
+`talosconfig-secret-import.tf` consumes that input. Terraform creates the thing, then asks an
+operator to tell it what was created. Both Grafana ARNs have the same shape.
+
+That is the whole reason a teardown feels dangerous: a rebuild changes those values and a
+human has to chase them back into files.
+
+| Kind | Examples | Belongs in |
+|---|---|---|
+| **Decisions** — stable across rebuilds | cluster name, VIP, node counts and sizes, vSphere placement, Talos/K8s versions | `envs/<env>.tfvars`, in Git |
+| **Facts produced by the build** — change every rebuild | talosconfig ARN, Grafana ARNs, OIDC bucket, CloudFront id, kubeconfig, SSM params | module outputs, referenced directly — never written down |
+| **Secrets** | `vsphere_password`, `github_token` | Octopus only |
+
+**The self-seeding mechanism already exists and has never been able to run.**
+`secrets-values.tf` writes the talosconfig value from the cluster's own machine secrets:
+
+```hcl
+data "talos_client_configuration" "talosconfig" {
+  count                = local.seed_secret_values ? 1 : 0
+  client_configuration = talos_machine_secrets.cluster.client_configuration
+  endpoints            = module.vsphere_cp.ip_addresses
+}
+
+resource "aws_secretsmanager_secret_version" "talosconfig" {
+  secret_id     = module.irsa[0].talosconfig_secret_arn   # the OUTPUT
+  secret_string = data.talos_client_configuration.talosconfig[0].talos_config
+}
+```
+
+Its own header says it exists *"so a full `terraform destroy` + apply re-seeds itself with
+ZERO manual steps"*. It is gated on `manage_platform_secret_values`, which defaults to
+`false`, is not set in `qa.tfvars`, and could not take effect from there anyway.
+
 ---
 
 ## 5. Pinned versions and their defaults
@@ -375,11 +464,11 @@ Each of these blocks "push a branch, get a cluster".
 |---|---|---|
 | 1 | **No `prod.tfvars`.** Dev and QA are declared in Git; prod's values exist only as Octopus variables. | Add `envs/prod.tfvars` mirroring QA, leaving only secrets in Octopus. |
 | 2 | **vSphere placement is not in Git.** `datacenter`, `datastore`, `vm_cluster_name`, `vm_folder`, `network_name`, `content_library_name`, `content_library_item_name` are commented out in *both* tfvars and supplied by Octopus. They are not secrets. | Move them into the tfvars. Leave `vsphere_password` and `github_token` in Octopus. |
-| 3 | **`qa.tfvars` is factually wrong.** `control_plane_vip = "TBD-qa-vip"` while QA runs on `10.10.82.51`; `enable_irsa = true` sits under a comment saying "start OFF". | Correct both — **after** confirming from `deploy.ps1` that Octopus overrides the VIP, so the edit cannot change a live apply. |
-| 4 | **`talosconfig_secret_arn` must be seeded by hand before the first apply.** QA's own comment documents the manual `aws secretsmanager create-secret` and pasting the ARN back. Dev's Octopus deploy currently fails on this variable. | A bootstrap step, or a `create-if-absent` data source. |
+| 3 | **`qa.tfvars` is factually wrong AND inert** — `control_plane_vip = "TBD-qa-vip"` while QA runs on `10.10.82.51`. Correcting the value alone changes nothing. | Make `deploy.ps1` pass `-var-file` **first**, then correct the values. Order matters. |
+| 4 | **`talosconfig_secret_arn` is an output treated as an input**, so it must be seeded by hand and pasted back. The self-seeding code already exists in `secrets-values.tf` and is gated off. | Drop the input variable; reference `module.irsa[0].talosconfig_secret_arn`. Set `manage_platform_secret_values = true` once tfvars are read. |
 | 5 | **`risingwave-2-imports.tf.dev-only`** is enabled/disabled by renaming the file. | It is already gated by `enable_rw2_imports`; the rename is redundant. Delete the file — RW-2 is being retired (INFRA-1692). |
 | 6 | **Bare `import` blocks** in `talosconfig-secret-import.tf` and `grafana-secret-import.tf` fail a new environment's first plan, because the resource does not exist yet. See [[terraform-import-blocks-block-new-envs]]. | Delete once adopted; a no-op for dev/QA state. |
-| 7 | **The Flux target branch must exist first.** `github_branch = "op-qa"` in `iaac-talos-flux-platform` has to be created before bootstrap, by hand. | Create-if-absent in the flux module, or a documented pre-step. |
+| 7 | **Terraform does not bootstrap Flux any more** — `flux_bootstrap_git` was `removed`. A new cluster comes up with no Flux. The target branch still has to exist by hand too. | Decide deliberately: restore bootstrap to Terraform, or document the runbook as a required step and stop claiming it is automated. |
 | 8 | **A new Octopus environment + variable scoping** is console work. | `iaac-octopus-config` may cover this — verify when we reach repo 4. |
 | 9 | **IP/VIP allocation and vSphere capacity** are human decisions. | Will stay manual; document the inputs required. |
 
