@@ -330,6 +330,64 @@ if PERMS.exists() and "iaac-talos-bootstrap-${CLUSTER_NAME}" not in PERMS.read_t
 else:
     print("  --  apply-bootstrap-perms.sh missing or already patched, skipped")
 
+
+# ---------------------------------------------------------------- A9
+# Make the tfvars TRUE. Read from the live Octopus variables 2026-09-17; every value below
+# was wrong in git and harmless only because deploy.ps1 never reads these files. Correcting
+# them BEFORE A1 switches TF_USE_VARFILE on is the whole point -- otherwise turning the flag
+# on would make the wrong values real.
+print("A9  correct the tfvars against the live Octopus variables")
+
+PLACEMENT_BLOCK = """
+# --- vSphere placement (was Octopus-only until 2026-09-17; values read from Octopus) ---
+vsphere_server            = "usxd1vmvcntrapp.usxpress.com"
+vsphere_user              = "svc_terraform"
+datacenter                = "D1-Datacenter"
+datastore                 = "USXD1NTXPROD-SC1"
+vm_cluster_name           = "D1 NTX PROD"
+network_name              = "10.10.82 (vLAN 82) Prod"
+content_library_name      = "dev-cluster"  # yes, dev-cluster -- shared by dev, QA and PROD
+content_library_item_name = "talos-v1.11.1"
+"""
+
+for envkey, fixes, folder in (
+    ("dev", [
+        ('github_repository = "iaac-talos-flux-platform"',
+         'github_repository = "iaac-talos-flux-cluster"'),
+        ('github_branch     = "op-dev"', 'github_branch     = "master"'),
+        ('flux_target_path  = "clusters/op-usxpress-dev"',
+         'flux_target_path  = "clusters/bm-dev"'),
+        ('cp_cpus             = 4', 'cp_cpus             = 2'),
+     ], "bm-dev"),
+    ("qa", [
+        ('github_repository = "iaac-talos-flux-platform"',
+         'github_repository = "iaac-talos-flux-cluster"'),
+        ('github_branch     = "op-qa"', 'github_branch     = "master"'),
+     ], "op-usxpress-qa"),
+):
+    fp = f("deploy/terraform/envs/%s.tfvars" % envkey)
+    if not fp.exists():
+        print("  --  %s.tfvars absent, skipped" % envkey); continue
+    for old, new in fixes:
+        if old in fp.read_text():
+            sub(fp, old, new, "%s.tfvars %s" % (envkey, old.split("=")[0].strip()))
+        else:
+            print("  --  %s.tfvars: %r not found, skipped" % (envkey, old[:40]))
+    txt = fp.read_text()
+    if "vsphere_server" not in txt:
+        txt = txt.rstrip() + "\n" + PLACEMENT_BLOCK
+        txt += 'vm_folder                 = "/KubernetesD1/TalosD1/%s"\n' % folder
+        fp.write_text(txt)
+        print("  ok  %s.tfvars vSphere placement added" % envkey)
+
+QATF2 = f("deploy/terraform/envs/qa.tfvars")
+if QATF2.exists() and "tf_state_bucket" not in QATF2.read_text():
+    QATF2.write_text(QATF2.read_text().rstrip() +
+        '\n\n# Backend: SHARED per AWS account, cluster separated by TF_STATE_KEY.\n'
+        'tf_state_bucket = "lazy-tf-state-425rbol87rmn6c7m"\n'
+        'manage_platform_secret_values = true\n')
+    print("  ok  qa.tfvars tf_state_bucket + manage_platform_secret_values")
+
 print("""
 DONE. Not covered, deliberately:
   A2 (grafana half) modules/irsa/grafana-secret.tf not read; those ARNs look like

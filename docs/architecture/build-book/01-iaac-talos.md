@@ -456,6 +456,116 @@ on dev.
 
 ---
 
+## 5b. What the LIVE variables say — and where git disagrees
+
+Read from the Octopus **DevOps** space, project `iaac-talos` (`Projects-8283`), 2026-09-17.
+Since `deploy.ps1` passes no `-var-file`, **this is the real configuration.** `envs/*.tfvars`
+is a parallel description that has never been consulted.
+
+Reproduce with `scripts/octopus-dump-talos-vars.py` in the `eks_code` repo.
+
+### Where each environment actually comes from
+
+| Variable | dev | qa | prod |
+|---|---|---|---|
+| `TF_VAR_cluster_name` | `op-usxpress-dev` | `op-usxpress-qa` | `op-usxpress-prod` |
+| `TF_VAR_control_plane_vip` | `10.10.82.50` | `10.10.82.51` | `10.10.82.52` |
+| `TF_VAR_cp_cpus` | **2** (`[ALL]` default) | 4 | 4 |
+| `TF_VAR_cp_memory_mb` | 8192 | 16384 | 16384 |
+| `TF_VAR_worker_count` | 7 | 0 (pools) | 0 (pools) |
+| `TF_VAR_tf_state_bucket` | `op-usxpress-dev-tfstate` | `lazy-tf-state-425rbol87rmn6c7m` | `lazy-tf-state-ipp58n854uhpw13x` |
+| `TF_STATE_KEY` | `iaac/talos/op-usxpress-dev.tfstate` | `…op-usxpress-qa.tfstate` | `…op-usxpress-prod.tfstate` |
+| `TF_VAR_flux_target_path` | **`clusters/bm-dev`** | `clusters/op-usxpress-qa` | `clusters/op-usxpress-prod` |
+| `TfApply` | false (`[ALL]`) | **true** | **true** |
+| `AWS_ROLE_TO_ASSUME` | `700736442855:role/octopus-usxpress` | `527101283767:…` | `937464026810:…` |
+
+**The state backend is shared per AWS account** for QA and prod — `lazy-tf-state-*`, with the
+cluster distinguished by `TF_STATE_KEY`. Dev is the odd one out on a per-cluster bucket. A new
+cluster in an existing account therefore needs **no new bucket**, only a new key.
+
+**`AWS_ROLE_TO_ASSUME` settles who Terraform is:** `octopus-usxpress` in each account. Not
+`iaac-octopus-worker-*`, which is the MageRunner/DX identity.
+
+### Flux points at the CLUSTER repo, on master
+
+```
+TF_VAR_github_repository = iaac-talos-flux-cluster   [ALL]
+TF_VAR_github_branch     = master                    [ALL]
+TF_VAR_github_owner      = variant-inc               [ALL]
+```
+
+Not `iaac-talos-flux-platform`, and not a per-environment branch. A new cluster needs a
+`clusters/<name>/` **directory on `master`** — a PR, not a branch.
+
+### vSphere placement — identical everywhere except the folder
+
+| Variable | Value |
+|---|---|
+| `vsphere_server` | `usxd1vmvcntrapp.usxpress.com` |
+| `vsphere_user` | `svc_terraform` |
+| `datacenter` | `D1-Datacenter` |
+| `datastore` | `USXD1NTXPROD-SC1` |
+| `vm_cluster_name` | `D1 NTX PROD` |
+| `network_name` | `10.10.82 (vLAN 82) Prod` |
+| `content_library_name` | **`dev-cluster`** — for dev, QA **and production** |
+| `content_library_item_name` | `talos-v#{TF_VAR_talos_version}` |
+| `vm_folder` | `/KubernetesD1/TalosD1/<cluster>` |
+
+⚠️ **All three environments, production included, pull the Talos OVA from a content library
+called `dev-cluster`**, on a network labelled `Prod` and a datastore labelled `PROD`. Either a
+shared library with a misleading name, or a copied value nobody revisited. It is what prod
+rebuilds from.
+
+### Where `envs/*.tfvars` is factually wrong
+
+Every one of these is inert today and becomes real the moment `TF_USE_VARFILE` is switched on.
+**Correct them first; that ordering is the whole of A1.**
+
+| File | Says | Live value |
+|---|---|---|
+| `qa.tfvars` | `control_plane_vip = "TBD-qa-vip"` | `10.10.82.51` |
+| `qa.tfvars` | `github_repository = iaac-talos-flux-platform` | `iaac-talos-flux-cluster` |
+| `qa.tfvars` | `github_branch = "op-qa"` | `master` |
+| `qa.tfvars` | (no `tf_state_bucket`) | `lazy-tf-state-425rbol87rmn6c7m` |
+| `dev.tfvars` | `cp_cpus = 4` | **2** |
+| `dev.tfvars` | `github_repository = iaac-talos-flux-platform` | `iaac-talos-flux-cluster` |
+| `dev.tfvars` | `github_branch = "op-dev"` | `master` |
+| `dev.tfvars` | `flux_target_path = clusters/op-usxpress-dev` | **`clusters/bm-dev`** |
+| both | vSphere placement commented out | all nine values present in Octopus |
+
+### Two traps in the `[ALL]`-scoped defaults
+
+```
+TF_VAR_cluster_name = #{environment_abbreviation}-cluster   [ALL]
+TF_VAR_enable_irsa  = false                                 [ALL]
+```
+
+A new environment that does not override `cluster_name` builds a cluster called
+`<abbrev>-cluster` — which falls **outside** the IAM grant scoped to `<cluster>-*`, produces
+the wrong bucket names, and writes the wrong SSM paths. `environment_abbreviation` itself
+defaults to `#{Octopus.Environment.Name | Substring 0 4}`. Neither is validated anywhere.
+
+### IAM is scoped by cluster-name prefix
+
+```json
+"Sid": "IAMRoleManagementClusterScoped",
+"Resource": [ "arn:aws:iam::527101283767:role/op-usxpress-qa-*",
+              "arn:aws:iam::527101283767:role/iaac-octopus-worker-op-usxpress-qa" ]
+```
+
+Terraform can create IAM roles **only** for names matching its own cluster prefix. A cluster
+named `op-usxpress-qa2` in that account cannot create its eight IRSA roles;
+`op-usxpress-qa-2` can. And `octopus/apply-bootstrap-perms.sh` uses `put-role-policy`, which
+**replaces** the named policy — running it for a second cluster in an occupied account
+de-authorises the first. See [[one-account-one-cluster-assumption]].
+
+> **Instrument note.** `aws iam simulate-principal-policy` without `--resource-arns` simulates
+> against `*` and returns `implicitDeny` for a correctly scoped grant. It reported twice that
+> Terraform could not create roles, while Terraform was creating eight. Read the policy
+> document; do not simulate it.
+
+---
+
 ## 6. What is NOT automated
 
 Each of these blocks "push a branch, get a cluster".
