@@ -260,6 +260,45 @@ tf_state_bucket  = "op-usxpress-qa2-tfstate"
 
 No ARNs. No `TBD`. That is the point.
 
+### ⚠️ Step 1.5 — the naming decision that is not cosmetic
+
+Terraform's IAM grant in each account is **scoped by cluster-name prefix**. Read from QA's
+live `octopus-usxpress` role, 2026-09-17:
+
+```json
+"Sid": "IAMRoleManagementClusterScoped",
+"Action": [ "iam:CreateRole", "iam:PutRolePolicy", ... ],
+"Resource": [
+  "arn:aws:iam::527101283767:role/op-usxpress-qa-*",
+  "arn:aws:iam::527101283767:role/iaac-octopus-worker-op-usxpress-qa"
+]
+```
+
+`op-usxpress-qa2-*` does **not** match `op-usxpress-qa-*`. Name the cluster `op-usxpress-qa2`
+and Terraform cannot create any of its eight IRSA roles — the apply fails partway with an
+AccessDenied that reads like a credentials problem.
+
+**Decision: name it `op-usxpress-qa-2`.** That falls inside the existing wildcard, so nothing
+needs changing and QA cannot be disturbed.
+
+### ☠️ And do NOT run `apply-bootstrap-perms.sh` for a second cluster in an existing account
+
+```bash
+aws iam put-role-policy --role-name "$ROLE" --policy-name iaac-talos-bootstrap ...
+```
+
+`put-role-policy` **replaces** the named inline policy, and the document the script writes
+covers exactly **one** cluster. Running it in QA's account with `CLUSTER_NAME=op-usxpress-qa2`
+would overwrite `op-usxpress-qa-*` and **de-authorise QA's own Terraform** — the next QA apply
+fails with AccessDenied on the roles it created itself.
+
+The script's header says *"Run once per account"*. That was true while each account held one
+cluster. QA2 is the first time it is not.
+
+**Fix (PR 2):** give each cluster its own inline policy —
+`--policy-name "iaac-talos-bootstrap-${CLUSTER_NAME}"`. Inline policies are separate objects,
+so no cluster can clobber another, and it needs no read-modify-write.
+
 ### Step 2 — the two things Terraform cannot create for itself
 
 1. **The Terraform state bucket.** `deploy.ps1` runs
