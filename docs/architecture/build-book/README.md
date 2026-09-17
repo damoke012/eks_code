@@ -18,7 +18,7 @@ Three environments, each its own AWS account and vSphere footprint:
 | 01 | [`iaac-talos`](01-iaac-talos.md) | vSphere VMs, Talos bootstrap, Cilium, Flux bootstrap, IRSA | drafted, `deploy.ps1` pending |
 | 02 | [`iaac-talos-flux-cluster`](02-iaac-talos-flux-cluster.md) | the Flux `GitRepository` + `Kustomization` wiring | drafted |
 | 03 | [`iaac-talos-flux-platform`](03-iaac-talos-flux-platform.md) | the platform stack, branch per cluster | drafted |
-| 04 | `iaac-octopus-config` | Octopus variables — supplies every `TF_VAR_*` | not started |
+| 04 | [`iaac-octopus-config`](04-iaac-octopus-config.md) | spaces, environments, worker pools, lifecycles — **not** project variables | drafted |
 | 05 | `iaac-octopus-onprem` | release mirror, enrollment, fork-side dispatchers | not started |
 | 06 | `iaac-networking` | | not started |
 | 07 | `iaac-risingwave-onprem` | RisingWave operator, CR and console | not started |
@@ -39,6 +39,11 @@ not automated**. The last of those is the one to read before building anything.
 
 ## The standing claim this book is testing
 
-"Everything is automated." Section 01 already lists nine things that are not. The way to settle
-it is to build a throwaway cluster from these documents alone and record every step that was
-not in them.
+"Everything is automated." Section 01 already lists nine things that are not, and section 04 adds
+the largest one: **no repo manages the Octopus project variables that build a cluster.** Every
+`TF_VAR_*` is typed into a web form, which is where `TBD-qa-vip`, the wrong Flux repository name
+and dev's 2 vCPU all came from. `octopus/new-environment.sh` and `TF_USE_VARFILE=true` are the
+route out — they move those decisions into `envs/<env>.tfvars`, under review, in git.
+
+The way to settle the claim is to build a throwaway cluster from these documents alone and record
+every step that was not in them.

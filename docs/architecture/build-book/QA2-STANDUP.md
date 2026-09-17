@@ -44,11 +44,15 @@ Line numbers are `master` @ `8c732fc`.
 > could not be tested with no secret present. One dry-run dispatch answers it the moment one
 > exists; if lowercase fails, the lookup moves to an exact-name match in bash.
 
-### Octopus — 1 step
+### Octopus — 2 steps
+
+**Corrected 2026-09-17 by reading `iaac-octopus-config`.** This was one step because the whole
+thing was assumed to be console work. Half of it is code.
 
 | # | Do this | Where | What it does |
 |---|---|---|---|
-| 7 | New environment + variables | Octopus (**DevOps** space — `octo.yaml` line 38) | `TF_VAR_env_name=qa2`, `S3_BUCKET`, `TF_STATE_KEY`, `AWS_DEFAULT_REGION`, `TfApply=false`, plus the only two secrets: `TF_VAR_vsphere_password`, `TF_VAR_github_token` |
+| 7a | Environment, worker pool, **lifecycle phase** | PR to `iaac-octopus-config` — `deploy/config/{environments,worker_pools,lifecycles}.yaml` | creates them in both managed spaces. **Append to the lists** — inserting renumbers every later entry's `sort_order`. **An environment named in no lifecycle phase can never be deployed to.** Then `SpacesVariablesTfApply=true`, or the run only prints a plan. |
+| 7b | Project variables | Octopus UI, project `iaac-talos` (**DevOps** space — `octo.yaml` line 38) | `TF_VAR_env_name=qa2`, `TF_USE_VARFILE=true`, `S3_BUCKET`, `TF_STATE_KEY`, `AWS_DEFAULT_REGION`, `TfApply=false`, plus the only two secrets: `TF_VAR_vsphere_password`, `TF_VAR_github_token`. **No repo manages these** — see [04-iaac-octopus-config.md](04-iaac-octopus-config.md) §7. |
 
 ### The pipeline — 3 steps
 
@@ -100,7 +104,8 @@ regenerates all of it.
 
 1. `deploy/terraform/envs/qa2.tfvars` — **the only file with decisions in it**
 2. Two GHA workflow dropdowns, to admit a 4th environment
-3. Octopus: one environment, six variables, two secrets
+3. Octopus: three YAML lines in `iaac-octopus-config` (environment, worker pool, **lifecycle
+   phase**), then seven variables and two secrets typed into the `iaac-talos` project by hand
 4. One new branch in the platform repo
 
 Everything else is generated.
@@ -367,9 +372,38 @@ A new environment, a worker pool, and these variables scoped to it:
 | `TF_VAR_vsphere_password` | secret | the only two secrets |
 | `TF_VAR_github_token` | secret | |
 
+And, in `iaac-octopus-config`, three list entries — **appended, not inserted**:
+
+```yaml
+deploy/config/environments.yaml   - qa2     # sort_order = list position; inserting renumbers the rest
+deploy/config/worker_pools.yaml   - usxpress-qa2
+deploy/config/lifecycles.yaml     add qa2 to a phase
+```
+
+⚠️ **The lifecycle entry is not optional.** Every phase names its environments explicitly and the
+module resolves them by name to an id. An environment in no phase exists in the UI and can never
+receive a deployment — a green PR and a dead environment.
+
 ⚠️ **Which space?** `octo.yaml` pushes `iaac-talos` to **DevOps**. The `octopus/` directory
 manages **OnPremise** (`Spaces-302`) and is dev-scoped MageRunner routing — a different
-concern. The cluster's variables belong in DevOps. *Unverified — Octopus API call still owed.*
+concern. The cluster's variables belong in DevOps. `iaac-octopus-config` manages `Default` and
+`DevOps`, which is consistent — but it manages no *project* variables at all, so 7b stays manual
+either way. *The variable values themselves are still unverified — Octopus API call owed.*
+
+### Step 3b — write the tfvars, don't copy one
+
+`octopus/new-environment.sh` with no arguments asks for every value a human decides — env key,
+cluster name, VIP, node counts and sizes, the seven vSphere placement values — and validates each
+one before it is written. It refuses a placeholder (`TBD`, `TODO`, `<...>`), a malformed IPv4, a
+VIP or a `vm_folder` already used by another environment, and it will not overwrite an existing
+file. Flags pre-answer any question, so CI can call it non-interactively; with no terminal and no
+value it fails rather than inventing one.
+
+It also checks the IAM trap: a cluster name that extends an existing one **at a hyphen**
+(`op-usxpress-qa-2` inside `op-usxpress-qa-*`) inherits that grant and needs no IAM change, while
+one that does not (`op-usxpress-qa2`) needs its own policy — and writing that policy would
+de-authorise `op-usxpress-qa`, because `apply-bootstrap-perms.sh` replaces rather than adds.
+The script warns and requires an explicit confirmation.
 
 ### Step 4 — push, and watch the two halves
 
@@ -460,7 +494,8 @@ days is a worse outcome than not testing.
 
 | # | Open | Needed from |
 |---|---|---|
-| 1 | Octopus variable values, and which space holds them | an authenticated Octopus API call — **the repo's `OCTOPUS_API_KEY` is 5 months old and Doke's local key is rejected as "account may have been disabled"**. Likely the same expired credential. |
+| 1 | Octopus variable **values** | an authenticated Octopus API call — **the repo's `OCTOPUS_API_KEY` is 5 months old and Doke's local key is rejected as "account may have been disabled"**. Likely the same expired credential. |
+| 1a | ~~Which space holds the cluster variables, and can they be code?~~ **Answered 2026-09-17.** `iaac-octopus-config` manages `Default` + `DevOps` and creates spaces, environments, worker pools, lifecycles, script modules and library variable *set names* — and **no projects and no project variables**. So the environment is a PR; the cluster's `TF_VAR_*` remain a web form. | closed |
 | 1b | **`ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>` does not exist for any environment** — steps 4 and 5 cannot run | the bootstrap role ARN per account, set as a repo secret |
 | 2 | **Flux bootstrap: restore to Terraform, or accept a manual step?** | Doke |
 | 3 | QA2 IP/VIP allocation and vSphere capacity | networking + vSphere |
