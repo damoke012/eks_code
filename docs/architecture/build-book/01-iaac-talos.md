@@ -1,11 +1,39 @@
 # Repo 1 — `variant-inc/iaac-talos`
 
+**Repo:** <https://github.com/variant-inc/iaac-talos>
+**Read at:** `master` @ [`8c732fc`](https://github.com/variant-inc/iaac-talos/tree/8c732fc),
+tag [`v0.2.0`](https://github.com/variant-inc/iaac-talos/releases/tag/v0.2.0), on 2026-09-17.
+**Access:** corporate GitHub, on the WSL box — not from a codespace ([[usx-github-enterprise-not-personal]]).
+
+```bash
+gh repo clone variant-inc/iaac-talos
+```
+
 **What it does:** turns empty vSphere capacity into a running, Flux-managed Kubernetes
 cluster with an AWS identity. It is the only repo that creates machines.
 
-Read against `master` @ `8c732fc` (tag `v0.2.0`), 2026-09-17. Supersedes the relevant part of
+Supersedes the relevant part of
 [`../op-usxpress-dev-repo-architecture.md`](../op-usxpress-dev-repo-architecture.md)
 (2026-03-25), which describes a branch model and a workflow set this repo no longer has.
+
+### Where to look
+
+| What you want | Path |
+|---|---|
+| The trigger | [`.github/workflows/octo.yaml`](https://github.com/variant-inc/iaac-talos/blob/master/.github/workflows/octo.yaml) |
+| Octopus entry point | [`deploy/deploy.ps1`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/deploy.ps1) |
+| Wiring, JWKS, SSM, MageRunner SA | [`deploy/terraform/main.tf`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/terraform/main.tf) |
+| Every input and its default | [`deploy/terraform/variables.tf`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/terraform/variables.tf) |
+| Machine sizes — dev | [`deploy/terraform/envs/dev.tfvars`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/terraform/envs/dev.tfvars) |
+| Machine sizes — QA | [`deploy/terraform/envs/qa.tfvars`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/terraform/envs/qa.tfvars) |
+| Machine-config patches | [`deploy/terraform/modules/talos/main.tf`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/terraform/modules/talos/main.tf) |
+| VM cloning | [`deploy/terraform/modules/vsphere_vm/`](https://github.com/variant-inc/iaac-talos/tree/master/deploy/terraform/modules/vsphere_vm) |
+| IRSA + the GHA IAM roles | [`deploy/terraform/modules/irsa/`](https://github.com/variant-inc/iaac-talos/tree/master/deploy/terraform/modules/irsa) |
+| Troubleshooting library | [`deploy/docs/troubleshooting/`](https://github.com/variant-inc/iaac-talos/tree/master/deploy/docs/troubleshooting) |
+| New-cluster checklist | [`QA-CLUSTER-BOOTSTRAP-CHECKLIST.md`](https://github.com/variant-inc/iaac-talos/blob/master/deploy/docs/troubleshooting/QA-CLUSTER-BOOTSTRAP-CHECKLIST.md) |
+
+> Links point at `master`, so they follow the repo. For the exact state this section was
+> written against, swap `master` for `8c732fc` in any of them.
 
 ---
 
