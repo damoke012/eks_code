@@ -38,7 +38,14 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
    (`diagnosing-bugs`), the third `git archive` around an unmergeable tree
    (`resolving-merge-conflicts`), follow-ups written by hand (`to-tickets`). Judging "I am
    nearly done, this one is quick" is the signal to load the skill, not to skip it.
-10. **Corp GHE is not personal GitHub.** USX and variant-inc repo work happens on WSL against
+10. **Never break a working environment.** Every change proves itself in **QA2 → dev → QA →
+   prod**, one environment at a time. Split work into a zero-risk PR (new files, dead files,
+   inert text) and a behaviour PR (anything a plan, a reconcile or a pod would notice); the
+   second waits for QA2. **Default new behaviour to OFF**, enabled per environment by a flag —
+   that is what makes a merge safe in a repo where every environment shares one branch. When
+   asked "will this break anything", answer with a table: one row per change, named failure
+   mode. Not a reassurance.
+11. **Corp GHE is not personal GitHub.** USX and variant-inc repo work happens on WSL against
    corporate GitHub Enterprise. The codespace `damoke012` token must never reach a USX repo.
 
 ## Skills (`.claude/skills/`)
