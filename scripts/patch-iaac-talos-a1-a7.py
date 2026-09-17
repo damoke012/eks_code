@@ -313,6 +313,23 @@ fi
 NEWENV.chmod(0o755)
 print("  ok  octopus/new-environment.sh")
 
+OLD_POLICY_LINE = '  --policy-name iaac-talos-bootstrap \\'
+NEW_POLICY_LINE = '  --policy-name "iaac-talos-bootstrap-${CLUSTER_NAME}" \\'
+ATTACH_MSG = 'echo "Attaching iaac-talos-bootstrap inline policy to $ROLE ..."'
+GUARD_BLOCK = '# ONE POLICY PER CLUSTER. put-role-policy REPLACES the named policy, and this document\n# covers a single cluster. A shared name meant standing up a second cluster in an account\n# silently removed the first cluster\'s grant -- its Terraform then failed with AccessDenied\n# on roles it had created itself. Separate inline policies cannot clobber each other.\nEXISTING=$(aws iam list-role-policies --role-name "$ROLE" --query \'PolicyNames\' --output text 2>/dev/null || true)\ncase " $EXISTING " in\n  *" iaac-talos-bootstrap "*)\n    echo "NOTE: the legacy shared policy iaac-talos-bootstrap exists on $ROLE."\n    echo "      Leaving it untouched -- it carries the grant for the cluster already in"\n    echo "      this account. This run adds a separate policy and removes nothing."\n    ;;\nesac\n\necho "Attaching iaac-talos-bootstrap-$CLUSTER_NAME inline policy to $ROLE ..."'
+OK_MSG = 'echo "  [ok] iaac-talos-bootstrap"'
+OK_MSG_NEW = 'echo "  [ok] iaac-talos-bootstrap-$CLUSTER_NAME"'
+
+# ---------------------------------------------------------------- A8
+print("A8  one inline policy per cluster -- a second must not de-authorise the first")
+PERMS = f("octopus/apply-bootstrap-perms.sh")
+if PERMS.exists() and "iaac-talos-bootstrap-${CLUSTER_NAME}" not in PERMS.read_text():
+    sub(PERMS, OLD_POLICY_LINE, NEW_POLICY_LINE, "per-cluster policy name")
+    sub(PERMS, ATTACH_MSG, GUARD_BLOCK, "guard + message")
+    sub(PERMS, OK_MSG, OK_MSG_NEW, "ok message")
+else:
+    print("  --  apply-bootstrap-perms.sh missing or already patched, skipped")
+
 print("""
 DONE. Not covered, deliberately:
   A2 (grafana half) modules/irsa/grafana-secret.tf not read; those ARNs look like
