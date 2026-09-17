@@ -9,6 +9,7 @@ Sensitive variables come back from the API with a null value, so nothing secret 
 
     python3 scripts/octopus-dump-talos-vars.py            # prompts for the key
     python3 scripts/octopus-dump-talos-vars.py --all      # every project
+    python3 scripts/octopus-dump-talos-vars.py --full     # do not truncate values
 """
 import json, os, pathlib, signal, sys, urllib.error, urllib.request
 
@@ -22,6 +23,10 @@ except (AttributeError, ValueError):
 BASE = os.environ.get("OCTOPUS_URL", "https://octopus.usxpress.io").rstrip("/") + "/api"
 KEY = os.environ.get("OCTOPUS_API_KEY", "")
 MATCH = None if "--all" in sys.argv else "talos"
+# Values are truncated to keep the table readable. --full prints them whole, which is
+# the only way to read a complex value: TF_VAR_worker_pools is JSON far longer than 58
+# characters, and its truncated form hides how many node pools an environment has.
+FULL = "--full" in sys.argv
 
 # Three sources, in order: env var, a 0600 key file, then an interactive prompt.
 # The prompt is last because hidden input through a pasted terminal session is unreliable --
@@ -123,7 +128,8 @@ for sp in spaces:
                     mark = " <-- A4"
                 else:
                     mark = ""
-                print(f'    {v["Name"]:<42} = {val[:58]:<58} [{scope}]{mark}')
+                shown = val if FULL else f"{val[:58]:<58}"
+                print(f'    {v["Name"]:<42} = {shown} [{scope}]{mark}')
 
 print("\n--- gap A4: vSphere placement ---")
 missing = PLACEMENT - found_placement

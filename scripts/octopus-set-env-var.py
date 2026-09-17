@@ -7,6 +7,12 @@ named environment are eligible.
 
     python3 scripts/octopus-set-env-var.py --env qa2 --set TF_VAR_grafana_admin_secret_arn=
     ... --apply
+
+--create adds an entry that does not exist yet. That case is NOT a typo: a value the
+environment inherits from [ALL] has no scoped entry to edit. On 2026-09-17 QA2's plan asked
+for three control planes because TF_VAR_control_plane_count is [ALL]=3 and nothing had ever
+scoped it -- the generator copies only what is scoped to the source, so every inherited value
+silently arrives at the [ALL] default. --create prints the inherited value it is overriding.
 """
 import argparse, json, os, pathlib, sys, urllib.error, urllib.request
 
@@ -51,6 +57,9 @@ def main():
     ap.add_argument("--env", required=True)
     ap.add_argument("--set", action="append", required=True, metavar="NAME=VALUE",
                     help="repeatable; an empty VALUE clears the variable")
+    ap.add_argument("--create", action="store_true",
+                    help="create the variable scoped to --env when no entry exists yet, "
+                         "instead of refusing. The inherited [ALL] value is printed first.")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
 
@@ -79,30 +88,57 @@ def main():
         if v["Name"] in wanted and scope == [env_id]:
             hits[v["Name"]].append(v)
 
+    # An entry with an empty Environment scope is the [ALL] fallback -- what this
+    # environment resolves to today when nothing is scoped to it.
+    inherited = {n: [] for n in wanted}
+    for v in doc["Variables"]:
+        if v["Name"] in wanted and not (v.get("Scope") or {}).get("Environment"):
+            inherited[v["Name"]].append(v)
+
+    to_create = []
     for n, vs in hits.items():
-        if not vs:
-            die(f"{n} has no entry scoped exactly to {a.env} -- refusing to guess")
         if len(vs) > 1:
             die(f"{n} has {len(vs)} entries scoped to {a.env} -- resolve by hand")
+        if not vs:
+            if not a.create:
+                cur = repr(inherited[n][0].get("Value")) if inherited[n] else "nothing at all"
+                die(f"{n} has no entry scoped exactly to {a.env} -- refusing to guess.\n"
+                    f"   It resolves today to the [ALL] value {cur}.\n"
+                    f"   Re-run with --create to add an entry scoped to {a.env}.")
+            to_create.append(n)
 
     print(f"\n=== changes for {a.env} ===")
-    for n, vs in hits.items():
-        old = vs[0].get("Value")
-        print(f"  {n}")
-        print(f"      from: {old!r}")
-        print(f"        to: {wanted[n]!r}")
+    for n in wanted:
+        if n in to_create:
+            src = repr(inherited[n][0].get("Value")) if inherited[n] else "nothing at all"
+            print(f"  {n}   (NEW -- scoped to {a.env})")
+            print(f"      inherited: [ALL] {src}")
+            print(f"             to: {wanted[n]!r}")
+        else:
+            print(f"  {n}")
+            print(f"      from: {hits[n][0].get('Value')!r}")
+            print(f"        to: {wanted[n]!r}")
 
     if not a.apply:
         print("\ndry run -- nothing written. Re-run with --apply.")
         return
 
     for n, vs in hits.items():
-        vs[0]["Value"] = wanted[n]
+        if vs:
+            vs[0]["Value"] = wanted[n]
+    for n in to_create:
+        doc["Variables"].append({
+            "Name": n, "Value": wanted[n], "Type": "String",
+            "IsSensitive": False, "IsEditable": True, "Prompt": None,
+            "Scope": {"Environment": [env_id]},
+        })
     call(k, f"/{SPACE}/projects/{PROJECT}/variables", method="PUT", body=doc)
 
+    expected = before + len(to_create)
     after = call(k, f"/{SPACE}/projects/{PROJECT}/variables")
-    if len(after["Variables"]) != before:
-        die(f"variable count changed {before} -> {len(after['Variables'])} -- restore from {backup}")
+    if len(after["Variables"]) != expected:
+        die(f"variable count is {len(after['Variables'])}, expected {expected} "
+            f"({before} + {len(to_create)} created) -- restore from {backup}")
     for v in after["Variables"]:
         scope = (v.get("Scope") or {}).get("Environment", [])
         if v["Name"] in wanted and scope == [env_id]:
@@ -110,7 +146,8 @@ def main():
             if got != wanted[v["Name"]]:
                 die(f"{v['Name']} is {got!r} after the write, expected {wanted[v['Name']]!r}")
             print(f"  verified {v['Name']} = {got!r}")
-    print(f"\nwrote. count unchanged at {before}")
+    print(f"\nwrote. {before} -> {expected}"
+          + (f" ({len(to_create)} created)" if to_create else " (count unchanged)"))
 
 
 if __name__ == "__main__":
