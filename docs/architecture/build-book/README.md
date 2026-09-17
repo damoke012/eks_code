@@ -21,7 +21,7 @@ Three environments, each its own AWS account and vSphere footprint:
 | 04 | [`iaac-octopus-config`](04-iaac-octopus-config.md) | spaces, environments, worker pools, lifecycles — **not** project variables | drafted |
 | 05 | [`iaac-octopus-server` + `iaac-octopus` + `iaac-octopus-onprem`](05-octopus-platform.md) | Octopus itself: the server StatefulSet, the three worker tentacle pods, the release mirror | drafted |
 | 06 | `iaac-networking` | | not started |
-| 07 | `iaac-risingwave-onprem` | RisingWave operator, CR and console | not started |
+| 07 | [`iaac-risingwave-onprem`](07-iaac-risingwave-onprem.md) | RisingWave operator, CR, console — **the repo with no gate before prod** | drafted |
 | 08 | `risingwave-pipeline` | the ETL, branch per environment | not started |
 | 09 | `iaac-argocd-onprem` | app delivery | not started |
 | 10 | `ix-kafka-topics-users`, `iaac-confluent-cloud`, `ix-schema-registry` | app onboarding | not started |
