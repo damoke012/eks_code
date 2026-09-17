@@ -18,8 +18,9 @@ Now:
 one per merge.
 
 ```bash
-git -C <iaac-risingwave-onprem> fetch --tags
-git -C <iaac-risingwave-onprem> log --oneline --decorate -10 main
+cd /tmp && rm -rf iaac-risingwave-onprem
+git clone -q https://github.com/variant-inc/iaac-risingwave-onprem.git
+git -C /tmp/iaac-risingwave-onprem log --oneline --decorate -10 main
 ```
 
 Take the **exact patch tag** — `v0.5.6`. Never `v0.5` or `v0`: those float forward on every
@@ -53,13 +54,18 @@ git diff                    # exactly one line should differ
 flux --context op-qa -n flux-system get kustomization risingwave-onprem
 ```
 
-Ready means the manifests applied. It does not mean the workload is healthy — check the pods
-([[gitops-has-four-stale-layers]]).
+Ready means the manifests applied. It does not mean the workload is healthy. Every GitOps layer
+reports Ready while the next one is still behind — GitRepository, Kustomization, HelmRelease,
+Pod — so finish at the pod:
+
+```bash
+kubectl --context op-qa -n risingwave get pods
+```
 
 ## What this does not protect against
 
 - **A bad manifest still reaches dev immediately.** That is the point of dev.
-- **`kustomize build` passing is not `kubectl apply` passing.** The 2026-09-17 console freeze
+- **`kustomize build` passing is not `kubectl apply` passing.** The 2026-09-15 console freeze
   rendered cleanly and failed server-side apply. A pre-merge
   `kubectl apply --server-side --dry-run=server` against a live cluster is the check that would
   have caught it; this pinning does not add one.
