@@ -494,6 +494,84 @@ days is a worse outcome than not testing.
 
 ---
 
+## QA2's Octopus variables — read from the live project, 2026-09-17
+
+Project `iaac-talos` (`Projects-8283`), space **DevOps** (`Spaces-2`), 121 variables. Below is
+QA2's complete set, derived from QA's actual values rather than guessed.
+
+### ⚠️ The computed-identifier trap
+
+```
+environment_abbreviation = #{Octopus.Environment.Name | Substring 0 4}     [ALL]
+```
+
+Four `[ALL]` defaults interpolate it, and **none of them errors when it is wrong** — they compute a
+plausible value and Terraform builds the wrong thing:
+
+| Variable | `[ALL]` template | If the environment is named `qa2` | Must be |
+|---|---|---|---|
+| `TF_VAR_cluster_name` | `#{environment_abbreviation}-cluster` | `qa2-cluster` | `op-usxpress-qa-2` |
+| `TF_VAR_flux_target_path` | `clusters/#{environment_abbreviation}` | `clusters/qa2` | `clusters/op-usxpress-qa-2` |
+| `TF_VAR_vm_folder` | `/KubernetesD1/TalosD1/#{...}-cluster` | `/…/qa2-cluster` | `/KubernetesD1/TalosD1/op-usxpress-qa-2` |
+| `TF_VAR_content_library_name` | `#{environment_abbreviation}-cluster` | `qa2-cluster` — **no such library**, the OVA clone fails | `dev-cluster` |
+
+Set `environment_abbreviation` explicitly too. Do not rely on the substring.
+
+### The sheet
+
+Scope every one of these to the new `qa2` environment.
+
+| Variable | Value | Note |
+|---|---|---|
+| `environment_abbreviation` | `qa-2` | explicit — never computed |
+| `env_short` | `qa-2` | |
+| `TF_VAR_env_name` | `qa-2` | selects `envs/qa-2.tfvars` |
+| `TF_USE_VARFILE` | `true` | new in #67; makes the tfvars authoritative |
+| `TF_VAR_cluster_name` | `op-usxpress-qa-2` | **the hyphen is load-bearing** — inherits QA's `op-usxpress-qa-*` IAM grant |
+| `TF_STATE_KEY` | `iaac/talos/op-usxpress-qa-2.tfstate` | **must differ from QA's or QA2 adopts QA's state** |
+| `TF_VAR_tf_state_bucket` / `S3_BUCKET` | `lazy-tf-state-425rbol87rmn6c7m` | QA's bucket — shared per account |
+| `AWS_ROLE_TO_ASSUME` | `arn:aws:iam::527101283767:role/octopus-usxpress` | same account as QA |
+| `WORKER_POOL` | `WorkerPools-1522` | `usxpress-qa`, 2 healthy workers. Reuse, don't create |
+| `TF_VAR_control_plane_vip` | `10.10.82.53` | **pending networking** |
+| `TF_VAR_endpoint` | `https://10.10.82.53:6443` | |
+| `TF_VAR_control_plane_name_prefix` | `talos-cp-op-qa-2` | |
+| `TF_VAR_worker_name_prefix` | `talos-wk-op-qa-2` | |
+| `TF_VAR_irsa_oidc_bucket_name` | `op-usxpress-qa-2-irsa-oidc-v2` | |
+| `TF_VAR_control_plane_count` | `1` | 3 for a real cluster; 1 is enough for a throwaway |
+| `TF_VAR_cp_cpus` / `cp_memory_mb` | `4` / `16384` | matches QA |
+| `TF_VAR_worker_pools` | `{"system":{"count":1,...}}` | QA's shape, one node |
+| `TF_VAR_worker_count` | `0` | legacy scalar, ignored when `worker_pools` is set |
+| `TF_VAR_disk_size_gb` | `100` | |
+| `TF_VAR_talos_version` | `1.11.1` | |
+| `TF_VAR_content_library_name` | `dev-cluster` | **override** — all three environments use this one |
+| `TF_VAR_content_library_item_name` | `talos-v#{TF_VAR_talos_version}` | |
+| `TF_VAR_datastore` | `USXD1NTXPROD-SC1` | |
+| `TF_VAR_network_name` | `10.10.82 (vLAN 82) Prod` | |
+| `TF_VAR_enable_irsa` | `true` | `[ALL]` is `false` |
+| `TF_VAR_enable_aws_iam_authenticator` | `true` | |
+| `TF_VAR_manage_platform_secret_values` | `true` | |
+| `TfApply` | **`false`** | `[ALL]` is false, **but QA is `true`** — set it explicitly |
+| `TfDestroy` | `false` | |
+
+Inherited from `[ALL]` and correct as-is: `TF_VAR_datacenter` (`D1-Datacenter`),
+`TF_VAR_vm_cluster_name` (`D1 NTX PROD`), `TF_VAR_vsphere_server`
+(`usxd1vmvcntrapp.usxpress.com`), `TF_VAR_vsphere_user` (`svc_terraform`),
+`TF_VAR_github_owner`/`_repository`/`_branch` (`variant-inc` / `iaac-talos-flux-cluster` /
+`master`), `AWS_DEFAULT_REGION`, and the two secrets.
+
+### Still to decide
+
+- `TF_VAR_grafana_admin_secret_arn` and `_azure_ad_secret_arn` are QA-scoped ARNs in the same
+  account. QA2 can share them or get its own — sharing is simpler and the values are per-account.
+- `DOMAIN` is `usxpress-qa.com` for QA. QA2's ingress hostnames need deciding.
+- `CLUSTER_NAME` is a **separate** variable from `TF_VAR_cluster_name` and holds `qa-one` for QA.
+  What consumes it is not yet established — check before copying.
+- `TF_VAR_talosconfig_secret_arn` is set for QA but **A2 removed that Terraform variable** in #67.
+  Terraform ignores an undeclared `TF_VAR_*` silently, so it is harmless — but do not copy it to
+  QA2, and delete QA's when convenient.
+
+---
+
 ## What is NOT closed (2026-09-17)
 
 | # | Open | Needed from |

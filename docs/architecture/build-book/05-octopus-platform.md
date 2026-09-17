@@ -171,9 +171,12 @@ for i in "${spaces_array[@]}"; do
 done
 ```
 
-- **Every replica joins the same pool, `devops`, in both spaces.** There are no per-environment
-  values files and no `usxpress-*` string anywhere in the repo, so the four `usxpress-*` pools
-  created in section 04 appear to have no members. **Nothing found creates the `devops` pool.**
+- **`WORKER_POOL: devops` in `values.yaml` is the base, not what any environment gets.** The chart
+  is deployed *through Octopus*, which substitutes `WORKER_POOL` and `DOMAIN` per environment, so
+  the repo shows one value while six deployments exist — `dev`, `qa`, `stage`, `prod`, `dpl`, `ops`
+  — each with its own pool and hostname, all Healthy (verified against the API 2026-09-17).
+  **Reading this repo alone gives you the default and hides the fleet.** Same lesson as the
+  RisingWave `postRenderer`: the file in git is not the configuration that runs.
 - The worker's identity is its pod name, so a rescheduled pod registers as a new worker. `-f`
   forces re-registration.
 - The certificate is cached at `/meta/tentacle-default.config` and `configureTentacle` **recurses**

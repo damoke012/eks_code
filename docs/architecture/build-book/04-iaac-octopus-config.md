@@ -164,11 +164,25 @@ So three replicas all register into a pool named **`devops`**, in both spaces, a
 **not one of the four pools this repo creates**. There are no per-environment values files and no
 `usxpress-*` string anywhere in `iaac-octopus`.
 
-Two consequences:
+**Corrected 2026-09-17 against the live API.** The inference above was wrong. Reading
+`iaac-octopus`'s `values.yaml` showed only the *base* values; the chart is deployed **through
+Octopus**, which substitutes `WORKER_POOL` and `DOMAIN` per environment at deploy time. There are
+six worker deployments, not one:
 
-1. The four `usxpress-*` pools appear to be **declared but unfilled**. Confirm in the Octopus UI
-   before relying on either reading — a pool's membership is not visible from git.
-2. **Nothing found so far creates the `devops` pool**, which is the one that does the work.
+```
+octopusworker-{0,1,2}.dev.usxpress.io    WorkerPools-1422  usxpress-development
+octopusworker-{0,1}.qa.usxpress.io       WorkerPools-1522  usxpress-qa
+octopusworker-{0,1}.stage.usxpress.io    WorkerPools-1542  usxpress-staging
+octopusworker-{0,1}.prod.usxpress.io     WorkerPools-1582  usxpress-production
+octopusworker-{0,1}.dpl.usxpress.io      WorkerPools-286   dpl
+octopusworker-{0,1}.ops.usxpress.io      WorkerPools-22    devops
+```
+
+All Healthy. So the four `usxpress-*` pools this repo creates **are live and populated**, and the
+project picks one per environment via a `WORKER_POOL` variable holding a pool **id**.
+
+This repo manages a **subset**: `devops`, `dpl` and `Default Worker Pool` exist outside it, just as
+the `dpl` *environment* exists in Octopus but is absent from `environments.yaml`.
 
 ### Lifecycles — `lifecycles.yaml`
 
@@ -260,7 +274,7 @@ elsewhere. Recorded here only because the question is asked of every section.
 | 2 | **The apply is gated.** `if ($SpacesVariablesTfApply -eq "true")`. | A green run means a plan was printed. Second repo with this exact pattern — `iaac-talos` has `TfApply` — so treat it as a house convention, not an oddity. [[octopus-green-but-no-apply]] |
 | 3 | **Imports are disabled.** | An object created by hand does not get adopted; the next run tries to create it and fails on a duplicate name. |
 | 4 | `space_vars` defines prefixes for `Engineering`, `USXpress` and `OnPrem`, none of which are in `allowed_spaces`. | Either three spaces are managed elsewhere, or the map is dead. Unresolved. |
-| 4a | **The `devops` worker pool — the one every tentacle joins — is not created by this repo**, and nothing found so far creates it. The four `usxpress-*` pools that *are* created appear to have no workers. | The pool that runs every deployment is unaccounted for. Adding a pool here does not add a worker. |
+| 4a | This repo creates 4 of the 7 worker pools and some of the environments. `devops`, `dpl`, `Default Worker Pool` and the `dpl` environment are managed elsewhere or by hand. | A reader cannot assume this repo is the complete picture of the Octopus estate. |
 | 5 | **Not yet read:** `run_variables.ps1`, `scripts/setup.ps1`, `.github/workflows/deploy.yml`, `config.gotmpl`, `common.tfvars.gotmpl`, both import scripts, `vars.yaml` past line 40. | §1 and the variable-value half of §4 are therefore partial. |
 
 ## 8. Standing up QA2 here
@@ -280,10 +294,11 @@ environments:
 # deploy/config/lifecycles.yaml     -- without this, qa2 can never be deployed to
 ```
 
-**Probably no worker pool line.** Every tentacle registers into `devops`, which already serves
-dev, QA and prod. Adding `usxpress-qa2` would create a pool with nothing in it — which looks
-correct in a PR and fails at deployment time with no worker available. Check which pool the
-`iaac-talos` project's steps actually use before adding one.
+**No worker pool line — reuse QA's.** Pools are per environment and each is filled by its own
+`iaac-octopus` deployment. Creating `usxpress-qa2` would create an *empty* pool, and QA2 would
+then also need a worker deployment. Since QA2 lives in QA's AWS account and the workers are
+generic — the AWS role arrives as an Octopus variable, not baked into the pod — QA2 should set
+`WORKER_POOL = WorkerPools-1522` (`usxpress-qa`) and reuse QA's two healthy workers.
 
 Then `SpacesVariablesTfApply=true`, or nothing is applied.
 
@@ -316,7 +331,8 @@ environment until a project targets it.
 2. **Insert into `environments.yaml` and you renumber the rest.** Append.
 3. **`jira_environments` falls back to `unmapped`** for any name not in the map.
 4. **Green means planned, not applied.**
-4a. **A pool created here has no workers.** Workers come from `iaac-octopus`, and all of them
-   join `devops`.
+4a. **A pool needs a deployment of `iaac-octopus` to fill it.** Creating the pool here does not
+   create workers; a new environment's workers are a separate deploy. Reusing an existing pool
+   avoids that entirely.
 5. **`allowed_spaces` has two entries, `space_vars` has five.** Do not read that map as the list
    of managed spaces.
