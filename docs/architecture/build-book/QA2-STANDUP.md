@@ -9,6 +9,89 @@ ask about is a gap we have not closed.
 
 ---
 
+## The whole thing on one page
+
+Every step: what you do, which file acts, which lines do the work, what exists afterwards.
+Line numbers are `master` @ `8c732fc`.
+
+### Before the pipeline — 6 steps, 5 of them one-time
+
+| # | Do this | File / place | What it does | After |
+|---|---|---|---|---|
+| 1 | Decide 6 values | *(human)* | name, VIP, IP range, AWS account, vSphere placement, node shape | decisions exist |
+| 2 | Write them down | `deploy/terraform/envs/qa2.tfvars` | the **only** file a person edits | decisions in Git |
+| 3 | Create the state bucket | **manual — no automation exists** | a Terraform backend cannot create its own bucket | `op-usxpress-qa2-tfstate` |
+| 4 | Bootstrap account IAM | GHA `onprem-account-bootstrap.yaml` → `octopus/apply-bootstrap-perms.sh` | attaches the `iaac-talos-bootstrap` policy to `octopus-usxpress`, scoped `<cluster>-*` | Octopus worker may build |
+| 5 | Seed the worker secret | GHA `onprem-cluster-secrets.yaml` → `octopus/ensure-cluster-secrets.sh` | creates `<cluster>/octopus-worker` | ExternalSecrets can resolve |
+| 6 | Branch the platform repo | `iaac-talos-flux-platform`, `op-qa2` from `op-qa` | Terraform points at a branch; it never creates one | Flux has somewhere to read |
+
+> ⚠️ Steps 4 and 5 hardcode `options: [dev, qa, prod]` and read
+> `secrets.ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>`. **A fourth environment cannot be selected.** Add
+> `qa2` to both choice lists and add the matching GitHub secret, or these steps cannot run.
+
+### Octopus — 1 step
+
+| # | Do this | Where | What it does |
+|---|---|---|---|
+| 7 | New environment + variables | Octopus (**DevOps** space — `octo.yaml` line 38) | `TF_VAR_env_name=qa2`, `S3_BUCKET`, `TF_STATE_KEY`, `AWS_DEFAULT_REGION`, `TfApply=false`, plus the only two secrets: `TF_VAR_vsphere_password`, `TF_VAR_github_token` |
+
+### The pipeline — 3 steps
+
+| # | Do this | File | Lines | What happens |
+|---|---|---|---|---|
+| 8 | `git push` any branch | `.github/workflows/octo.yaml` | 5–8 trigger, 32–39 package | validates, packages `deploy/`, pushes to Octopus, creates a release. **Packaging is not applying.** |
+| 9 | Deploy with `TfApply=false` | `deploy/deploy.ps1` | 15–26 sweep `TF_*` into env vars · 39–43 `init` with the S3 backend · 111 `plan` | a plan you read before anything is built |
+| 10 | Set `TfApply=true`, deploy | `deploy/deploy.ps1` | 113–114 `apply` | the sequence below |
+
+### What step 10 actually does, in order
+
+| # | File | Lines | Action |
+|---|---|---|---|
+| 1 | `main.tf` | 9–13 | creates the vSphere folder |
+| 2 | `main.tf` | 15–30 | clones control-plane VMs from the Talos OVA |
+| 3 | `main.tf` | 35–47 | picks pools vs legacy scalars (`effective_worker_pools`) |
+| 4 | `main.tf` | 64–82 | clones worker VMs per pool, plus the Ceph second disk |
+| 5 | `modules/talos/main.tf` | 32–66 | renders the CP machine config — **CNI `none`, kube-proxy disabled**, Cilium inlined, one assembled apiServer patch |
+| 6 | `modules/talos/main.tf` | 86–114 | applies config to CP[0] — hostname, VIP on `eth0`, `hostname-override` |
+| 7 | `modules/talos/main.tf` | 116–141 | waits for port 50000, then a **fixed 30s sleep** |
+| 8 | `modules/talos/main.tf` | 143–148 | bootstraps etcd on CP[0] |
+| 9 | `modules/talos/main.tf` | 150–181 | joins the remaining control planes |
+| 10 | `modules/talos/main.tf` | 183–224 | joins workers — synthetic `zone` a/b/c, pool labels, pool taints |
+| 11 | `modules/talos/main.tf` | 226–230 | retrieves the kubeconfig |
+| 12 | `main.tf` | 189–199 | IRSA module — OIDC S3 bucket, CloudFront, IAM OIDC provider, 8 roles |
+| 13 | `main.tf` | 218–260 | fetches JWKS from the cluster → S3 → invalidates CloudFront |
+| 14 | `secrets-values.tf` | 22–34 | **writes the talosconfig from the cluster's own machine secrets** |
+| 15 | `secrets-values.tf` | 37–52 | generates a random 28-char Grafana admin password |
+| 16 | `secrets-values.tf` | 55–65 | Entra placeholder, preserved by `ignore_changes` |
+| 17 | `main.tf` | 266–309 | writes 3 SSM parameters — endpoint, CA, OIDC issuer |
+| 18 | `main.tf` | 317–370 | `magerunner-deploy` SA + cluster-admin binding + token → SSM |
+| 19 | `modules/flux/main.tf` | 82–91 | waits for the API. **Bootstraps Flux only if A6 Option 1 is taken** |
+| 20 | `deploy.ps1` | 130–162 | validates the 3 SSM parameters — **hard fail** if any is empty |
+| 21 | `deploy.ps1` | 164–224 | force-finalizes stuck `Terminating` namespaces |
+| 22 | `deploy.ps1` | 226–294 | restarts istiod if its log shows `could not decode pem` |
+| 23 | `deploy.ps1` | 115–123 | publishes `terraform_outputs.yml` as an Octopus artifact |
+
+**Steps 14–16 are the answer to "values change on rebuild".** Nobody types an ARN; a teardown
+regenerates all of it.
+
+### After the pipeline
+
+| # | What | Where |
+|---|---|---|
+| 11 | Flux reconciles the platform stack | `iaac-talos-flux-platform@op-qa2` |
+| 12 | Verify at the thing, not the tick | Part B step 8 |
+
+### The files a person touches, complete
+
+1. `deploy/terraform/envs/qa2.tfvars` — **the only file with decisions in it**
+2. Two GHA workflow dropdowns, to admit a 4th environment
+3. Octopus: one environment, six variables, two secrets
+4. One new branch in the platform repo
+
+Everything else is generated.
+
+---
+
 ## Part A — what must change before QA2 is attempted
 
 None of this is done yet (2026-09-17). These are prerequisites, not options: without them QA2
@@ -282,7 +365,7 @@ days is a worse outcome than not testing.
 | 1 | Octopus variable values, and which space holds them | an authenticated Octopus API call |
 | 2 | **Flux bootstrap: restore to Terraform, or accept a manual step?** | Doke |
 | 3 | QA2 IP/VIP allocation and vSphere capacity | networking + vSphere |
-| 4 | `onprem-account-bootstrap.yaml` and `onprem-cluster-secrets.yaml` — do they already create the state bucket and seed secrets? | reading them |
+| 4 | ~~Do the bootstrap workflows create the state bucket?~~ **Answered 2026-09-17: no.** `onprem-account-bootstrap.yaml` attaches an IAM policy; `onprem-cluster-secrets.yaml` seeds `<cluster>/octopus-worker`. **The state bucket has no automation at all.** Both also hardcode `options: [dev, qa, prod]` and `ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>`, so a 4th environment cannot be selected. | closed — now 3 fixes |
 | 5 | Whether QA2 reuses QA's AWS account or gets its own | Doke + cloud team |
 
 Items 1 and 4 are reads. Item 2 is a decision. Items 3 and 5 are allocations. **None of Part A
