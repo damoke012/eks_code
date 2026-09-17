@@ -538,9 +538,9 @@ Scope every one of these to the new `qa2` environment.
 | `TF_VAR_control_plane_name_prefix` | `talos-cp-op-qa-2` | |
 | `TF_VAR_worker_name_prefix` | `talos-wk-op-qa-2` | |
 | `TF_VAR_irsa_oidc_bucket_name` | `op-usxpress-qa-2-irsa-oidc-v2` | |
-| `TF_VAR_control_plane_count` | `1` | 3 for a real cluster; 1 is enough for a throwaway |
+| `TF_VAR_control_plane_count` | `1` | **had to be CREATED, not edited** — no environment scopes it, so every cluster inherits `[ALL]` = 3. See the trap below. |
 | `TF_VAR_cp_cpus` / `cp_memory_mb` | `4` / `16384` | matches QA |
-| `TF_VAR_worker_pools` | `{"system":{"count":1,...}}` | QA's shape, one node |
+| `TF_VAR_worker_pools` | all three pools, `count: 1` each | **keep the three pools.** QA's copy is `system 2 + platform 3 + application 5 = 10`; dropping to one flat pool strands any manifest carrying a `pool=platform` / `pool=application` nodeSelector, with no error. |
 | `TF_VAR_worker_count` | `0` | legacy scalar, ignored when `worker_pools` is set |
 | `TF_VAR_disk_size_gb` | `100` | |
 | `TF_VAR_talos_version` | `1.11.1` | |
@@ -579,6 +579,34 @@ environment** — for those, get the reservation confirmed before step 9.
 
 ⚠️ `ping` and `arp` answer "is anyone on it right now", never "is it reserved". A free address
 inside a DHCP scope is still leasable tomorrow. Do not record a silent ping as confirmation.
+
+
+### ☠️ The trap that produced a 13-VM plan (2026-09-17)
+
+QA2's first plan said **`97 to add`**, with three control planes and ten workers — QA's full
+production shape, for a cluster specified as 1 + 1.
+
+Neither number came from a mistake in the copy. They came from two different places, and only
+one of them was visible:
+
+| Variable | Where the wrong value came from |
+|---|---|
+| `control_plane_count` | **`[ALL]` = 3.** No environment scopes it — not dev, not QA, not prod. `octopus-create-qa2-vars.py` derives the new environment from what the source scopes *explicitly*, so a value the source merely inherits is never seen, never copied and never flagged. |
+| `worker_pools` | **copied faithfully.** QA's value defines three pools summing to ten. The copy was correct; the intent was not. |
+
+**The general rule: a generator that copies scoped variables silently leaves every inherited
+value at the `[ALL]` default.** For a throwaway that means an oversized cluster. For a real
+environment it means the opposite — `[ALL]` holds `cp_cpus = 2`, `cp_memory_mb = 8192`,
+`disk_size_gb = 50`, `worker_count = 2`, which are dev-sized and wrong for production, with
+nothing anywhere saying so.
+
+After generating a new environment, list every `TF_VAR_*` it resolves through `[ALL]` and
+confirm each one deliberately. `octopus-set-env-var.py --create` writes the override and prints
+the inherited value it is displacing.
+
+⚠️ **And a release freezes the variable snapshot.** Correcting a variable does not reach an
+existing release. Octopus → the release → *Show Variables* → **Update Variables**, or the next
+plan is byte-identical to the last one and reads exactly like a change that did not work.
 
 ### Still to decide
 
