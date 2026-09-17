@@ -501,6 +501,7 @@ days is a worse outcome than not testing.
 | 3 | QA2 IP/VIP allocation and vSphere capacity | networking + vSphere |
 | 4 | ~~Do the bootstrap workflows create the state bucket?~~ **Answered 2026-09-17: no.** `onprem-account-bootstrap.yaml` attaches an IAM policy; `onprem-cluster-secrets.yaml` seeds `<cluster>/octopus-worker`. **The state bucket has no automation at all.** Both also hardcode `options: [dev, qa, prod]` and `ONPREM_BOOTSTRAP_ROLE_ARN_<ENV>`, so a 4th environment cannot be selected. | closed — now 3 fixes |
 | 5 | Whether QA2 reuses QA's AWS account or gets its own | Doke + cloud team |
+| 6 | **There is no `prod.tfvars`.** `deploy/terraform/envs/` holds `dev.tfvars` and `qa.tfvars` only — confirmed 2026-09-17 by running the generator against the branch. So the QA2 → dev → QA → prod rollout of `TF_USE_VARFILE=true` has no last step: prod's file has to be generated before prod can ever use one, and until then prod stays 100% Octopus-variable-driven. | generate it with `new-environment.sh --from qa`, then reconcile every value against prod's live Octopus variables before it is trusted |
 
 Items 1 and 4 are reads. Item 2 is a decision. Items 3 and 5 are allocations. **None of Part A
 has been written yet** — this page is the design, not the state of the repo.

@@ -104,9 +104,9 @@ ask() {
 
 confirm() {
   local question=$1 reply
+  [ "${ACCEPT_ALL:-0}" = "1" ] && { note "$question -- accepted by --yes"; return 0; }
   if [ "$INTERACTIVE" -eq 0 ]; then
-    [ "${ACCEPT_ALL:-0}" = "1" ] || die "$question -- rerun with --yes to accept non-interactively"
-    return 0
+    die "$question -- rerun with --yes to accept non-interactively"
   fi
   read -r -p "   ${question} [type yes]: " reply || die "aborted"
   [ "$reply" = "yes" ] || die "declined"
@@ -147,6 +147,10 @@ while [ $# -gt 0 ]; do
     *) printf '!! unknown argument: %s\n' "$1" >&2; usage ;;
   esac
 done
+
+# --yes means "do not ask me anything": take every default, fail on anything with no default.
+# Without this, a prompt in a terminal happily reads whatever is left in the paste buffer.
+[ "$ACCEPT_ALL" = "1" ] && INTERACTIVE=0
 
 ENVS_DIR="deploy/terraform/envs"
 [ -d "$ENVS_DIR" ] || die "run this from the repo root -- $ENVS_DIR does not exist here"
