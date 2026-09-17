@@ -10,7 +10,14 @@ Sensitive variables come back from the API with a null value, so nothing secret 
     python3 scripts/octopus-dump-talos-vars.py            # prompts for the key
     python3 scripts/octopus-dump-talos-vars.py --all      # every project
 """
-import json, os, pathlib, sys, urllib.error, urllib.request
+import json, os, pathlib, signal, sys, urllib.error, urllib.request
+
+# Piping into head closes stdout early; without this the script dies with a BrokenPipeError
+# traceback that looks like an API failure. It is not -- the dump was fine.
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except (AttributeError, ValueError):
+    pass
 
 BASE = os.environ.get("OCTOPUS_URL", "https://octopus.usxpress.io").rstrip("/") + "/api"
 KEY = os.environ.get("OCTOPUS_API_KEY", "")
