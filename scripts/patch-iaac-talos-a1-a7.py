@@ -420,8 +420,10 @@ DONE. Not covered, deliberately:
                     change which resources exist.
   A3                set manage_platform_secret_values=true per env -- the generator does
                     this for new envs; existing envs need it added with their A1 flag.
-  A4                the vSphere placement VALUES are in Octopus and could not be read
-                    (API key rejected). The generator marks them MISSING and exits 3.
+  A4                CLOSED 2026-09-17 -- the nine vSphere placement values were read from
+                    Octopus and are written into both tfvars by A9 above.
+  A6                enable_flux_bootstrap defaults FALSE. It must be set true ONLY for a new
+                    cluster. Never for dev/qa/prod, whose Flux is out of Terraform state.
 
 Next: git diff, then terraform fmt -check, then a plan on a throwaway before any merge.
 """)
