@@ -63,7 +63,22 @@ spec:
   prune: true
 ```
 
-Identical shape on dev (`path: ./manifests/op-usxpress-dev`, `prune: false`).
+Identical shape on dev (`path: ./manifests/op-usxpress-dev`) and on **prod**, verified
+2026-09-17:
+
+```yaml
+# clusters/op-usxpress-prod/flux-system/infra.yaml
+  name: iaac-risingwave-onprem
+  namespace: flux-system
+spec:
+  interval: 5m0s
+  ref:
+    branch: main
+  url: https://github.com/variant-inc/iaac-risingwave-onprem.git
+```
+
+Prod's Kustomization additionally sets `wait: true` and `timeout: 10m0s`, and carries its own
+`postRenderer`. **All three clusters track the same branch.**
 
 **So a merge to `main` that touches `manifests/op-usxpress-prod/` reaches production within five
 minutes.** There is no release, no tag, no approval, no environment branch. The only pre-merge
@@ -168,14 +183,15 @@ partial for anything touching dashboards or bootstrap.
 | 1 | **No gate between merge and prod.** One `main`, five-minute interval. | Rule 10 cannot be followed. A prod-affecting change is one merge away, and the only check proves rendering, not applying. |
 | 2 | **`manifest-lint` cannot catch an apply failure.** `kustomize build` succeeds on a manifest that server-side apply will reject. | The exact 2026-09-17 failure mode ([[server-side-apply-keeps-dropped-fields]]). A `--server-side --dry-run=server` check against a live cluster would catch it; a render never will. |
 | 3 | **No alert on a stuck Kustomization.** | The freeze ran ~4h unnoticed. `scripts/flux-kustomization-health.sh` detects it; alert C6 is blocked on Alertmanager. |
-| 4 | **Not read:** `deploy/terraform/{main,secrets,outputs,variables}.tf`, `deploy/README.md`, `console-ui-enablement-runbook.md`, prod's Flux block (truncated in the read — dev and QA confirmed, prod assumed identical and **still to verify**). | §1 and §5 are partial on the Terraform side. |
+| 4 | **Not read:** `deploy/terraform/{main,secrets,outputs,variables}.tf`, `deploy/README.md`, `console-ui-enablement-runbook.md`. | §1 and §5 are partial on the Terraform side. |
 
 ---
 
 ## Proven
 
-- Dev and QA both track `branch: main` of `iaac-risingwave-onprem` at a 5-minute interval, each
-  with a per-cluster `path`. Read from `iaac-talos-flux-cluster` on `master`.
+- **All three clusters** — dev, QA and prod — track `branch: main` of `iaac-risingwave-onprem` at
+  a 5-minute interval, each with a per-cluster `path`. Read from `iaac-talos-flux-cluster` on
+  `master`, 2026-09-17.
 - The Terraform half retains a `TfApply` gate; the manifests half has none.
 - `manifest-lint.yaml` runs only on `pull_request`.
 - RisingWave resource requests/limits, `stateStore`, and the operator chart version are set by a
