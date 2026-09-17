@@ -274,7 +274,7 @@ elsewhere. Recorded here only because the question is asked of every section.
 | 2 | **The apply is gated.** `if ($SpacesVariablesTfApply -eq "true")`. | A green run means a plan was printed. Second repo with this exact pattern — `iaac-talos` has `TfApply` — so treat it as a house convention, not an oddity. [[octopus-green-but-no-apply]] |
 | 3 | **Imports are disabled.** | An object created by hand does not get adopted; the next run tries to create it and fails on a duplicate name. |
 | 4 | `space_vars` defines prefixes for `Engineering`, `USXpress` and `OnPrem`, none of which are in `allowed_spaces`. | Either three spaces are managed elsewhere, or the map is dead. Unresolved. |
-| 4a | This repo creates 4 of the 7 worker pools and some of the environments. `devops`, `dpl`, `Default Worker Pool` and the `dpl` environment are managed elsewhere or by hand. | A reader cannot assume this repo is the complete picture of the Octopus estate. |
+| 4a | This repo manages a **subset** of the Octopus estate. Octopus has **7 environments** (`dpl` and `devops` are absent from `environments.yaml`), **7 worker pools** (4 declared here), and the lifecycle `iaac-talos` actually uses — `iaac-release` — is not in `lifecycles.yaml` at all. | A reader cannot assume this repo is the complete picture. Verified against the live API 2026-09-17. |
 | 5 | **Not yet read:** `run_variables.ps1`, `scripts/setup.ps1`, `.github/workflows/deploy.yml`, `config.gotmpl`, `common.tfvars.gotmpl`, both import scripts, `vars.yaml` past line 40. | §1 and the variable-value half of §4 are therefore partial. |
 
 ## 8. Standing up QA2 here
@@ -301,6 +301,22 @@ generic — the AWS role arrives as an Octopus variable, not baked into the pod 
 `WORKER_POOL = WorkerPools-1522` (`usxpress-qa`) and reuse QA's two healthy workers.
 
 Then `SpacesVariablesTfApply=true`, or nothing is applied.
+
+**Corrected 2026-09-17 against the live API — the lifecycle half is NOT a PR.** `iaac-talos` uses
+`Lifecycles-42`, whose name is **`iaac-release`** (slug `release-devops`). That name appears
+nowhere in `lifecycles.yaml`, and its production phase keeps 30 Items where the repo's `release`
+keeps 10. So the lifecycle that governs every cluster deployment is managed **outside this repo**.
+
+Its four phases, with the environments they target:
+
+| Phase | Environment | Mode |
+|---|---|---|
+| development | `Environments-1` development | automatic |
+| qa | `Environments-602` qa | optional, manual |
+| staging | `Environments-21` staging | optional, manual |
+| production | `Environments-41` production | manual |
+
+Adding `qa2` to that lifecycle is **console work**. The environment itself is still a PR here.
 
 **Blast radius:** additive in both `Default` and `DevOps`. No existing environment, pool or
 lifecycle is modified, *provided the append rule is followed*. Nothing deploys to a new

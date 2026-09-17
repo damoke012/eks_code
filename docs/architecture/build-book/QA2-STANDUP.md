@@ -51,7 +51,8 @@ thing was assumed to be console work. Half of it is code.
 
 | # | Do this | Where | What it does |
 |---|---|---|---|
-| 7a | Environment + **lifecycle phase** (probably no worker pool) | PR to `iaac-octopus-config` — `deploy/config/{environments,lifecycles}.yaml` | creates them in both managed spaces. **Append to the lists** — inserting renumbers every later entry's `sort_order`. **An environment named in no lifecycle phase can never be deployed to.** Then `SpacesVariablesTfApply=true`, or the run only prints a plan. |
+| 7a | The **environment** `qa2` | PR to `iaac-octopus-config` — one appended line in `deploy/config/environments.yaml`. **No worker pool** (QA2 reuses `WorkerPools-1522`) and **no lifecycle line** — see 7c |
+| 7c | A **phase for `qa2` in lifecycle `iaac-release`** | **Octopus console.** `iaac-talos` uses `Lifecycles-42` / `iaac-release`, which is not in `lifecycles.yaml`. Without a phase the environment exists and can never be deployed to | creates them in both managed spaces. **Append to the lists** — inserting renumbers every later entry's `sort_order`. **An environment named in no lifecycle phase can never be deployed to.** Then `SpacesVariablesTfApply=true`, or the run only prints a plan. |
 | 7b | Project variables | Octopus UI, project `iaac-talos` (**DevOps** space — `octo.yaml` line 38) | `TF_VAR_env_name=qa2`, `TF_USE_VARFILE=true`, `S3_BUCKET`, `TF_STATE_KEY`, `AWS_DEFAULT_REGION`, `TfApply=false`, plus the only two secrets: `TF_VAR_vsphere_password`, `TF_VAR_github_token`. **No repo manages these** — see [04-iaac-octopus-config.md](04-iaac-octopus-config.md) §7. |
 
 ### The pipeline — 3 steps
