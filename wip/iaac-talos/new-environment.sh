@@ -311,6 +311,15 @@ cat >&2 <<REVIEW
 REVIEW
 confirm "Write this file?"
 
+# VM name prefixes follow the FLEET convention, derived from the cluster name rather than the
+# environment key: op-usxpress-qa -> talos-cp-op-qa, matching dev and prod. Deriving them from
+# the env key would give talos-cp-qa2, which no other cluster looks like -- and the Octopus
+# variable for this cluster already says talos-cp-op-qa-2.
+case "$CLUSTER" in
+  op-usxpress-*) NAME_SHORT="op-${CLUSTER#op-usxpress-}" ;;
+  *)             NAME_SHORT="$ENV_KEY" ;;
+esac
+
 TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 
@@ -339,8 +348,8 @@ trap 'rm -f "$TMP"' EXIT
   echo "control_plane_vip         = \"${VIP}\""
   echo "endpoint                  = \"https://${VIP}:6443\""
   echo "talos_version             = \"${TALOS_VERSION}\""
-  echo "control_plane_name_prefix = \"talos-cp-${ENV_KEY}\""
-  echo "worker_name_prefix        = \"talos-wk-${ENV_KEY}\""
+  echo "control_plane_name_prefix = \"talos-cp-${NAME_SHORT}\""
+  echo "worker_name_prefix        = \"talos-wk-${NAME_SHORT}\""
   echo
   echo "cilium_chart_version = \"${CILIUM_VERSION}\""
   echo "cilium_cli_image     = \"${CILIUM_CLI}\""
