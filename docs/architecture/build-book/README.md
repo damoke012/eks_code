@@ -16,7 +16,7 @@ Three environments, each its own AWS account and vSphere footprint:
 | # | Repo | Owns | Status |
 |---|---|---|---|
 | 01 | [`iaac-talos`](01-iaac-talos.md) | vSphere VMs, Talos bootstrap, Cilium, Flux bootstrap, IRSA | drafted, `deploy.ps1` pending |
-| 02 | `iaac-talos-flux-cluster` | the Flux `GitRepository` + `Kustomization` wiring | not started |
+| 02 | [`iaac-talos-flux-cluster`](02-iaac-talos-flux-cluster.md) | the Flux `GitRepository` + `Kustomization` wiring | drafted |
 | 03 | `iaac-talos-flux-platform` | the platform stack, branch per cluster | not started |
 | 04 | `iaac-octopus-config` | Octopus variables — supplies every `TF_VAR_*` | not started |
 | 05 | `iaac-octopus-onprem` | release mirror, enrollment, fork-side dispatchers | not started |

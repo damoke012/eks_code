@@ -341,9 +341,16 @@ so no cluster can clobber another, and it needs no read-modify-write.
    `github_repository = "iaac-talos-flux-platform"` and `github_branch = "op-qa"`; both are
    **wrong**, and harmless only because that file is never read.
 
-   What QA-2 actually needs: a `clusters/op-usxpress-qa-2/` directory on `master` of
-   `iaac-talos-flux-cluster`, holding the Flux `GitRepository` + `Kustomization` objects that
-   point at the platform repo. That is repo 2's job, and it is a PR, not a branch.
+   What QA-2 actually needs is **both**, corrected after reading repo 2:
+
+   - a `clusters/op-usxpress-qa-2/` **directory on `master`** of `iaac-talos-flux-cluster`
+     (a PR), and
+   - an **`op-qa-2` branch in `iaac-talos-flux-platform`**, because that directory's
+     `infra-source.yaml` names a per-environment branch of the platform repo, which must
+     exist before Flux can resolve the `infra` source.
+
+   The cluster repo is single-branch; the platform repo is branch-per-environment. See
+   [02-iaac-talos-flux-cluster.md](02-iaac-talos-flux-cluster.md) §2.
 
 ### Step 3 — Octopus scaffolding
 
