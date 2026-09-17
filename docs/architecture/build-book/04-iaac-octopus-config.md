@@ -142,8 +142,33 @@ worker_pools:
   - usxpress-production
 ```
 
-Same `for_each`/`sort_order` shape. The pool is created here; the **workers that register into
-it** are not — that is expected to be `iaac-octopus-onprem` (section 05, *unverified*).
+Same `for_each`/`sort_order` shape. **The pool is created here; nothing registers into it here.**
+
+And that turns out to matter. The workers are pods, built and deployed from `iaac-octopus`
+(section 05). Its `configure-tentacle.sh` runs:
+
+```bash
+tentacle register-worker --name "$ingress" --server "$SERVER_URL" \
+        --apiKey "$API_KEY" --workerPool "$WORKER_POOL" --space "$i" -f
+```
+
+and both of the repo's two values files — the only two, checked — say the same thing:
+
+```yaml
+SPACES: "Default,DevOps"
+WORKER_POOL: devops
+replicaCount: 3
+```
+
+So three replicas all register into a pool named **`devops`**, in both spaces, and `devops` is
+**not one of the four pools this repo creates**. There are no per-environment values files and no
+`usxpress-*` string anywhere in `iaac-octopus`.
+
+Two consequences:
+
+1. The four `usxpress-*` pools appear to be **declared but unfilled**. Confirm in the Octopus UI
+   before relying on either reading — a pool's membership is not visible from git.
+2. **Nothing found so far creates the `devops` pool**, which is the one that does the work.
 
 ### Lifecycles — `lifecycles.yaml`
 
@@ -235,6 +260,7 @@ elsewhere. Recorded here only because the question is asked of every section.
 | 2 | **The apply is gated.** `if ($SpacesVariablesTfApply -eq "true")`. | A green run means a plan was printed. Second repo with this exact pattern — `iaac-talos` has `TfApply` — so treat it as a house convention, not an oddity. [[octopus-green-but-no-apply]] |
 | 3 | **Imports are disabled.** | An object created by hand does not get adopted; the next run tries to create it and fails on a duplicate name. |
 | 4 | `space_vars` defines prefixes for `Engineering`, `USXpress` and `OnPrem`, none of which are in `allowed_spaces`. | Either three spaces are managed elsewhere, or the map is dead. Unresolved. |
+| 4a | **The `devops` worker pool — the one every tentacle joins — is not created by this repo**, and nothing found so far creates it. The four `usxpress-*` pools that *are* created appear to have no workers. | The pool that runs every deployment is unaccounted for. Adding a pool here does not add a worker. |
 | 5 | **Not yet read:** `run_variables.ps1`, `scripts/setup.ps1`, `.github/workflows/deploy.yml`, `config.gotmpl`, `common.tfvars.gotmpl`, both import scripts, `vars.yaml` past line 40. | §1 and the variable-value half of §4 are therefore partial. |
 
 ## 8. Standing up QA2 here
@@ -251,11 +277,13 @@ environments:
   - production
   - qa2            # appended: no other environment's sort_order moves
 
-# deploy/config/worker_pools.yaml
-  - usxpress-qa2
-
 # deploy/config/lifecycles.yaml     -- without this, qa2 can never be deployed to
 ```
+
+**Probably no worker pool line.** Every tentacle registers into `devops`, which already serves
+dev, QA and prod. Adding `usxpress-qa2` would create a pool with nothing in it — which looks
+correct in a PR and fails at deployment time with no worker available. Check which pool the
+`iaac-talos` project's steps actually use before adding one.
 
 Then `SpacesVariablesTfApply=true`, or nothing is applied.
 
@@ -288,5 +316,7 @@ environment until a project targets it.
 2. **Insert into `environments.yaml` and you renumber the rest.** Append.
 3. **`jira_environments` falls back to `unmapped`** for any name not in the map.
 4. **Green means planned, not applied.**
+4a. **A pool created here has no workers.** Workers come from `iaac-octopus`, and all of them
+   join `devops`.
 5. **`allowed_spaces` has two entries, `space_vars` has five.** Do not read that map as the list
    of managed spaces.

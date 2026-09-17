@@ -51,7 +51,7 @@ thing was assumed to be console work. Half of it is code.
 
 | # | Do this | Where | What it does |
 |---|---|---|---|
-| 7a | Environment, worker pool, **lifecycle phase** | PR to `iaac-octopus-config` — `deploy/config/{environments,worker_pools,lifecycles}.yaml` | creates them in both managed spaces. **Append to the lists** — inserting renumbers every later entry's `sort_order`. **An environment named in no lifecycle phase can never be deployed to.** Then `SpacesVariablesTfApply=true`, or the run only prints a plan. |
+| 7a | Environment + **lifecycle phase** (probably no worker pool) | PR to `iaac-octopus-config` — `deploy/config/{environments,lifecycles}.yaml` | creates them in both managed spaces. **Append to the lists** — inserting renumbers every later entry's `sort_order`. **An environment named in no lifecycle phase can never be deployed to.** Then `SpacesVariablesTfApply=true`, or the run only prints a plan. |
 | 7b | Project variables | Octopus UI, project `iaac-talos` (**DevOps** space — `octo.yaml` line 38) | `TF_VAR_env_name=qa2`, `TF_USE_VARFILE=true`, `S3_BUCKET`, `TF_STATE_KEY`, `AWS_DEFAULT_REGION`, `TfApply=false`, plus the only two secrets: `TF_VAR_vsphere_password`, `TF_VAR_github_token`. **No repo manages these** — see [04-iaac-octopus-config.md](04-iaac-octopus-config.md) §7. |
 
 ### The pipeline — 3 steps
@@ -376,9 +376,13 @@ And, in `iaac-octopus-config`, three list entries — **appended, not inserted**
 
 ```yaml
 deploy/config/environments.yaml   - qa2     # sort_order = list position; inserting renumbers the rest
-deploy/config/worker_pools.yaml   - usxpress-qa2
 deploy/config/lifecycles.yaml     add qa2 to a phase
 ```
+
+⚠️ **Do not add a worker pool without checking first.** Every Octopus tentacle is a pod from
+`iaac-octopus`, and all three replicas register into one shared pool named `devops` — not into
+the four `usxpress-*` pools `worker_pools.yaml` creates. A new pool would be created empty, which
+reviews clean and then fails at deployment with no worker available.
 
 ⚠️ **The lifecycle entry is not optional.** Every phase names its environments explicitly and the
 module resolves them by name to an id. An environment in no phase exists in the UI and can never
