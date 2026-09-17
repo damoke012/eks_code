@@ -263,7 +263,7 @@ done
 # Validate here as well as in Terraform: a bad value should never reach a file.
 echo "$VIP" | grep -Eq '^([0-9]{1,3}\\.){3}[0-9]{1,3}$' || {
   echo "!! --vip must be an IPv4 address, got '$VIP'" >&2; exit 1; }
-echo "$ENV_KEY" | grep -Eq '^[a-z0-9]+$' || {
+echo "$ENV_KEY" | grep -Eq '^[a-z0-9-]+$' || {
   echo "!! --env must be lowercase alphanumeric, got '$ENV_KEY'" >&2; exit 1; }
 
 SRC="deploy/terraform/envs/${FROM}.tfvars"
@@ -311,16 +311,23 @@ inherit() { grep -E "^ *$1 " "$SRC" || true; }
   inherit aws_region
   echo "irsa_oidc_bucket_name = \\"${CLUSTER}-irsa-oidc-v2\\""
   echo "irsa_role_arn         = \\"\\""
-  echo "tf_state_bucket       = \\"${CLUSTER}-tfstate\\""
+  # The backend is shared per AWS ACCOUNT, with TF_STATE_KEY separating clusters. Inherit
+  # the reference environment's bucket; only a brand-new account needs a new one.
+  if inherit tf_state_bucket | grep -q .; then inherit tf_state_bucket; else
+    echo "tf_state_bucket       = \\"${CLUSTER}-tfstate\\"  # new ACCOUNT: create it first"; fi
   echo
   echo "github_owner      = \\"variant-inc\\""
-  echo "github_repository = \\"iaac-talos-flux-platform\\""
-  echo "github_branch     = \\"op-${ENV_KEY}\\""
+  # The CLUSTER repo on master, into clusters/<name>/ -- not the platform repo on a branch.
+  # Read from the live Octopus variables 2026-09-17; the old tfvars said otherwise and were
+  # wrong, harmlessly, because nothing read them.
+  echo "github_repository = \\"iaac-talos-flux-cluster\\""
+  echo "github_branch     = \\"master\\""
   echo "flux_target_path  = \\"clusters/${CLUSTER}\\""
   echo
   echo "# vSphere placement -- inherited from ${FROM}. If these are absent, they are still"
   echo "# only in Octopus and this environment CANNOT be built from git (gap A4)."
-  for v in datacenter datastore vm_cluster_name vm_folder network_name \\
+  echo "vm_folder                 = \\"/KubernetesD1/TalosD1/${CLUSTER}\\""
+  for v in datacenter datastore vm_cluster_name network_name \\
            content_library_name content_library_item_name; do
     line=$(inherit "$v")
     if [ -n "$line" ]; then echo "$line"; else echo "# MISSING: $v -- not in ${FROM}.tfvars"; fi
@@ -372,11 +379,14 @@ datastore                 = "USXD1NTXPROD-SC1"
 vm_cluster_name           = "D1 NTX PROD"
 network_name              = "10.10.82 (vLAN 82) Prod"
 content_library_name      = "dev-cluster"  # yes, dev-cluster -- shared by dev, QA and PROD
-content_library_item_name = "talos-v1.11.1"
+content_library_item_name = "talos-v1.11.1"  # MUST track talos_version above; Octopus\n#   holds this as talos-v#{TF_VAR_talos_version} and interpolates. A tfvars cannot, so\n#   changing talos_version means changing this line too.
 """
 
 for envkey, fixes, folder in (
     ("dev", [
+        ("# Talosconfig SM secret ARN (seeded out-of-band 2026-06-23)\n",
+         "# Talosconfig secret: created AND populated by Terraform. No ARN is written here\n"
+         "# -- see secrets-values.tf and modules/irsa/talosconfig-secret.tf.\n"),
         ('github_repository = "iaac-talos-flux-platform"',
          'github_repository = "iaac-talos-flux-cluster"'),
         ('github_branch     = "op-dev"', 'github_branch     = "master"'),
@@ -385,6 +395,11 @@ for envkey, fixes, folder in (
         ('cp_cpus             = 4', 'cp_cpus             = 2'),
      ], "bm-dev"),
     ("qa", [
+        ("# Talosconfig SM secret ARN — MUST be seeded before first apply\n"
+         "# (talosctl generates a talosconfig; then aws secretsmanager create-secret\n"
+         "#  --name op-usxpress-qa/talosconfig ...; then paste the full ARN below)\n",
+         "# Talosconfig secret: created AND populated by Terraform. No ARN is written here\n"
+         "# -- see secrets-values.tf and modules/irsa/talosconfig-secret.tf.\n"),
         ('github_repository = "iaac-talos-flux-platform"',
          'github_repository = "iaac-talos-flux-cluster"'),
         ('github_branch     = "op-qa"', 'github_branch     = "master"'),
