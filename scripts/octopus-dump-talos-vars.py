@@ -10,20 +10,30 @@ Sensitive variables come back from the API with a null value, so nothing secret 
     python3 scripts/octopus-dump-talos-vars.py            # prompts for the key
     python3 scripts/octopus-dump-talos-vars.py --all      # every project
 """
-import json, os, sys, urllib.error, urllib.request
+import json, os, pathlib, sys, urllib.error, urllib.request
 
 BASE = os.environ.get("OCTOPUS_URL", "https://octopus.usxpress.io").rstrip("/") + "/api"
 KEY = os.environ.get("OCTOPUS_API_KEY", "")
 MATCH = None if "--all" in sys.argv else "talos"
 
-# Prompt rather than demand an export. A command containing a placeholder gets pasted
-# verbatim, and the placeholder becomes the credential -- that happened on 2026-09-17.
+# Three sources, in order: env var, a 0600 key file, then an interactive prompt.
+# The prompt is last because hidden input through a pasted terminal session is unreliable --
+# it silently produced an empty key twice on 2026-09-17.
+KEYFILE = pathlib.Path.home() / ".octopus-api-key"
+if not KEY and KEYFILE.exists():
+    KEY = KEYFILE.read_text().strip()
+    print(f"using key from {KEYFILE}")
 if not KEY:
     import getpass
     try:
         KEY = getpass.getpass("Octopus API key (hidden, starts with API-): ").strip()
     except (EOFError, KeyboardInterrupt):
         sys.exit("\n!! no key entered")
+if not KEY:
+    sys.exit("!! no key received -- nothing was typed, or the paste did not land.\n"
+             "   Write it to a file instead:\n"
+             "     read -rs -p 'paste key: ' K && printf '%s' \"$K\" > ~/.octopus-api-key"
+             " && chmod 600 ~/.octopus-api-key && unset K")
 if not KEY.startswith("API-"):
     sys.exit("!! that does not look like an Octopus API key -- it must start with 'API-'.\n"
              "   Octopus profile -> My API Keys -> New API Key. Nothing was sent.")
