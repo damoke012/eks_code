@@ -1,4 +1,4 @@
-Grafana on `op-usxpress-qa` has been running healthily for 72 days — `3/3 Running`,
+Grafana on `op-usxpress-qa` has been running healthily for 72 days (measured 2026-09-18) — `3/3 Running`,
 0 restarts, PVC bound. But its HelmRelease has been `Stalled / RetriesExceeded` since
 **14 July**, so Flux cannot deliver any change to it. Nothing committed under
 `infrastructure/grafana/` has reached the cluster in over two months, and nothing reports
