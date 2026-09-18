@@ -209,3 +209,41 @@ ConfigMap, as a follow-up.
 - **A Kustomization being `Ready=True` says nothing about the HelmReleases it ships.**
 - **`helm uninstall` takes the PVC** when the chart owns it and the storage class reclaims
   `Delete`. Annotate or move to `existingClaim` first.
+
+---
+
+## Outcome, same day
+
+**#151** (grafana alone) merged 14:02, `history[0].status` `failed` → **`deployed`** at 14:08.
+Proved the pattern before it was widened.
+
+**#152** (the other 18 files) merged after it. Post-reconcile:
+`FAILED: 0. UNKNOWN: 0. ADVISORY: 2` — from 35.
+
+⚠️ **The first post-merge run read `ADVISORY: 32` and `FAILED: 0`, which looks like success.**
+It was not: the advisories still described the *old* spec, because Flux had not reconciled yet.
+The arithmetic gave it away — 35 → 32, and the three that cleared were grafana's, from #151.
+A check that reads live objects is a statement about *this moment*, and the moment right after
+a merge is the wrong one. `flux reconcile source git flux-system` then re-read.
+
+**What remains is `risingwave/risingwave-operator`**, and it is out of the platform repo's
+reach:
+
+```
+flux-system   infra                   op-qa@sha1:5d3c43c5        <- what #152 changed
+flux-system   iaac-risingwave-onprem  v0.5.6@sha1:62e56b3d       <- where the operator lives
+```
+
+Fixing it means a change in `iaac-risingwave-onprem`, a new tag, and a re-pin in the cluster
+repo — see `wip/iaac-talos-flux-cluster/PROMOTING-RISINGWAVE.md`. Not a platform PR.
+
+**That is the useful property of `check-helmrelease-truth.sh`: it audits the CLUSTER, not a
+repository.** It found a release no platform PR could have reached. A repo-side linter would
+have reported the platform clean and been right about the wrong question.
+
+Also visible: `arc-systems/arc`, `arc-runners/risingwave-pipeline` and `octopus/octopusworker`
+exist on the `op-qa` branch and were patched by #152, but **none of them is present on the
+cluster** — the check lists 19 HelmReleases against more files in Git. Either they are not
+enumerated in a Kustomization, or they belong elsewhere. `arc-runners/risingwave-pipeline` is
+the RisingWave CI runner, so this matters to the dev→QA pipeline question and is worth
+resolving before that conversation. Not chased today.
