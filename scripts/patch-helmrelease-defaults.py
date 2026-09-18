@@ -26,6 +26,15 @@ CONSERVATIVE BY CONSTRUCTION:
   * refuses any file it cannot read confidently, and says which and why
   * pins a version only when --pin names it AND the current value is what --pin expects
 
+DOCUMENT-AWARE. A platform file routinely holds a HelmRepository and a HelmRelease in
+one multi-document YAML, repository first. The first version of this script looked for
+the first top-level `spec:` in the FILE and wrote `timeout: 15m` onto the repository --
+a valid field there, so nothing complained, while the HelmRelease it was meant to
+protect kept the 5-minute default. Three of eighteen files were patched into a no-op
+that read as a success in the diff. It also counted `kind: HelmRelease` occurrences as
+its safety guard, which one HelmRelease plus one HelmRepository passes. Each document
+is now located, classified and patched on its own.
+
 Dry run by default: prints a unified diff per file and writes nothing.
 
     python3 scripts/patch-helmrelease-defaults.py /path/to/iaac-talos-flux-platform \\
@@ -81,27 +90,60 @@ def top_level_spec(lines):
     return None
 
 
-def patch(text, rel_id, pin):
-    """Return (new_text, [notes]) or (None, [reasons it was skipped])."""
+def split_documents(text):
+    """[(start, end)] line ranges, one per YAML document.
+
+    Splits on a `---` alone at column 0. A `---` indented, or carrying content, is not
+    a document separator and must not be treated as one.
+    """
     lines = text.splitlines()
+    bounds, start = [], 0
+    for i, line in enumerate(lines):
+        if re.match(r"^---\s*$", line):
+            bounds.append((start, i))
+            start = i + 1
+    bounds.append((start, len(lines)))
+    return [b for b in bounds if b[1] > b[0]]
+
+
+def doc_identity(doc_lines):
+    """(kind, 'ns/name') for one document, read from its OWN metadata block."""
+    kind = None
+    for line in doc_lines:
+        m = re.match(r"^kind:\s*(\S+)\s*$", line)
+        if m:
+            kind = m.group(1)
+            break
+    meta_i = next((i for i, l in enumerate(doc_lines)
+                   if re.match(r"^metadata:\s*$", l)), None)
+    ns = nm = "?"
+    if meta_i is not None:
+        children, _ = find_block_children(doc_lines, meta_i, 0)
+        for i in children:
+            m = re.match(r"^\s*name:\s*(\S+)\s*$", doc_lines[i])
+            if m:
+                nm = m.group(1)
+            m = re.match(r"^\s*namespace:\s*(\S+)\s*$", doc_lines[i])
+            if m:
+                ns = m.group(1)
+    return kind, f"{ns}/{nm}"
+
+
+def patch_document(doc, rel_id, pin):
+    """Patch ONE HelmRelease document. Returns (new_lines | None, notes)."""
     notes = []
-
-    if sum(1 for l in lines if re.match(r"^\s*kind:\s*HelmRelease\s*$", l)) != 1:
-        return None, ["not exactly one HelmRelease document in the file"]
-
-    spec_i = top_level_spec(lines)
+    spec_i = top_level_spec(doc)
     if spec_i is None:
-        return None, ["no top-level `spec:` at column 0"]
+        return None, ["no `spec:` at column 0 in this document"]
 
-    spec_children, spec_indent = find_block_children(lines, spec_i, 0)
+    spec_children, spec_indent = find_block_children(doc, spec_i, 0)
     if spec_indent is None:
         return None, ["`spec:` has no children"]
 
     inserts = []  # (line index to insert BEFORE, text)
 
     # --- 1. spec.timeout ------------------------------------------------------
-    have_timeout = any(re.match(r"^\s*timeout:", lines[i]) for i in spec_children)
-    if have_timeout:
+    if any(re.match(r"^\s*timeout:", doc[i]) for i in spec_children):
         notes.append("timeout already set")
     else:
         inserts.append((spec_i + 1, " " * spec_indent + f"timeout: {TIMEOUT_DEFAULT}"))
@@ -109,58 +151,81 @@ def patch(text, rel_id, pin):
 
     # --- 2. install.remediation.remediateLastFailure --------------------------
     install_i = next(
-        (i for i in spec_children if re.match(r"^\s*install:\s*$", lines[i])), None
+        (i for i in spec_children if re.match(r"^\s*install:\s*$", doc[i])), None
     )
     if install_i is None:
         notes.append("no install: block -- remediation left alone")
     else:
-        inst_children, inst_indent = find_block_children(lines, install_i, spec_indent)
+        inst_children, inst_indent = find_block_children(doc, install_i, spec_indent)
         rem_i = next(
-            (i for i in inst_children if re.match(r"^\s*remediation:\s*$", lines[i])),
-            None,
+            (i for i in inst_children if re.match(r"^\s*remediation:\s*$", doc[i])), None
         )
         if rem_i is None:
             # Flux defaults install retries to 0. Adding a remediation block here would
             # change behaviour beyond the fix, so it is a skip, not a silent insert.
             notes.append("SKIPPED remediateLastFailure: no install.remediation block")
         else:
-            rem_children, rem_indent = find_block_children(lines, rem_i, inst_indent)
-            if any(
-                re.match(r"^\s*remediateLastFailure:", lines[i]) for i in rem_children
-            ):
+            rem_children, rem_indent = find_block_children(doc, rem_i, inst_indent)
+            if any(re.match(r"^\s*remediateLastFailure:", doc[i]) for i in rem_children):
                 notes.append("remediateLastFailure already set")
             elif rem_indent is None:
                 notes.append("SKIPPED remediateLastFailure: remediation block is empty")
             else:
-                inserts.append(
-                    (rem_i + 1, " " * rem_indent + "remediateLastFailure: true")
-                )
+                inserts.append((rem_i + 1, " " * rem_indent + "remediateLastFailure: true"))
                 notes.append("+ install.remediation.remediateLastFailure: true")
 
     # --- 3. pin a floating chart version --------------------------------------
-    # Only when --pin names this release AND the file still holds the expected
-    # floating value. A version that has already been changed is not ours to rewrite.
-    new_lines = lines[:]
+    # Only when --pin names this release AND the document still holds the expected
+    # floating value. A version already changed is not ours to rewrite.
+    new_doc = doc[:]
     if rel_id in pin:
         want_from, want_to = pin[rel_id]
         pat = re.compile(r'^(\s*version:\s*)(["\']?)' + re.escape(want_from) + r'\2\s*$')
-        hits = [i for i, l in enumerate(new_lines) if pat.match(l)]
+        hits = [i for i, l in enumerate(new_doc) if pat.match(l)]
         if len(hits) == 1:
-            i = hits[0]
-            m = pat.match(new_lines[i])
-            new_lines[i] = f'{m.group(1)}"{want_to}"'
+            m = pat.match(new_doc[hits[0]])
+            new_doc[hits[0]] = f'{m.group(1)}"{want_to}"'
             notes.append(f"version {want_from} -> {want_to}")
         elif not hits:
-            notes.append(f"SKIPPED pin: no `version: {want_from}` line found")
+            notes.append(f"SKIPPED pin: no `version: {want_from}` line in this document")
         else:
             notes.append(f"SKIPPED pin: {len(hits)} `version: {want_from}` lines")
 
     for at, text_line in sorted(inserts, key=lambda x: -x[0]):
-        new_lines.insert(at, text_line)
+        new_doc.insert(at, text_line)
 
-    if new_lines == lines:
-        return None, notes + ["nothing to change"]
-    return "\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), notes
+    if new_doc == doc:
+        return None, notes
+    return new_doc, notes
+
+
+def patch_file(text, pin):
+    """Patch every HelmRelease document in a file. Returns (new_text | None, notes, ids)."""
+    lines = text.splitlines()
+    plan, notes, ids = [], [], []
+
+    for start, end in split_documents(text):
+        doc = lines[start:end]
+        kind, rid = doc_identity(doc)
+        if kind != "HelmRelease":
+            notes.append(f"[{kind or 'no kind'} {rid}] not a HelmRelease -- untouched")
+            continue
+        ids.append(rid)
+        new_doc, dnotes = patch_document(doc, rid, pin)
+        notes.extend(f"[{rid}] {n}" for n in dnotes)
+        if new_doc is not None:
+            plan.append((start, end, new_doc))
+
+    if not ids:
+        return None, notes + ["no HelmRelease document in this file"], ids
+    if not plan:
+        return None, notes + ["nothing to change"], ids
+
+    # Splice from the LAST document backwards so earlier line indices stay valid.
+    new_lines = lines[:]
+    for start, end, new_doc in sorted(plan, key=lambda x: -x[0]):
+        new_lines[start:end] = new_doc
+    return "\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), notes, ids
 
 
 def main():
@@ -194,30 +259,23 @@ def main():
     ]
     if not files:
         fail("no file under this checkout contains `kind: HelmRelease`")
-    print(f"{len(files)} HelmRelease file(s) under {root}\n")
+    print(f"{len(files)} file(s) containing a HelmRelease under {root}\n")
 
-    changed = skipped = 0
+    changed = untouched = 0
     seen_ids = set()
     for f in files:
         text = f.read_text()
-        ns = re.search(r"^\s*namespace:\s*(\S+)\s*$", text, re.M)
-        nm = re.search(r"^\s*name:\s*(\S+)\s*$", text, re.M)
-        rel_id = f"{ns.group(1)}/{nm.group(1)}" if ns and nm else "?/?"
-        seen_ids.add(rel_id)
-
-        new, notes = patch(text, rel_id, pin)
+        new, notes, ids = patch_file(text, pin)
+        seen_ids.update(ids)
         rel_path = f.relative_to(root)
-        if new is None:
-            skipped += 1
-            print(f"-- {rel_path}  ({rel_id})")
-            for n in notes:
-                print(f"     {n}")
-            continue
-
-        changed += 1
-        print(f"** {rel_path}  ({rel_id})")
+        marker = "**" if new else "--"
+        print(f"{marker} {rel_path}")
         for n in notes:
             print(f"     {n}")
+        if new is None:
+            untouched += 1
+            continue
+        changed += 1
         for line in difflib.unified_diff(
             text.splitlines(), new.splitlines(),
             fromfile=str(rel_path), tofile=str(rel_path), lineterm="", n=2,
@@ -227,11 +285,12 @@ def main():
         if a.apply:
             f.write_text(new)
 
-    unmatched = set(pin) - seen_ids
+    unmatched = sorted(set(pin) - seen_ids)
     if unmatched:
-        print("!! --pin named releases that were not found: " + ", ".join(sorted(unmatched)))
+        print("!! --pin named releases that were not found: " + ", ".join(unmatched))
+        print("   HelmReleases seen: " + ", ".join(sorted(seen_ids)))
 
-    print(f"\n{changed} file(s) to change, {skipped} left alone.")
+    print(f"\n{changed} file(s) to change, {untouched} left alone.")
     if not a.apply:
         print("dry run -- nothing written. Re-run with --apply, then read `git diff`.")
 
