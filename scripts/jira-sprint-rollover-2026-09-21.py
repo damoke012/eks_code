@@ -6,6 +6,10 @@ Then file exactly three tickets and put them in the new sprint:
   2. Idris  -- RisingWave pipeline edge cases, dev -> QA
   3. Idris  -- RisingWave alerting
 
+Pass --list first if anything is unexpected: it is read-only and prints every board on
+the project and every sprint with its state, which is what distinguishes "no active
+sprint" from "not a scrum board" and from "sprints exist but none was ever started".
+
 DRY-RUN BY DEFAULT. Pass --go to write.
 Auth:  read -rsp 'Atlassian API token: ' ATLASSIAN_TOKEN; export ATLASSIAN_TOKEN; echo
 
@@ -26,6 +30,7 @@ import urllib.error
 import urllib.request
 
 GO = "--go" in sys.argv
+LIST = "--list" in sys.argv
 
 BASE = "https://usxpress.atlassian.net"
 EMAIL = os.environ.get("JIRA_EMAIL", "doke@usxpress.com")
@@ -264,7 +269,66 @@ existing epic INFRA-1632 (INFRA-1657 / 1658 / 1659) -- link rather than duplicat
 ]
 
 
+def survey():
+    """Read-only: which board, which sprints, what state. Answers 'found 0 active'.
+
+    A scrum board whose sprints are all `future` has never had one STARTED, and a kanban
+    board has no sprints at all. Those are different problems with the same symptom, and
+    neither is visible from the active-sprint query that reports zero."""
+    s, r = api("GET", f"/rest/agile/1.0/board?projectKeyOrId={PROJECT}&maxResults=50")
+    print(f"-- boards on {PROJECT} --")
+    if s == 200:
+        for b in r.get("values", []):
+            mark = "  <- JIRA_BOARD" if b["id"] == BOARD else ""
+            print(f"   {b['id']:<6} {b.get('type','?'):<8} {b.get('name','')}{mark}")
+    else:
+        print(f"   !! cannot list boards (HTTP {s}): {r}")
+
+    s, r = api("GET", f"/rest/agile/1.0/board/{BOARD}")
+    print(f"\n-- board {BOARD} --")
+    if s == 200:
+        print(f"   name {r.get('name')}   type {r.get('type')}")
+        if r.get("type") != "scrum":
+            print("   !! not a scrum board -- it has no sprints at all")
+    else:
+        print(f"   !! cannot read board {BOARD} (HTTP {s}): {r}")
+
+    print(f"\n-- every sprint on board {BOARD}, any state --")
+    start, rows = 0, []
+    while True:
+        s, r = api("GET", f"/rest/agile/1.0/board/{BOARD}/sprint"
+                          f"?startAt={start}&maxResults=50")
+        if s != 200:
+            print(f"   !! cannot list sprints (HTTP {s}): {r}")
+            return
+        rows.extend(r.get("values", []))
+        if r.get("isLast", True):
+            break
+        start += len(r.get("values", []))
+    if not rows:
+        print("   none -- nothing has ever been created on this board")
+        return
+    for sp in rows:
+        s2, c = api("GET", f"/rest/agile/1.0/sprint/{sp['id']}/issue"
+                           f"?maxResults=0&fields=summary")
+        n = c.get("total", "?") if s2 == 200 else "?"
+        print(f"   {sp['id']:<6} {sp.get('state',''):<7} {str(n):>4} issue(s)  "
+              f"{(sp.get('startDate') or '-')[:10]} -> {(sp.get('endDate') or '-')[:10]}  "
+              f"{sp.get('name','')}")
+    states = sorted({sp.get("state") for sp in rows})
+    print(f"\n   states present: {', '.join(states)}")
+    if "active" not in states and "future" in states:
+        print("   Sprints exist but none was ever STARTED. A future sprint cannot be closed --")
+        print("   it is started, or its issues are moved and it is deleted. Decide which, then")
+        print("   re-run: this script only knows how to close an ACTIVE sprint.")
+
+
 def main():
+    if LIST:
+        print("== jira board survey  [READ ONLY]\n")
+        preflight()
+        survey()
+        return
     print(f"== jira sprint rollover  [{'EXECUTING' if GO else 'DRY RUN -- pass --go to execute'}]\n")
     preflight()
 
@@ -276,7 +340,9 @@ def main():
     active = r.get("values", [])
     if len(active) != 1:
         die(f"expected exactly one active sprint on board {BOARD}, found {len(active)}: "
-            f"{[x.get('name') for x in active]}\n   Resolve by hand -- this will not guess.")
+            f"{[x.get('name') for x in active]}\n"
+            f"   Run with --list to see every board and every sprint with its state.\n"
+            f"   Zero active usually means the sprints exist but were never STARTED.")
     sprint = active[0]
     sid, sname = sprint["id"], sprint["name"]
     print(f"active sprint: {sname}  (id {sid})")
