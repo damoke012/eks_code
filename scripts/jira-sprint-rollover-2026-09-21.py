@@ -130,6 +130,80 @@ def account_id(email):
     return pool[0]["accountId"]
 
 
+def pick_sprint():
+    """The sprint to close. Active if there is one, otherwise the started-in-spirit future one.
+
+    Board 322 has never had a sprint STARTED -- UI Sprint 4 sits in state `future` with 27
+    issues and dates that have already passed, which is the team's working sprint in
+    everything but the flag. So `active` is empty and always will be.
+
+    Selection refuses to guess: exactly one active, or exactly one future sprint that HAS
+    issues. An empty future sprint is a placeholder someone created and is never the answer.
+    """
+    override = None
+    for i, a in enumerate(sys.argv):
+        if a == "--sprint" and i + 1 < len(sys.argv):
+            override = int(sys.argv[i + 1])
+    rows, start = [], 0
+    while True:
+        s, r = api("GET", f"/rest/agile/1.0/board/{BOARD}/sprint?startAt={start}&maxResults=50")
+        if s != 200:
+            die(f"cannot list sprints on board {BOARD} (HTTP {s}): {r}")
+        rows.extend(r.get("values", []))
+        if r.get("isLast", True):
+            break
+        start += len(r.get("values", []))
+
+    if override:
+        hit = [x for x in rows if x["id"] == override]
+        if not hit:
+            die(f"--sprint {override} is not a sprint on board {BOARD}")
+        return hit[0]
+
+    active = [x for x in rows if x.get("state") == "active"]
+    if len(active) == 1:
+        return active[0]
+    if len(active) > 1:
+        die(f"{len(active)} active sprints: {[x['name'] for x in active]} -- pass --sprint <id>")
+
+    future = []
+    for x in rows:
+        if x.get("state") != "future":
+            continue
+        s2, c = api("GET", f"/rest/agile/1.0/sprint/{x['id']}/issue?maxResults=0")
+        if s2 == 200 and c.get("total", 0) > 0:
+            x["_issues"] = c["total"]
+            future.append(x)
+    if len(future) == 1:
+        f = future[0]
+        print(f"no ACTIVE sprint; using the one future sprint that has issues: "
+              f"{f['name']} ({f['_issues']})")
+        return f
+    die(f"no active sprint and {len(future)} future sprints with issues "
+        f"{[x['name'] for x in future]} -- pass --sprint <id>")
+
+
+def close_sprint(sprint):
+    """Close it, starting it first if it was never started.
+
+    The API will not close a `future` sprint. Starting it and closing it preserves the
+    sprint report and the completed-issue history; deleting it would not. The issues that
+    are not done have already been moved to the backlog by this point, so the close has
+    nothing left to relocate."""
+    sid, name, state = sprint["id"], sprint["name"], sprint.get("state")
+    if state == "future":
+        s, r = api("POST", f"/rest/agile/1.0/sprint/{sid}", {"state": "active"})
+        if s not in (200, 204):
+            die(f"could not START {name} before closing it (HTTP {s}): {r}\n"
+                f"   The backlog move already ran -- check the board before retrying.")
+        print(f"   started {name} (it had never been started)")
+    s, r = api("POST", f"/rest/agile/1.0/sprint/{sid}", {"state": "closed"})
+    if s not in (200, 204):
+        die(f"could not close {name} (HTTP {s}): {r}\n"
+            f"   The backlog move already ran -- check the board before retrying.")
+    print(f"   closed {name}")
+
+
 def next_sprint_name(current):
     """Follow the board's own naming. 'UI Sprint 4' -> 'UI Sprint 5'."""
     m = re.match(r"^(.*?)(\d+)\s*$", current or "")
@@ -333,19 +407,9 @@ def main():
     preflight()
 
     # ---------------------------------------------------------------- find it --
-    s, r = api("GET", f"/rest/agile/1.0/board/{BOARD}/sprint?state=active")
-    if s != 200:
-        die(f"cannot list sprints on board {BOARD} (HTTP {s}): {r}\n"
-            f"   Set JIRA_BOARD if 322 is not the INFRA board.")
-    active = r.get("values", [])
-    if len(active) != 1:
-        die(f"expected exactly one active sprint on board {BOARD}, found {len(active)}: "
-            f"{[x.get('name') for x in active]}\n"
-            f"   Run with --list to see every board and every sprint with its state.\n"
-            f"   Zero active usually means the sprints exist but were never STARTED.")
-    sprint = active[0]
+    sprint = pick_sprint()
     sid, sname = sprint["id"], sprint["name"]
-    print(f"active sprint: {sname}  (id {sid})")
+    print(f"closing: {sname}  (id {sid}, state {sprint.get('state')})")
 
     # ------------------------------------------------------------- what is in --
     issues, start = [], 0
@@ -375,6 +439,8 @@ def main():
 
     new_name = next_sprint_name(sname)
     print(f"\n-- then --")
+    if sprint.get("state") == "future":
+        print(f"   start  {sname} -- it was never started, and a future sprint cannot be closed")
     print(f"   close  {sname} (id {sid})")
     print(f"   create {new_name}   {SPRINT_START[:10]} -> {SPRINT_END[:10]}")
     for t in TICKETS:
@@ -393,11 +459,7 @@ def main():
         print(f"   {len(chunk)} issue(s): {'OK' if s in (200, 204) else f'FAIL {s} {r}'}")
 
     print("-- closing sprint --")
-    s, r = api("POST", f"/rest/agile/1.0/sprint/{sid}", {"state": "closed"})
-    if s not in (200, 204):
-        die(f"could not close sprint {sid} (HTTP {s}): {r}\n"
-            f"   The backlog move above DID run -- check the board before retrying.")
-    print(f"   closed {sname}")
+    close_sprint(sprint)
 
     print("-- creating sprint --")
     s, r = api("POST", "/rest/agile/1.0/sprint", {
