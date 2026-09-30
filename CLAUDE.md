@@ -57,6 +57,7 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
 | `prod-auth-triage` | blanket 401s from a prod API, `IDX10214`, `AADSTS500011` |
 | `entra-authz-claims` | an Entra login succeeds and the user has **no permissions** — empty Argo UI, "SSO is broken" |
 | `azure-oidc-federation` | `AADSTS700213`, a workflow failing `azure/login` on a new branch |
+| `dx-apply-triage` | a DX-Apply step fails, `no space left on device`, a deploy that stopped partway |
 
 ## The learning loop
 

@@ -129,3 +129,26 @@ paged days before the deploy failed.
 - **Resizing alone moves the ceiling**, it does not remove it: 100 Gi buys ~35 apps.
 - `[Replicator] Completed Apply` ran before the failure — **a failed DX deploy is partially
   applied**, so a retry is not a clean slate.
+
+---
+
+## Resolved, same day
+
+`rm -rf /cache/USXpress/*/tf_plugin_cache` on `octopusworker-1` took the volume from
+**39 G / 98%** to **3.8 G / 10%**. The redeploy of
+`netradyne-coaching-session-sync 0.0.7-f-DXT-2008-coaching-session.1.17` to qa completed in
+**2 minutes** with every module applying in sequence — `[Replicator]`, `[Mongodb-User]`,
+`[Cron]` — and Jira updated `successful`.
+
+Confirmed in the output rather than from the green tick: `[Cron]` reported
+`Schedule: */30 * * * *` and `Suspend: false`, which is the statement that it will actually
+run. The `mongodb-user` module emitted its `user_id` and the config map
+`netradyne-coaching-session-sync-m-u`.
+
+Worker-0 was left alone deliberately at 17 G / 42% — it was not blocking anything, and wiping
+it would have made the next several deploys slow for no gain. It is six apps into a
+fourteen-app budget and is the next one to fill.
+
+**Turned into a skill:** `.claude/skills/dx-apply-triage/SKILL.md`, so the next DX-Apply
+failure starts at the worker's disk and reads the error stack from the bottom instead of
+rediscovering both.
