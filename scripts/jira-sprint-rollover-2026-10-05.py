@@ -6,17 +6,22 @@ issues go into the NEW SPRINT, not the backlog. That script was a reset; this on
 rollover. It also creates no tickets.
 
   1. close every issue in the sprint whose status is already in the Done category
-  2. create the next sprint
-  3. move every issue that is NOT done into it
-  4. close the old sprint
+  2. close the old sprint WITH the unfinished issues still in it
+  3. create the next sprint
+  4. move every issue that is NOT done into it
 
 DRY-RUN BY DEFAULT. Pass --go to write. Pass --list for the read-only board survey.
 Auth:  read -rsp 'Atlassian API token: ' ATLASSIAN_TOKEN; export ATLASSIAN_TOKEN; echo
 
-ORDER MATTERS, and not for the obvious reason. Jira's own "complete sprint" dialog asks
-where the incomplete issues should go; the API close does not ask and its default is not
-worth discovering on a live board. So the issues are moved out EXPLICITLY, into a sprint
-that already exists, before the close runs.
+ORDER MATTERS, and the first version of this script got it wrong. It moved the unfinished
+issues out BEFORE closing -- correct when the destination is the backlog (a reset), wrong
+when the destination is the next sprint. `POST /sprint/{id}/issue` REPLACES an open sprint
+association rather than adding to it, so UI Sprint 5 closed holding ZERO issues and its
+sprint report showed no commitment and no carry-over for two whole weeks.
+
+Jira's sprint field keeps CLOSED sprints in an issue's history. So closing first and moving
+second leaves the old sprint's record intact -- 3 committed, 0 completed, 3 carried over --
+and the issue still lands in the new sprint. Close, then move.
 
 "Close the done ones" is best-effort by design. The INFRA workflow may have no transition
 to a terminal status from where an issue currently sits, and a rollover should not fail
@@ -201,12 +206,12 @@ def close_sprint(sprint):
         s, r = api("POST", f"/rest/agile/1.0/sprint/{sid}", {"state": "active"})
         if s not in (200, 204):
             die(f"could not START {name} before closing it (HTTP {s}): {r}\n"
-                f"   The carry-over already ran -- check the board before retrying.")
+                f"   Nothing has been moved yet -- the board is unchanged.")
         print(f"   started {name} (it had never been started)")
     s, r = api("POST", f"/rest/agile/1.0/sprint/{sid}", {"state": "closed"})
     if s not in (200, 204):
         die(f"could not close {name} (HTTP {s}): {r}\n"
-            f"   The carry-over already ran -- check the board before retrying.")
+            f"   Nothing has been moved yet -- the board is unchanged.")
     print(f"   closed {name}")
 
 
@@ -262,12 +267,12 @@ def main():
         who = ((i["fields"].get("assignee") or {}) or {}).get("displayName", "unassigned")
         print(f"   {i['key']:<12} [{name:<12}] {who[:18]:<18} {i['fields']['summary'][:44]}")
 
-    print("\n-- then --")
-    print(f"   create {new_name}   {SPRINT_START[:10]} -> {SPRINT_END[:10]}")
-    print(f"   move   {len(todo)} issue(s) into it")
+    print("\n-- then, in this order --")
     if sprint.get("state") == "future":
         print(f"   start  {sname} -- it was never started, and a future sprint cannot be closed")
-    print(f"   close  {sname} (id {sid})")
+    print(f"   close  {sname} (id {sid}) WITH the {len(todo)} unfinished issue(s) still in it")
+    print(f"   create {new_name}   {SPRINT_START[:10]} -> {SPRINT_END[:10]}")
+    print(f"   move   {len(todo)} issue(s) into it")
 
     if not GO:
         print("\ndry run -- nothing written. Read both lists above, then pass --go.")
@@ -288,12 +293,19 @@ def main():
         s, r = api("POST", f"/rest/api/3/issue/{i['key']}/transitions", {"transition": {"id": tid}})
         print(f"   {i['key']:<12} {'-> ' + tname if s in (200, 204) else f'FAIL {s} {r}'}")
 
+    # Close FIRST, with the unfinished issues still in the sprint, so its report records
+    # what was committed and what carried over. Moving them out first empties the record.
+    print("\n-- closing old sprint --")
+    close_sprint(sprint)
+
     print("\n-- creating sprint --")
     s, r = api("POST", "/rest/agile/1.0/sprint", {
         "name": new_name, "startDate": SPRINT_START, "endDate": SPRINT_END,
         "originBoardId": BOARD})
     if s not in (200, 201):
-        die(f"could not create sprint (HTTP {s}): {r}")
+        die(f"could not create sprint (HTTP {s}): {r}\n"
+            f"   {sname} is already CLOSED -- create the sprint by hand and move the "
+            f"issues into it, or the unfinished work is sitting in no sprint at all.")
     new_id = r["id"]
     print(f"   created {new_name} (id {new_id})")
 
@@ -303,12 +315,9 @@ def main():
         s, r = api("POST", f"/rest/agile/1.0/sprint/{new_id}/issue", {"issues": chunk})
         if s not in (200, 204):
             die(f"could not move {len(chunk)} issue(s) into {new_name} (HTTP {s}): {r}\n"
-                f"   {new_name} (id {new_id}) EXISTS and {sname} is still open -- "
-                f"fix the move, then re-run with --sprint {sid}.")
+                f"   {sname} is CLOSED and {new_name} (id {new_id}) EXISTS -- the issues "
+                f"are in no open sprint. Move them by hand or re-run the move alone.")
         print(f"   {len(chunk)} issue(s): OK")
-
-    print("\n-- closing old sprint --")
-    close_sprint(sprint)
 
     print(f"\ndone. {new_name}: {BASE}/jira/software/c/projects/{PROJECT}/boards/{BOARD}")
 
