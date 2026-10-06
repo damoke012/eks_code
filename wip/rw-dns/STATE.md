@@ -152,3 +152,44 @@ of a day.
 Repointing `risingwave-dashboard` at `risingwave-meta:5691` **must wait** until
 `risingwave-console` resolves corporately. Doing it sooner leaves every browser with no route
 to the console at all for 24 hours.
+
+---
+
+## ✅ STEP 2 DONE 2026-10-06 — the names now tell the truth
+
+PR **#166**: `virtualservice-dashboard.yaml` repointed from `risingwave-console:8020` to
+`risingwave-meta:5691`. Verified by response hash immediately after reconcile:
+
+```
+risingwave-dashboard   http=200 cc738d9a03a28c9a   <- meta dashboard
+risingwave-overview    http=200 cc738d9a03a28c9a   <- meta dashboard (same)
+risingwave-web         http=200 9980ad26c2748234   <- console
+```
+
+### Final state on op-dev
+
+| Hostname | Serves | Note |
+|---|---|---|
+| `risingwave-web.op-dev` | console | the one that resolves everywhere today |
+| `risingwave-console.op-dev` | console | correct name; negative-cached on one laptop until 2026-10-07 |
+| `risingwave.op-dev` | console | same |
+| `risingwave-dashboard.op-dev` | meta dashboard | was the console since Phase 1 |
+| `risingwave-overview.op-dev` | meta dashboard | |
+
+**Five hostnames for two UIs.** Three console names exist only because each was queried a
+second or two before Route53 had its record, and the zone's 86400s negative TTL then hid it
+for a day — so we minted another, twice. **Consolidate to `risingwave-console` and
+`risingwave-dashboard` once the caches expire (2026-10-07), and delete the rest.**
+
+Also noted for the tidy-up: `virtualservice-dashboard.yaml` is `networking.istio.io/v1`
+while `virtualservice-risingwave-console.yaml` is `v1beta1`.
+
+### The rule that would have avoided all of it
+
+**Never query a hostname before you create it.** Check with `dig +short <name> @8.8.8.8` —
+a public resolver — and prove the route with `curl --resolve <host>:443:<node-ip>`, which
+needs no DNS. One local query, after the record is confirmed live, and never before.
+
+A polling loop is the trap: it queries the name repeatedly *while it does not exist*, so the
+loop written to confirm the record is what makes it unreachable. Poll the public resolver,
+then ask the local one exactly once.
