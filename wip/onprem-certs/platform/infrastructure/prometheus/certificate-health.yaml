@@ -1,0 +1,78 @@
+# PrometheusRule: certificate expiry and renewal health
+#
+# On 2026-10-06 op-usxpress-dev was found serving EXPIRED TLS on every hostname --
+# *.op-dev.usxpress.io for 41 days, taking Argo CD, Grafana and both RisingWave UIs with it.
+# All six certificates reported Ready: True throughout. cert-manager's Ready condition means
+# "a certificate was issued at some point"; it does not flip when the stored certificate
+# expires, nor when renewal fails. Nothing alerted, because nothing watches certificates.
+#
+# CertificateRenewalOverdue is the rule that matters: renewal falls due at day 60 of 90, so
+# it fires about FOUR WEEKS before anyone sees a browser warning. The expiry rules are the
+# backstop; CertManagerACMEFailing catches the root cause (a credential-less cert-manager)
+# on day one rather than at the first missed renewal.
+#
+# kube-prometheus-stack selects PrometheusRule via ruleSelector.matchLabels
+#   { release: prometheus-stack }  -- same convention as irsa-health.yaml, rook-ceph-health.yaml.
+#
+# ⚠️ PREREQUISITE: Prometheus must scrape cert-manager, or every rule here is valid, healthy,
+# `inactive` and DEAD -- indistinguishable from "no certificate is expiring". Confirm a
+# ServiceMonitor selects cert-manager's metrics Service (port 9402) BEFORE trusting silence.
+# See [[onprem-alerts-not-delivered]] -- authoring has never been the problem here, ingestion has.
+#
+# Refs: INFRA-1632 (observability epic), INFRA-1659 (delivery).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: certificate-health
+  namespace: prometheus
+  labels:
+    app.kubernetes.io/part-of: security
+    release: prometheus-stack
+spec:
+  groups:
+    - name: certificates.health
+      interval: 30s
+      rules:
+        # THE one. Renewal is due at day 60 of a 90-day Let's Encrypt certificate, so a
+        # renewal still outstanding 3 days later means renewal is BROKEN, with 27 days of
+        # runway left. This would have fired on 2026-08-14 instead of nobody noticing
+        # until a browser complained on 2026-10-06.
+        - alert: CertificateRenewalOverdue
+          expr: (time() - certmanager_certificate_renewal_timestamp_seconds) > 259200
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "{{ $labels.name }} ({{ $labels.namespace }}) renewal is 3+ days overdue"
+            description: "cert-manager was due to renew this and has not. It will still report Ready:True until the certificate expires. Check status.notAfter, status.failedIssuanceAttempts and whether a stale ACME Order is being polled."
+
+        - alert: CertificateExpiringSoon
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 1209600
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "{{ $labels.name }} ({{ $labels.namespace }}) expires in under 14 days"
+
+        - alert: CertificateExpired
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 0
+          for: 15m
+          labels: {severity: critical}
+          annotations:
+            summary: "{{ $labels.name }} ({{ $labels.namespace }}) has EXPIRED -- browsers are refusing it now"
+            description: "Every hostname served by this certificate is returning a TLS error. Verify with curl -w '%{ssl_verify_result}' -- 10 is expired. Do NOT use curl -k; it disables the only check that matters."
+
+        - alert: CertificateNotReady
+          expr: certmanager_certificate_ready_status{condition="False"} == 1
+          for: 1h
+          labels: {severity: warning}
+          annotations:
+            summary: "{{ $labels.name }} ({{ $labels.namespace }}) is not Ready"
+
+        # The root cause, seen on day one. cert-manager with no AWS credentials cannot run
+        # the Route53 DNS-01 solver; on 2026-10-06 it had been failing for 109 days.
+        - alert: CertManagerACMEFailing
+          expr: increase(certmanager_http_acme_client_request_count{status!~"2.."}[1h]) > 5
+          for: 30m
+          labels: {severity: warning}
+          annotations:
+            summary: "cert-manager ACME requests are failing -- renewals will stop silently"
+            description: "Certificates stay Ready:True and valid for weeks while this is broken. Check the controller log for 'no EC2 IMDS role found' (missing IRSA) and the pod for AWS_ROLE_ARN."
