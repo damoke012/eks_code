@@ -1,0 +1,38 @@
+# ENVIRONMENT: op-usxpress-dev ONLY.
+# Place at: variant-inc/iaac-risingwave-onprem
+#           manifests/op-usxpress-dev/virtualservice-risingwave-console.yaml
+# Then add the filename to that directory's kustomization.yaml resources list --
+# the directory ENUMERATES; an unlisted file applies to nothing and reports no error.
+#
+# WHY: the console is already served, at risingwave-dashboard.op-dev.usxpress.io (200 on
+# http and https, measured 2026-10-06). That name says "dashboard", so Tim port-forwarded
+# through OpenLens for weeks instead of opening it. This adds a truthful name for the same
+# service. It takes nothing away: both hostnames serve the console until Tim has moved.
+#
+# No Gateway change is needed. shared-http already has a 443 server for
+# '*.op-dev.usxpress.io' with credentialName wildcard-op-dev-tls, which covers this host.
+# The per-host server blocks for risingwave-dashboard and risingwave-overview are redundant
+# with that wildcard; leave them alone -- editing shared-http risks every host on the cluster.
+#
+# The target list is op-dev's seven WORKERS, read from this cluster's node list on
+# 2026-10-06, and is identical to what the two working RisingWave routes already carry.
+# Do not copy it to another cluster: external-dns ownership is keyed per cluster and a
+# borrowed record is skipped silently.
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: risingwave-console
+  namespace: risingwave
+  annotations:
+    external-dns.alpha.kubernetes.io/target: "10.10.82.21,10.10.82.22,10.10.82.26,10.10.82.27,10.10.82.28,10.10.82.178,10.10.82.180"
+spec:
+  hosts:
+    - risingwave-console.op-dev.usxpress.io
+  gateways:
+    - istio-ingress/shared-http
+  http:
+    - route:
+        - destination:
+            host: risingwave-console.risingwave.svc.cluster.local
+            port:
+              number: 8020

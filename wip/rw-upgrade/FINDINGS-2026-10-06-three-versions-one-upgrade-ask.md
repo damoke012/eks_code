@@ -66,12 +66,42 @@ presented ("I'm getting errors... I think that's because of the license key").
 Agreed on the call after several minutes of confusion:
 
 * **Console** -- SSO login, SQL editor, sources/tables/materialized views, relationship
-  graphs and fragmentation. This is the one Tim needs. **It has no DNS entry.**
+  graphs and fragmentation. This is the one Tim needs. ~~**It has no DNS entry.**~~
 * **Dashboard** -- the other UI. `risingwave-dashboard` currently resolves to the
   **console**.
 
 Tim has been reaching both by `kubectl port-forward` through OpenLens because of it, and had
 to move from ASA to Cisco AnyConnect to get there at all.
+
+#### ⚠️ CORRECTED 2026-10-06 by measurement on op-usxpress-dev
+
+**"The console has no DNS entry" is false, and so is "the dashboard has no name."** Both UIs
+have had a hostname and a route all along. Only the *names* are wrong:
+
+| VirtualService | Hostname | Routes to | Which UI |
+|---|---|---|---|
+| `risingwave-dashboard` | `risingwave-dashboard.op-dev.usxpress.io` | `risingwave-console:8020` | **the console** |
+| `risingwave-overview` | `risingwave-overview.op-dev.usxpress.io` | `risingwave-meta:5691` | **the dashboard** |
+
+Both bind `istio-ingress/shared-http`, both carry the same 7-worker target annotation, and
+`risingwave-dashboard.op-dev.usxpress.io` resolves to all seven dev workers. So the call's
+"everything is behind a DNS entry" was **right**, and the correction I offered -- that the
+console was not -- was wrong. The call reached the correct conclusion by the wrong route and
+I took the wrong half forward.
+
+**So this is a naming defect, not a missing-route defect.** The cost is the same, and it is
+not small: Tim has been port-forwarding through OpenLens, and moved VPN clients, to reach a
+UI that already had a working URL -- because that URL is named after the other UI. Nobody
+checked, because the name said it was the wrong thing.
+
+Not yet measured: whether either hostname returns a 200. A resolving record and an admitted
+route are not a served page -- `shared-http` carries a dedicated 443 server block per RW host
+rather than relying on the `*.op-dev.usxpress.io` wildcard, so TLS per host is unconfirmed.
+
+**What the ticket should say** (INFRA-1703 carries the wrong version): rename, do not create.
+`risingwave-console` for the console, `risingwave-dashboard` for the meta dashboard, retire
+`risingwave-overview`. Add the new name before taking the old one away -- Tim is using
+`risingwave-dashboard` for the console today.
 
 ---
 
