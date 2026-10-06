@@ -68,3 +68,49 @@ Service blocks an Istio route." "This needs a new Certificate and a Gateway edit
 3. A meeting that reaches the right conclusion by the wrong argument is indistinguishable
    from one that reached the wrong conclusion — until someone measures. I corrected the call
    towards the wrong answer, confidently, from the same unmeasured ground they were on.
+
+---
+
+## ✅ SHIPPED AND VERIFIED 2026-10-06
+
+PR **#163** merged to `op-dev` of `variant-inc/iaac-talos-flux-platform` —
+`infrastructure/risingwave-routes/virtualservice-risingwave-console.yaml` plus the
+kustomization line. **Note the repo: the platform repo, NOT `iaac-risingwave-onprem`.** That
+repo's `manifests/op-usxpress-dev/` holds only the `*-ext.yaml` NodePort Services; every
+VirtualService lives in the platform repo's `risingwave-routes` directory. The first attempt
+targeted the wrong repo and the file listing caught it.
+
+Verified by **content**, not by name:
+
+```
+risingwave-console     http=200 verify=0 9980ad26c2748234
+risingwave-dashboard   http=200 verify=0 9980ad26c2748234   <- identical: both the console
+risingwave-overview    http=200 verify=0 cc738d9a03a28c9a   <- differs: the meta dashboard
+```
+
+Comparing response hashes proves the routing without parsing a single page. Two hostnames
+that must serve the same thing, one that must not — three numbers settle it.
+
+**`verify=0` on the new host confirms the untested assumption**: `shared-http`'s
+`*.op-dev.usxpress.io` 443 server with `wildcard-op-dev-tls` covers a brand-new hostname, so
+no Certificate and no Gateway edit were needed. The per-host certs for dashboard and overview
+are redundant with it.
+
+### Trap: the local resolver cached NXDOMAIN
+
+external-dns created the record **seconds** after the Kustomization applied
+(`CREATE risingwave-console.op-dev.usxpress.io A`, zone `Z0658284PVIFD4Q8I9PO`), and
+`dig @8.8.8.8` returned all seven worker IPs immediately. But `getent hosts` kept saying no
+for five minutes, because the name had been queried repeatedly earlier in the day while it
+genuinely did not exist, and the negative answer was cached locally.
+
+**A new DNS record looks identical to a broken one from a machine that asked too early.**
+Query an authoritative or public resolver (`dig +short <name> @8.8.8.8`) before concluding
+external-dns failed, and test the route itself with
+`curl --resolve <host>:443:<node-ip>`, which bypasses DNS entirely. From WSL the flush is
+`cmd.exe /c ipconfig /flushdns`.
+
+### Still open
+
+Repointing `risingwave-dashboard` at the meta dashboard and retiring `risingwave-overview`.
+That removes a URL in use, so it waits until Tim has moved to `risingwave-console`.
