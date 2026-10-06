@@ -193,3 +193,70 @@ needs no DNS. One local query, after the record is confirmed live, and never bef
 A polling loop is the trap: it queries the name repeatedly *while it does not exist*, so the
 loop written to confirm the record is what makes it unreachable. Poll the public resolver,
 then ask the local one exactly once.
+
+---
+
+## ⛔ STEP 2 WAS REVERTED, SAME DAY — Dex is mounted on the dashboard hostname
+
+PR **#167** reverted #166. `virtualservice-dashboard.yaml` points at
+`risingwave-console.risingwave.svc.cluster.local:8020` again.
+
+**What #166 broke.** The console's SSO flow issues to
+
+```
+https://risingwave-dashboard.op-dev.usxpress.io/dex/auth?client_id=risingwave-console
+   &redirect_uri=https%3A%2F%2Frisingwave-dashboard.op-dev.usxpress.io%2Fauth%2Fsso%2Fcallback
+```
+
+Both the **Dex issuer** and the **SSO callback** are pinned to
+`risingwave-dashboard.op-dev.usxpress.io`. The VirtualService has a single catch-all route,
+so repointing the host moved `/dex/*` and `/auth/*` to `risingwave-meta:5691` along with
+`/`. The meta dashboard has no such paths: "Sign in with SSO" returned **Not Found**.
+
+Verified after the revert: `/dex/auth` on `risingwave-dashboard.op-dev` → **200**.
+
+### The trap
+
+**A hostname is not one application.** I checked that `risingwave-dashboard.op-dev` served
+the console UI, and it did. I did not check what *else* was mounted under it. A
+single-route VirtualService carries every path, so repointing a host silently relocates
+every API, callback and auth endpoint that any client has hardcoded — and the client that
+breaks is an OIDC redirect chain, which no reconcile and no probe of `/` will show.
+
+**Before repointing a hostname, enumerate its paths and its consumers.** Minimum:
+
+```
+kubectl -n <ns> get vs -o yaml | grep -A5 'match:\|uri:'      # declared paths (none here = all)
+kubectl -n <ns> get deploy <app> -o yaml | grep -iE 'issuer|redirect|callback|_url'
+```
+
+An OIDC issuer URL is a consumer of the hostname and lives in the application's config,
+not in the routing. Related: [[config-can-outrun-the-image]] — the config outlives the
+assumption it was written under.
+
+### What the rename actually requires (not a routing change)
+
+Sequenced, because the identity provider has to agree:
+
+1. Move the console's **Dex issuer** and **SSO callback** to `risingwave-console.op-dev`
+   (`variant-inc/iaac-risingwave-onprem`, `manifests/op-usxpress-dev/`).
+2. **Add** the new redirect URI to the shared Entra app registration (clientID `e112d6ce`).
+   Add, do not replace — the same app reg serves QA and prod, see
+   [[rw-dex-entra-shared-app-registration]].
+3. Confirm login works on `risingwave-console.op-dev` end to end.
+4. *Then* repoint `risingwave-dashboard.op-dev` at `risingwave-meta:5691`.
+5. Remove the old redirect URI from Entra once no client uses it.
+
+Step 2 is the long pole: it is an Entra change, so it is not self-service from this repo.
+
+### Proven / killed / traps
+
+- **Proven:** the revert restores SSO (`/dex/auth` → 200). Dex is served by
+  `risingwave-console:8020`, under `/dex` on the dashboard hostname.
+- **Killed:** repointing the hostname alone. Also killed as a shortcut — adding a `/dex`
+  path-prefix match back to `risingwave-console:8020` while `/` goes to meta. It would
+  restore the issuer, but the callback `/auth/sso/callback` and the session cookie are on
+  the same host as the console UI, so the flow would land the user on the meta dashboard.
+  Splitting one app's auth across two backends by path is a worse defect than the name.
+- **Trap:** `risingwave-dashboard.op-dev` serving the console is *load-bearing* today. The
+  name is wrong and fixing it is a four-step change ending at Entra, not a one-line diff.
