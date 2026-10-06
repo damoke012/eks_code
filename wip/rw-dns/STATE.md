@@ -114,3 +114,41 @@ external-dns failed, and test the route itself with
 
 Repointing `risingwave-dashboard` at the meta dashboard and retiring `risingwave-overview`.
 That removes a URL in use, so it waits until Tim has moved to `risingwave-console`.
+
+### ⚠️ The usxpress.io zone caches NXDOMAIN for 24 HOURS
+
+```
+dig +short SOA usxpress.io
+ns-1577.awsdns-05.co.uk. awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400
+                                                                          ^^^^^ negative TTL
+```
+
+Measured 2026-10-06, an hour after `risingwave-console.op-dev.usxpress.io` was created:
+
+| Resolver | risingwave-console | risingwave-dashboard |
+|---|---|---|
+| corporate (default) | **empty** | 7 IPs |
+| public (`@8.8.8.8`) | 7 IPs | 7 IPs |
+
+external-dns created the record within **seconds** of the Kustomization applying. The name was
+nevertheless unreachable from every corporate client, because it had been queried several
+times earlier that day *while it did not yet exist*, and the SOA minimum pins that negative
+answer for **86400 seconds**.
+
+**Probing a hostname before you create it costs a day on this zone** — and probing first is
+exactly what you do to check whether something already exists. Check with
+`dig +short <name> @8.8.8.8` (public, uncached by corp) rather than the default resolver, and
+prove the route with `curl --resolve <host>:443:<node-ip>`, which needs no DNS at all.
+
+`cmd.exe /c ipconfig /flushdns` clears the Windows cache; it does **not** touch the corporate
+resolver, which is the one that matters.
+
+**Follow-up worth raising:** 86400 is very long for a negative TTL — 300–900 is typical. The
+zone lives in network account 155768531003. One field, and it would have cost minutes instead
+of a day.
+
+### Consequence for step 2
+
+Repointing `risingwave-dashboard` at `risingwave-meta:5691` **must wait** until
+`risingwave-console` resolves corporately. Doing it sooner leaves every browser with no route
+to the console at all for 24 hours.
