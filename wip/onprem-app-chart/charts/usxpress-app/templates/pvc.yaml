@@ -1,0 +1,19 @@
+{{- if and .Values.persistence.enabled (ne .Values.workload.kind "StatefulSet") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}-data
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+  {{- if .Values.persistence.retainOnDelete }}
+  annotations:
+    # ceph-block reclaims Delete. Without this, `helm uninstall` takes the
+    # volume and the data with it.
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes: {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

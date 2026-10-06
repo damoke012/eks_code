@@ -1,0 +1,196 @@
+# usxpress-app -- the intake form and the deployment config are the same file.
+#
+# Everything marked REQUIRED is enforced by values.schema.json, so a missing
+# answer fails `helm template` rather than deploying something half-configured.
+
+# ─────────────────────────────────────────────────────────── identity ──
+nameOverride: ""
+fullnameOverride: ""
+
+# REQUIRED. The cluster this release is rendered for. external-dns keys its
+# ownership TXT record on this; a VirtualService copied between clusters with
+# the wrong owner-id fails to register DNS and reports no error at all.
+clusterName: ""        # op-usxpress-dev | op-usxpress-qa | op-usxpress-prod
+
+# REQUIRED. Used for the Secrets Manager path and for alert labels.
+environment: ""        # dev | qa | prod
+
+# REQUIRED. Who is paged when this breaks. Lands on every alert.
+owner:
+  team: ""
+  contact: ""
+
+# ──────────────────────────────────────────────────────────── workload ──
+# Exactly one of these may be enabled.
+workload:
+  kind: Deployment     # Deployment | StatefulSet | Job | CronJob
+  replicas: 2
+  # CronJob only
+  schedule: ""
+  # Job / CronJob only. Keep BOTH history limits small: a healthy CronJob
+  # never prunes its old failures, so KubeJobFailed fires forever on a job
+  # that has been succeeding for months.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  # Deployment only. `Recreate` cannot be applied over a live `rollingUpdate`
+  # block by server-side apply; Flux's dry run fails and the WHOLE
+  # Kustomization stops, silently. Set rollingUpdate to null when using it.
+  strategy: RollingUpdate
+
+image:
+  # REQUIRED. Registry is enforced by Kyverno at admission.
+  repository: ""       # 064859874041.dkr.ecr.us-east-2.amazonaws.com/<app>
+  # REQUIRED and digest-only. A tag is rejected here AND by Kyverno, because
+  # 515 of 517 ECR repositories accept org-wide push -- a tag can be moved
+  # under us by anyone in the org.
+  digest: ""           # sha256:...
+  pullPolicy: IfNotPresent
+
+command: []
+args: []
+
+# REQUIRED, both halves. Requests without limits is how one app takes a node;
+# limits without requests is how the scheduler puts it somewhere it cannot run.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# A read-only root filesystem with no writable /tmp broke a QA ETL job for
+# weeks: every `mktemp` failed. tmpVolume mounts an emptyDir at /tmp.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+tmpVolume: true
+
+probes:
+  liveness: {}         # { httpGet: { path: /healthz, port: http } }
+  readiness: {}
+  startup: {}
+
+# ────────────────────────────────────────────────────────────── config ──
+# Non-secret values only. Anything here is world-readable inside the cluster.
+config: {}
+
+# Extra env vars from sources the chart does not manage.
+extraEnv: []
+extraEnvFrom: []
+
+# ───────────────────────────────────────────────────────────── secrets ──
+# Pulled from AWS Secrets Manager by External Secrets Operator.
+#
+# ⚠️ A green ExternalSecret proves the SYNC ran, not that the value works, and
+# ESO writes the keys it COULD resolve even when others fail -- the pod then
+# dies at container creation with RESTARTS 0, invisible to restart alerts.
+externalSecrets:
+  enabled: false
+  secretStore: cluster-secret-store
+  secretStoreKind: ClusterSecretStore
+  refreshInterval: 1h
+  # Path convention: op-usxpress-<env>/<app>/<connector>
+  remotePrefix: ""
+  data: []
+    # - secretKey: POSTGRES_PASSWORD
+    #   remoteKey: op-usxpress-qa/myapp/postgres
+    #   property: password
+
+# ───────────────────────────────────────────────────────────────── aws ──
+# IRSA. The pod-identity webhook injects AWS_ROLE_ARN and the SA token.
+#
+# ⚠️ That webhook's failurePolicy is Ignore, so a pod can start with NO AWS
+# credentials and no error anywhere. One RisingWave compactor ran 88 days that
+# way and dev was storage-dead for 54 of them, every status green.
+serviceAccount:
+  create: true
+  name: ""
+  roleArn: ""          # arn:aws:iam::<account>:role/<role>
+  annotations: {}
+
+# ───────────────────────────────────────────────────────────── service ──
+service:
+  enabled: true
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+
+# ───────────────────────────────────────────────────────────── storage ──
+persistence:
+  enabled: false
+  # ceph-block (RWO) | ceph-fs (RWX) | ceph-bucket (object)
+  storageClass: ceph-block
+  accessModes: ["ReadWriteOnce"]
+  size: 10Gi
+  mountPath: /data
+  # Reclaim is Delete on ceph-block: a helm uninstall takes the volume with it.
+  # `keep` annotates the PVC so it survives.
+  retainOnDelete: true
+
+# ───────────────────────────────────────────────────── scale + spread ──
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: null
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# ⚠️ One data centre. There is no zone to spread across -- a constraint on
+# topology.kubernetes.io/zone is satisfied trivially and buys nothing. The
+# real failure domain here is the node.
+topologySpread:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: ScheduleAnyway
+
+# ───────────────────────────────────────────────────────────── ingress ──
+# Replaces the platform-app-expose chart. Istio + cert-manager + external-dns.
+expose:
+  enabled: false
+  hostname: ""
+  gateway: istio-ingress/shared-http
+  port: 80
+  tls:
+    enabled: true
+    issuer: letsencrypt
+    issuerKind: ClusterIssuer
+
+# ────────────────────────────────────────────────────── network policy ──
+networkPolicy:
+  enabled: false
+  defaultDeny: true
+  # Everything this app is allowed to reach. Default-deny with no egress rules
+  # breaks DNS first and the symptom looks like a dead service.
+  egress: []
+  ingress: []
+
+# ───────────────────────────────────────────────────────── monitoring ──
+monitoring:
+  serviceMonitor:
+    enabled: false
+    port: http
+    path: /metrics
+    interval: 30s
+  # ⚠️ Rules fire into nothing until INFRA-1698 lands an Alertmanager. The
+  # chart emits them so they are ready; it does not pretend they deliver.
+  prometheusRule:
+    enabled: false
+    rules: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}

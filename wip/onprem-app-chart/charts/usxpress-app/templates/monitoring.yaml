@@ -1,0 +1,54 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels:
+    {{- include "usxpress-app.labels" . | nindent 4 }}
+    # Prometheus only adopts monitors carrying its own release label. Without
+    # this the ServiceMonitor applies cleanly, reports nothing wrong, and is
+    # never scraped.
+    release: prometheus-stack
+spec:
+  selector:
+    matchLabels: {{- include "usxpress-app.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: {{ .Values.monitoring.serviceMonitor.port }}
+      path: {{ .Values.monitoring.serviceMonitor.path }}
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+{{- end }}
+{{- if .Values.monitoring.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels:
+    {{- include "usxpress-app.labels" . | nindent 4 }}
+    release: prometheus-stack
+spec:
+  groups:
+    - name: {{ include "usxpress-app.fullname" . }}
+      rules:
+      {{- range .Values.monitoring.prometheusRule.rules }}
+        - alert: {{ .alert }}
+          expr: {{ .expr | quote }}
+          for: {{ .for | default "5m" }}
+          labels:
+            severity: {{ .severity | default "warning" }}
+            team: {{ $.Values.owner.team }}
+            cluster: {{ $.Values.clusterName }}
+          annotations:
+            summary: {{ .summary | quote }}
+            description: {{ .description | quote }}
+      {{- end }}
+{{- end }}
+# ⚠️ Rules written here FIRE and reach nobody. There is no Alertmanager wired
+# on any on-prem cluster (INFRA-1698). Until that lands, the owning team is the
+# monitoring and must watch Grafana. Do not tell an app team their alerts are
+# live because this rendered.
+#
+# And when writing expressions: absent(up{job="x"} == 1) fires identically
+# whether the service is down or the job was never scraped. QA has had
+# ClusterDNSUnreachable firing for months because probe_success has no series
+# and there is no blackbox exporter. Confirm the metric exists first.

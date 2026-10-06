@@ -1,0 +1,20 @@
+# A scheduled batch job on prod, no service, no exposure.
+clusterName: op-usxpress-prod
+environment: prod
+owner: { team: data, contact: "#data-eng" }
+
+workload:
+  kind: CronJob
+  schedule: "*/30 * * * *"
+  failedJobsHistoryLimit: 1
+
+image:
+  repository: 064859874041.dkr.ecr.us-east-2.amazonaws.com/etl-pipeline
+  digest: sha256:4f1c8a9277b34e509a610c2de5b71f38aabbccddeeff00112233445566778899
+
+service:
+  enabled: false
+
+resources:
+  requests: { cpu: 500m, memory: 1Gi }
+  limits:   { cpu: "2",  memory: 4Gi }

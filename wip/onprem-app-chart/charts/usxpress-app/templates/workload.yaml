@@ -1,0 +1,116 @@
+{{- include "usxpress-app.validate" . -}}
+{{- if eq .Values.workload.kind "Deployment" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.workload.replicas }}
+  {{- end }}
+  # ⚠️ Switching an existing Deployment to Recreate cannot be server-side
+  # applied over a live rollingUpdate block. Flux's dry run fails and the whole
+  # Kustomization stops -- every other object in that directory with it, for
+  # four hours, with no alert. Setting rollingUpdate explicitly null is what
+  # makes the change applyable.
+  strategy:
+    type: {{ .Values.workload.strategy }}
+    {{- if eq .Values.workload.strategy "Recreate" }}
+    rollingUpdate: null
+    {{- end }}
+  selector:
+    matchLabels: {{- include "usxpress-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "usxpress-app.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+      annotations:
+        # Roll the pods when config changes. Without this a ConfigMap edit is
+        # applied and simply never read -- the running image keeps the value it
+        # started with, for months.
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec: {{- include "usxpress-app.podSpec" . | nindent 6 }}
+{{- end }}
+---
+{{- if eq .Values.workload.kind "StatefulSet" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "usxpress-app.fullname" . }}
+  replicas: {{ .Values.workload.replicas }}
+  selector:
+    matchLabels: {{- include "usxpress-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "usxpress-app.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec: {{- include "usxpress-app.podSpec" . | nindent 6 }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}
+{{- end }}
+---
+{{- if eq .Values.workload.kind "Job" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+  annotations:
+    # Run on every Argo CD sync, and let the previous one be replaced. A Job's
+    # pod template is immutable: without this, changing the image makes the
+    # apply fail with "field is immutable" and nothing in the directory lands.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels: {{- include "usxpress-app.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "usxpress-app.podSpec" . | nindent 6 }}
+{{- end }}
+---
+{{- if eq .Values.workload.kind "CronJob" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.workload.schedule | quote }}
+  concurrencyPolicy: Forbid
+  # ⚠️ failedJobsHistoryLimit only prunes when a NEW failure arrives. A CronJob
+  # that failed five times in July and has succeeded hourly ever since still
+  # holds those five Job objects -- and KubeJobFailed has no time bound, so it
+  # keeps firing about failures that are months old.
+  successfulJobsHistoryLimit: {{ .Values.workload.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.workload.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: {{- include "usxpress-app.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          {{- include "usxpress-app.podSpec" . | nindent 10 }}
+{{- end }}

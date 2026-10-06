@@ -1,0 +1,57 @@
+# A long-running HTTP service on QA, exposed, with secrets and monitoring.
+clusterName: op-usxpress-qa
+environment: qa
+owner:
+  team: platform
+  contact: "#on-prem-platform"
+
+workload:
+  kind: Deployment
+  replicas: 2
+
+image:
+  repository: 064859874041.dkr.ecr.us-east-2.amazonaws.com/orders-api
+  digest: sha256:d61624263d6a4f0c8e4b5a1f9c2e7d3b8a6f4e2c1d0b9a8c7e6f5d4c3b2a1908
+
+resources:
+  requests: { cpu: 200m, memory: 512Mi }
+  limits:   { cpu: "2",  memory: 2Gi }
+
+probes:
+  readiness: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5 }
+  liveness:  { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 20 }
+
+config:
+  LOG_LEVEL: info
+  KAFKA_BOOTSTRAP: pkc-xxxx.us-east-2.aws.confluent.cloud:9092
+
+externalSecrets:
+  enabled: true
+  data:
+    - secretKey: POSTGRES_PASSWORD
+      remoteKey: op-usxpress-qa/orders-api/postgres
+      property: password
+
+serviceAccount:
+  create: true
+  roleArn: arn:aws:iam::527101283767:role/orders-api-irsa
+
+expose:
+  enabled: true
+  hostname: orders.op-qa.usxpress.io
+
+podDisruptionBudget:
+  enabled: true
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+    rules:
+      - alert: OrdersApiDown
+        expr: 'kube_deployment_status_replicas_available{namespace="app-orders",deployment="orders-api"} == 0'
+        for: 5m
+        severity: critical
+        summary: "orders-api has no available replicas"
+        description: "Every replica is unavailable. Check pod events and the ExternalSecret value."

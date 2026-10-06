@@ -1,0 +1,41 @@
+{{- if .Values.expose.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+  annotations:
+    # ⚠️ external-dns claims ownership of a record with a TXT keyed on this
+    # value. Copy a VirtualService from another cluster without changing it and
+    # the new cluster refuses to touch a record it does not own -- no error on
+    # the VirtualService, no event, the hostname simply never resolves. This is
+    # derived from clusterName so it cannot be copied wrong.
+    external-dns.alpha.kubernetes.io/owner-id: {{ .Values.clusterName }}
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.expose.hostname }}
+spec:
+  hosts:
+    - {{ .Values.expose.hostname }}
+  gateways:
+    - {{ .Values.expose.gateway }}
+  http:
+    - route:
+        - destination:
+            host: {{ include "usxpress-app.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+            port:
+              number: {{ .Values.expose.port }}
+{{- if .Values.expose.tls.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}-tls
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "usxpress-app.fullname" . }}-tls
+  dnsNames:
+    - {{ .Values.expose.hostname }}
+  issuerRef:
+    name: {{ .Values.expose.tls.issuer }}
+    kind: {{ .Values.expose.tls.issuerKind }}
+{{- end }}
+{{- end }}

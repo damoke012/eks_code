@@ -1,0 +1,42 @@
+# RisingWave's SQL pipeline applier, as a Job run on every Argo CD sync.
+# This is the shape that replaces app-template/job/ for RW.
+#
+# It does NOT replace the RisingWave instance itself -- that is a CR owned by
+# the RisingWave operator, which comes from its own HelmRelease. See the README.
+clusterName: op-usxpress-qa
+environment: qa
+owner: { team: platform, contact: "#on-prem-platform" }
+
+workload:
+  kind: Job
+
+image:
+  repository: 064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/etl-pipeline
+  digest: sha256:d61624263d6a4f0c8e4b5a1f9c2e7d3b8a6f4e2c1d0b9a8c7e6f5d4c3b2a1908
+
+service:
+  enabled: false
+
+config:
+  # ⚠️ The database is named `dev` in every environment. Verified by SQL on QA.
+  # Setting this to the environment name is how you point QA at a database that
+  # does not exist.
+  RW_DB: dev
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"
+  PIPELINE_DIR: /pipeline/pipelines/Brand
+
+externalSecrets:
+  enabled: true
+  data:
+    - secretKey: RW_PASSWORD
+      remoteKey: op-usxpress-qa/risingwave/postgres
+      property: password
+
+serviceAccount:
+  create: true
+  roleArn: arn:aws:iam::527101283767:role/risingwave-pipeline-irsa
+
+resources:
+  requests: { cpu: 200m, memory: 512Mi }
+  limits:   { cpu: "1",  memory: 1Gi }

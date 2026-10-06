@@ -1,0 +1,31 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "usxpress-app.fullname" . }}
+  labels: {{- include "usxpress-app.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels: {{- include "usxpress-app.selectorLabels" . | nindent 6 }}
+  {{- with .Values.networkPolicy.ingress }}
+  ingress: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  egress:
+    # DNS first, always. A default-deny policy without this breaks name
+    # resolution, and the symptom -- every outbound call hanging -- reads like
+    # a dead dependency rather than a policy you just applied.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    {{- with .Values.networkPolicy.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

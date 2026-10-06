@@ -1,0 +1,17 @@
+apiVersion: v2
+name: usxpress-app
+description: |
+  One chart for every workload on the on-prem Talos clusters.
+
+  It renders the whole object matrix an application needs -- workload, service,
+  config, secrets, storage, scaling, exposure, network policy and monitoring --
+  from a single values file, and it refuses to render the mistakes that have
+  actually cost us outages. The values file doubles as the onboarding intake
+  form: if an app team can fill it in, the app can be deployed.
+
+  Replaces: app-template/job, app-template/service, platform-app-expose.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: USX Platform
