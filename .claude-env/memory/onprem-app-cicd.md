@@ -188,3 +188,41 @@ builds from. Tim CONFIRMED `f/driver` is the most up-to-date and owns the merge.
 any real scale anywhere. And RisingWave reported **"high barrier latency"** on op-dev —
 `CREATE TABLE` wedged at 0.0% (job 130) and `CANCEL JOBS` could not complete. `RECOVER`
 is the documented fix but restarts every streaming job — Tim's call, not ours.
+
+## ⚠️ 2026-10-06 — the cross-org sync was solving a problem that did not exist
+
+Two weeks went into getting Tim's SQL from `usxpressinc/risingwave-poc` into
+`variant-inc/risingwave-pipeline`: a scheduled sync workflow (PR #68), a
+path-scoped PR bot, a read-only deploy key design, a cross-org credential
+comparison (deploy key vs fine-grained PAT vs GitHub App vs making the repo
+public), and an escalation to `usxpressinc` org owners when neither Tim nor
+Idris turned out to have admin on his own repo.
+
+Then one command:
+
+```
+gh api repos/variant-inc/risingwave-pipeline/collaborators --jq '.[] | "\(.login)  \(.role_name)"'
+timothypreble  write
+```
+
+**Tim already had write on our repo.** He could have committed `pipelines/`
+directly at any point. The whole mechanism existed to spare him working in
+`variant-inc`, and he was already a collaborator there.
+
+The tell was available even earlier and was misread: `PUT /collaborators/{user}`
+returned **204 with an empty body**. 201 returns an invitation object; 204 means
+*already a collaborator at that permission*. An empty response read as success
+and was in fact "nothing to do, this was already true".
+
+**How to apply:** before designing any access mechanism, enumerate the access
+that exists. `gh api repos/<o>/<r>/collaborators --jq '.[] | "\(.login) \(.role_name)"'`
+and `.../invitations` cost nothing and answer the question the design is for.
+Same family as [[missing-credential-may-mean-missing-system]], inverted: there
+the credential was missing because the system was never built; here the
+credential was never needed because the access was already granted.
+
+Useful while here: `variant-inc/risingwave-pipeline` admins are `buddy-james`,
+`svivesusx`, `stevebduckjr`, `usx-devops`. `usxpressinc` org owners are
+`buddy-james`, `higdonmatthew`, `oibrahim-usxpress`, `svivesusx`, `usx-devops` —
+and buddy-james is also on variant-inc's Engineering Leadership team, so he is
+the single person who can unblock both orgs.

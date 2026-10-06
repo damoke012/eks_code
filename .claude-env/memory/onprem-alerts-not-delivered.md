@@ -71,3 +71,83 @@ Full record: `wip/observability/FINDINGS-2026-08-21-alerts-reach-nobody.md`.
 pods the default scrape config misses). Delivering two months of unreviewed backlog on day
 one trains everyone to ignore the channel. Related: [[onprem-app-cicd]],
 [[prod-incident-instrument-check]].
+
+---
+
+## ✅ 2026-09-18 — QA measured for the first time. The claim holds; the numbers differ.
+
+Everything above was **op-usxpress-dev only**, and this note said so. It was nonetheless
+quoted as a fleet fact more than once. Now measured on **op-usxpress-qa** (10.10.82.51):
+
+```
+FAIL  Prometheus CR has NO .spec.alerting — firing alerts go nowhere
+FAIL  no alertmanager pod in prometheus
+22 firing, 8 of them for over a week
+116 rules have live metrics, 81 flagged unable to fire
+```
+
+So the delivery gap is confirmed on two of three clusters. **Prod is still not measured.**
+
+**Read the ages before believing them:**
+- The seven oldest all start at `2026-07-14T17:57`, **including `Watchdog`** — which fires
+  the moment Prometheus starts. That timestamp is Prometheus's own boot, not an incident.
+  `KubeProxyDown` / `KubeControllerManagerDown` / `KubeSchedulerDown` are the Talos
+  static-pod false positives, same as dev.
+- Ten of the 22 carry `pod=prometheus-stack-kube-state-metrics-…` inside their label set, so
+  the KSM restart on 2026-09-14 reset their `activeAt`. **Their true ages are unknown, not
+  recent.** Same defect as INFRA-1657, still present in the shipped rules.
+
+**🔴 The one that matters:** `EtcdSnapshotJobFailing` ×5 and `KubeJobFailed` ×5 in
+`etcd-backup`. **QA's etcd backups are failing**, age unknown per the point above. A live
+data-loss exposure on the cluster running RisingWave, undetected purely because nothing
+delivers. File it ahead of the delivery work, not inside it.
+
+**`ClusterDNSUnreachable` (critical, ours) is a false positive**: `probe_success` has no
+series because there is no blackbox exporter. It is an `absent()` rule reporting a missing
+probe. Do not read it as a DNS outage.
+
+**On the 81 "cannot fire":** treat as an upper bound, per the extractor caveat above.
+Entries naming a real metric are credible — and
+`certmanager_certificate_expiration_timestamp_seconds` is among them, so **certificate-expiry
+alerting does not work on QA**. Entries whose "no series" list is bare label names
+(`cluster namespace owner_kind pod`) are the bug.
+
+Grafana was *not* the blocker it appeared to be — see
+[[helmrelease-ready-hides-failed-history]]. It has been running for 72 days; what was broken
+was Flux's ability to deliver changes to it.
+
+## 2026-10-05 — the "On-Prem Platform" Teams channel is NOT fed by the on-prem clusters
+
+Steve Duck reported the channel is noisy and asked for Idris's PR to be reviewed to quieten
+it. Measured before reviewing anything, across all three clusters:
+
+```
+kubectl --kubeconfig=<each> get providers.notification.toolkit.fluxcd.io,alerts.notification.toolkit.fluxcd.io -A
+op-usxpress-qa    No resources found   (notification-controller 1/1, 90d)
+op-usxpress-dev   No resources found
+op-usxpress-prod  No resources found
+```
+
+Zero Flux notification Providers and zero Alerts on **all three**, and no Alertmanager on any
+of them. So the channel's traffic originates **outside the on-prem clusters** — Octopus,
+GitHub Actions, Azure Monitor, Grafana or a cloud EKS cluster. Unidentified as of today; the
+cheapest answer is whoever configured the Teams connector, not more cluster searching.
+
+**Two true things at once, and they are easy to conflate:** the channel is noisy, AND on-prem
+alerting does not exist. Quietening the channel does not advance INFRA-1698, and a PR aimed
+at the alert rules would merge green and change nothing in that channel.
+
+⚠️ **`~/.kube/op-usxpress-dev.yaml` on Doke's WSL points at CLOUD EKS `qa-one`**
+(`D0E66CB97...gr7.us-east-2.eks.amazonaws.com`), not 10.10.82.50. The real on-prem dev config
+is `op-usxpress-dev-fresh.yaml`. An expired token is the only reason the first dev query did
+not return a confident "No resources found" **from the wrong cluster**. Verify the server
+address before trusting a kubeconfig's filename:
+
+```bash
+for f in "$HOME"/.kube/*.yaml; do echo "== $f"; kubectl --kubeconfig="$f" config view \
+  -o jsonpath='{range .clusters[*]}{.name}  {.cluster.server}{"\n"}{end}'; done
+```
+
+On-prem is `10.10.82.50/.51/.52`. Anything `eks.amazonaws.com` is cloud. `dare-cluster` (.20)
+and `dpl2-cluster` (.30) are the decommissioned clusters (INFRA-1686) and should not be in
+that directory at all. See [[proxy-is-not-the-property]], [[wsl-kubeconfig-churn]].

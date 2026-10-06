@@ -142,3 +142,62 @@ nothing, and the negation printed **ALL VALID** for zero orders. It reported suc
 absence of the thing it was counting — written minutes after documenting that exact failure
 mode. **A check whose success condition is "nothing matched" must first assert that something
 was there to match.**
+
+---
+
+## ✅ RESOLVED 2026-10-06 21:08 UTC
+
+All six reissued. Verified at the only layer that counts:
+
+```
+istio-ingress  brands-op-dev                     True  2027-01-04T20:05:37Z
+istio-ingress  risingwave-dashboard-usxpress-io  True  2027-01-04T20:03:41Z
+istio-ingress  risingwave-overview-usxpress-io   True  2027-01-04T20:03:42Z
+istio-ingress  wildcard-op-dev                   True  2027-01-04T20:05:40Z
+risingwave-2   rw2-sql-tls                       True  2027-01-04T20:05:38Z
+risingwave     rw-sql-tls                        True  2027-01-04T20:05:06Z
+
+argocd  grafana  risingwave-dashboard  risingwave-overview  rw-sql   -> all verify=0
+```
+
+Elapsed from "Not secure" in a browser screenshot to trusted TLS on every dev hostname:
+about one hour.
+
+### The three steps, in the order they had to happen
+
+1. **`rollout restart deploy/cert-manager`** (after proving `pod-identity-webhook` had a ready
+   pod and endpoints) — the pod came up with `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE`.
+2. **Delete the stale `CertificateRequest`s and `Order`s** — cert-manager was polling 56-day-old
+   ACME order URLs that Let's Encrypt had long purged, and would never have opened new ones.
+3. **Clear the backoff**, which was armed by the *old* failure and would have held for an hour:
+
+```bash
+kubectl -n <ns> patch certificate <name> --subresource=status --type=merge \
+  -p '{"status":{"lastFailureTime":null,"failedIssuanceAttempts":null}}'
+```
+
+Orders appeared within seconds of step 3 and were all `valid` inside three minutes. This
+patch touches only status — it never deletes a Secret, so a failed retry costs nothing but
+re-arming the timer. Prefer it to deleting the Secret, which replaces an expired certificate
+with no certificate.
+
+### What was never wrong
+
+The Issuer, the Route53 role, the hosted zone, LE rate limits, the ClusterIssuer config, the
+Gateway, the VirtualServices. Every one of those was guessed at by somebody during the hour,
+including twice by me. Zero challenges remained after issuance — the solver worked first try
+once it had credentials.
+
+## Prevention, written
+
+`wip/onprem-certs/platform/infrastructure/prometheus/certificate-health.yaml` + `PR-PLAN.md`.
+The load-bearing rule is `CertificateRenewalOverdue`: renewal falls due at day 60 of 90, so it
+fires with 27 days of runway. On this incident it would have alerted **2026-08-14**.
+
+Still open, and larger than the certificates:
+- Does anything scrape cert-manager? If not, all five rules are inert. **Unverified.**
+- `pod-identity-webhook` is `failurePolicy: Ignore` on all three clusters — second multi-month
+  silent outage from it (RisingWave compactor, 88 days; cert-manager, 109 days).
+- `iaac-drafts/tracks-4-5-restore-jun22/prometheus/irsa-health.yaml` was drafted in **June** and
+  contains `PodIdentityWebhookDown` and `IRSATokenInjectionFailure`. If it had shipped it would
+  plausibly have caught this in June. Did it ever merge?

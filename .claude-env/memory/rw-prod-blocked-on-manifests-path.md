@@ -77,3 +77,16 @@ at the same time; check which one applies before assuming a merge is safe.
 First instance found the same day: PR #36 changed the QA and prod console manifests together
 with `strategy: Recreate`, with no reviewer assigned. See
 `wip/rw-console-org-sync/STATE.md`.
+
+---
+
+**CORRECTED 2026-09-17.** `manifests/op-usxpress-prod/` now EXISTS on `main` with 24 files (dev
+has 34, QA 24). Prod is no longer blocked on the path. The live problem is the opposite one: every
+cluster's Flux `GitRepository` tracks `branch: main` at a 5-minute interval, so a merge touching
+`manifests/op-usxpress-prod/` reaches production with no gate at all
+([[risingwave-onprem-has-no-promotion-gate]]).
+
+**CLOSED 2026-09-17.** `33efcd9` in `iaac-talos-flux-cluster` (*INFRA-1674: wire RisingWave into
+op-usxpress-prod, #38*) added prod's `GitRepository` + `risingwave-operator` + `risingwave-onprem`
+Kustomizations and postRenderer. Prod RisingWave is live. It went straight from not-deployed to
+deployed-from-an-unpinned-branch, with no intermediate pinned state.

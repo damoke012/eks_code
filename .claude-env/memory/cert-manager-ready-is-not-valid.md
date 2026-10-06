@@ -6,6 +6,7 @@ metadata:
 ---
 
 Found 2026-10-06 on **op-usxpress-dev**. QA and prod were healthy throughout.
+✅ **Fixed the same day**: all six reissued, expiry 2027-01-04, `verify=0` on every hostname.
 
 ## Ready:True does not mean valid
 
@@ -36,7 +37,9 @@ secure" on a URL `curl -sk` had just called 200. Use `-w '%{ssl_verify_result}'`
 2. **A stale ACME Order is a dead URL.** LE expires orders after ~a week; cert-manager kept
    polling 56-day-old orders and got `404 … No order for ID`. It never opened a new one,
    because one looked in flight. The stuck Orders and CertificateRequests must be **deleted**.
-3. **A one-hour backoff after a failed issuance.** `status.failedIssuanceAttempts` and
+3. **A one-hour backoff after a failed issuance.** Clear it without touching any Secret:
+   `kubectl -n <ns> patch certificate <name> --subresource=status --type=merge -p '{"status":{"lastFailureTime":null,"failedIssuanceAttempts":null}}'`
+   Orders appeared in seconds and were valid in three minutes. `status.failedIssuanceAttempts` and
    `status.lastFailureTime` govern it, and the timer is armed by the *old* failure — so a
    correctly-fixed cluster still shows zero Orders and expired certs for an hour.
 

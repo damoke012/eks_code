@@ -482,3 +482,39 @@ replacement that BEGAN with the same three lines it anchored on, so the anchor s
 own substitution and a second run applied the block twice — duplicate `if:` keys, invalid
 YAML. An anchor that survives its own replacement is not an anchor. Every patch script here
 should either consume its anchor or check for its own marker first.
+
+## 2026-10-06 — on-prem RisingWave as deployed, and the upgrade ask
+
+**op-usxpress-dev `risingwave` namespace**, from the upgrade call:
+
+* **Operator** — Flux HelmRelease, chart `risingwave-operator` **v0.1.36**
+* **Engine** — `RisingWave` CR `v1alpha1`, image **v2.8.2**; meta, frontend, compute,
+  compactor, **1 replica each** (no HA for any component)
+* **State store** — S3 `risingwave-state-op-usxpress-dev`, us-east-2, IRSA
+* **Meta store** — PostgreSQL `pg-postgresql.risingwave.svc.cluster.local`, a **separate
+  Bitnami Helm chart outside the CR**. An upgrade plan that reads only the CR has missed
+  half the state.
+* `RW_SECRET_STORE_PRIVATE_KEY_HEX` injected; Prometheus endpoint wired.
+
+⚠️ **"Upgrade RisingWave to the latest" is ambiguous across THREE versioned things** —
+operator, engine, console. On the call Tim cited **v3.1.0** (engine) and Idris **v0.7.4**
+(a different component); neither resolved it. v2.8.2 → v3.1.0 is **two major versions**
+through a stateful system with **no documented restore for either store** and no tested
+rollback. Order is operator first, then engine; a CR the operator cannot reconcile does not
+error, it just stops progressing.
+
+⚠️ **The policy is "no `latest` TAG", not "no latest release".** The call nearly recorded the
+wrong one. Pin an explicit version; the newest explicit version is fine.
+
+⚠️ **Licence key expires 2026-11-01**, replaced 2026-10-06 (previous expired 10-15). It is a
+recurring short-clock task delivered by Teams message, nothing alerts on it, and the failure
+presents as a broken dashboard — which is how this one was first reported. The carrier and
+employee POCs kick off Friday and run into the next expiry.
+
+⚠️ **Console and dashboard are reversed in DNS.** The **console** (SSO login, SQL editor,
+sources/tables/MVs, relationship graphs) is what Tim needs and **has no DNS entry**;
+`risingwave-dashboard` resolves to it. Tim has been port-forwarding through OpenLens as a
+result. "Everything is behind a DNS entry" was said twice on the call and is false —
+[[adjacent-step-green-signals]].
+
+Full record: `wip/rw-upgrade/FINDINGS-2026-10-06-three-versions-one-upgrade-ask.md`
