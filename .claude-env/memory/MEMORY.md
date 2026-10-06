@@ -84,3 +84,4 @@
 - [Octopus [ALL] hides inherited values](octopus-all-scope-hides-inherited-values.md) — a generator copying SCOPED vars leaves inherited ones at the [ALL] default; QA2 planned 13 VMs instead of 4
 - [HelmRelease Ready hides a failed history](helmrelease-ready-hides-failed-history.md) — QA's Grafana stalled 66d while the pod ran 3/3; 5m default timeout + remediateLastFailure false-for-install
 - [TF plugin cache fills the Octopus worker](tf-plugin-cache-fills-octopus-worker.md) — per-app AND per-module cache; 12 apps = 35GB of a 40GB volume; ✅ cleared 2026-09-30, now the `dx-apply-triage` skill
+- [cert-manager Ready is not valid](cert-manager-ready-is-not-valid.md) — Ready:True while serving an EXPIRED cert; op-dev served expired TLS on every hostname 41d. `.status.notAfter` is the only answer, `curl -k` hides it (use `%{ssl_verify_result}`: 0 trusted, 10 expired). Cause: IRSA webhook failed open at pod creation + stale ACME order 404s + 1h backoff

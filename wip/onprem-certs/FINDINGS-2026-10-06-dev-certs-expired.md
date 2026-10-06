@@ -83,3 +83,62 @@ certificate into this path would have produced a seventh expired one.
 2. A cert-manager `Ready: True` is not a valid certificate. Check `.status.notAfter`.
 3. The screenshot found this, not the command. A browser was the honest instrument and the
    terminal was the flattering one.
+
+---
+
+## Why the certificates did not reissue the moment credentials were fixed
+
+Restoring IRSA was necessary and not sufficient. Two more things stood between the fix and a
+working certificate, and neither is visible from `Ready`:
+
+### 1. A 56-day-old ACME Order is a dead URL
+
+```
+order is in "errored" state: Failed to retrieve Order resource:
+404 urn:ietf:params:acme:error:malformed: No order for ID 543768975661
+```
+
+Let's Encrypt expires orders after about a week. cert-manager had stored the order URL from
+the first failed renewal in August and kept polling it, so every reconcile 404'd against an
+object that no longer existed at the CA. **It never attempted a new order**, because from its
+point of view one was already in flight. The stuck `Order` and `CertificateRequest` objects
+had to be deleted for it to start over — restoring credentials alone would have changed
+nothing, indefinitely.
+
+### 2. cert-manager backs off for an hour after a failed issuance
+
+```
+Failed Issuance Attempts: 1
+Last Failure Time:        2026-10-06T20:26:30Z
+```
+
+That failure was recorded *moments before* the stale objects were deleted, so the backoff
+timer was armed by the old regime and governs the first attempt of the new one. Retry at
+21:26:30 — a clean cluster still shows zero Orders and six expired certificates for an hour,
+and that is **not** a sign the fix did not work.
+
+**How to apply:** after fixing the cause of a cert-manager failure, read
+`status.failedIssuanceAttempts` and `status.lastFailureTime` before concluding anything from
+the absence of Orders. An empty `get orders` means "none in flight", which is the same output
+for "waiting out a timer", "never attempted" and "finished". Three states, one view.
+
+### Two wrong guesses worth recording
+
+Before reading `describe`, the hypotheses offered were **Let's Encrypt rate limiting** and
+**the Route53 role lacking zone permissions**. Both plausible, both wrong, and neither would
+have been found by looking harder at the thing they blamed. The Certificate's own `message`
+field named the real cause in one line.
+
+### And a check that lied in the same way the system did
+
+The watch loop written to confirm issuance was:
+
+```bash
+if ! kubectl get orders.acme.cert-manager.io -A --no-headers | grep -qv valid; then echo "ALL VALID"
+```
+
+`No resources found` goes to stderr, so the pipeline saw **empty input**, `grep -qv` matched
+nothing, and the negation printed **ALL VALID** for zero orders. It reported success for the
+absence of the thing it was counting — written minutes after documenting that exact failure
+mode. **A check whose success condition is "nothing matched" must first assert that something
+was there to match.**
