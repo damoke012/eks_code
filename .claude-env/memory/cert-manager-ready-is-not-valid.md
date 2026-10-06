@@ -58,3 +58,34 @@ Separate defect on dev: `io-curt-io-notifications-handler` (istio-system) refere
 ClusterIssuer named `letsencrypt` that does not exist, and has **never** been issued.
 
 Full write-up: `wip/onprem-certs/FINDINGS-2026-10-06-dev-certs-expired.md`.
+
+## 2026-10-06 evening — shipped fleet-wide, and what the fleet turned out to look like
+
+Merged: platform PRs **#160** (dev scoping fix), **#161** (op-qa), **#162** (op-prod).
+`certificate-health.yaml` + `servicemonitor-cert-manager.yaml`, alerting only.
+
+**A `certificates` rule group already existed on ALL THREE clusters** — `platform-health`,
+with `CertificateExpiringSoon` and `CertificateRenewalFailed` — and had **never been able to
+fire anywhere**, because nothing scraped cert-manager on any cluster. Somebody wrote fleet
+certificate alerting and it was inert from the day it landed. The ServiceMonitor revived it
+along with ours.
+
+⚠️ **The three clusters are not laid out the same.** PrometheusRules live in
+`infrastructure/prometheus-rules/` on **op-qa and op-prod**, and in
+`infrastructure/prometheus/` on **op-dev**. Dev is the odd one out. Copying dev's path to QA
+would have put two rule files in a directory that holds none. `flux-podmonitor.yaml` sits in
+`prometheus-rules/` on QA, so a monitor there is the house pattern.
+
+**Exclude `issuer_name!="istio-ca"`.** istiod and every istio-csr workload certificate rotate
+on a ~24h cycle, so they sit at zero days to expiry by design on all three clusters and match
+the expiry rules permanently. Also guard with `> 0`: a certificate that was never issued has
+expiration timestamp 0 and reads as expired since 1970. `CertificateNotReady` is the rule that
+catches those properly.
+
+**`irsa-health.yaml` is deployed on all three and contains a rule that cannot fire.**
+`IRSATokenInjectionFailure` counts admissions with `rejected="true"`, but
+`failurePolicy: Ignore` means the webhook is *skipped*, never rejecting — it counts the one
+event `Ignore` guarantees will not happen. The real metric is
+`apiserver_admission_webhook_fail_open_count`. Fleet-wide false coverage since INFRA-1538.
+INFRA-1704 carries the fix.
+
