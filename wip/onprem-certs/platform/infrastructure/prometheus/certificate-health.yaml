@@ -19,7 +19,14 @@
 # ServiceMonitor selects cert-manager's metrics Service (port 9402) BEFORE trusting silence.
 # See [[onprem-alerts-not-delivered]] -- authoring has never been the problem here, ingestion has.
 #
-# Refs: INFRA-1632 (observability epic), INFRA-1659 (delivery).
+# SCOPE: istio-ca issues istiod and every istio-csr workload certificate on a ~24h rotation.
+# Those sit at "0 days to expiry" permanently BY DESIGN -- measured 2026-10-06 on all three
+# clusters. Without issuer_name!="istio-ca" these rules fire constantly on every cluster and
+# train everyone to ignore the channel. The ">0" guard drops certificates that were never
+# issued at all (expiration timestamp 0 reads as expired since 1970); CertificateNotReady is
+# the rule that catches those, and it catches them correctly.
+#
+# Refs: INFRA-1704, INFRA-1632 (observability epic), INFRA-1659 (delivery).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -38,7 +45,7 @@ spec:
         # runway left. This would have fired on 2026-08-14 instead of nobody noticing
         # until a browser complained on 2026-10-06.
         - alert: CertificateRenewalOverdue
-          expr: (time() - certmanager_certificate_renewal_timestamp_seconds) > 259200
+          expr: time() - (certmanager_certificate_renewal_timestamp_seconds{issuer_name!="istio-ca"} > 0) > 259200
           for: 1h
           labels: {severity: warning}
           annotations:
@@ -46,14 +53,14 @@ spec:
             description: "cert-manager was due to renew this and has not. It will still report Ready:True until the certificate expires. Check status.notAfter, status.failedIssuanceAttempts and whether a stale ACME Order is being polled."
 
         - alert: CertificateExpiringSoon
-          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 1209600
+          expr: (certmanager_certificate_expiration_timestamp_seconds{issuer_name!="istio-ca"} > 0) - time() < 1209600
           for: 1h
           labels: {severity: warning}
           annotations:
             summary: "{{ $labels.name }} ({{ $labels.namespace }}) expires in under 14 days"
 
         - alert: CertificateExpired
-          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < 0
+          expr: (certmanager_certificate_expiration_timestamp_seconds{issuer_name!="istio-ca"} > 0) - time() < 0
           for: 15m
           labels: {severity: critical}
           annotations:
@@ -61,7 +68,7 @@ spec:
             description: "Every hostname served by this certificate is returning a TLS error. Verify with curl -w '%{ssl_verify_result}' -- 10 is expired. Do NOT use curl -k; it disables the only check that matters."
 
         - alert: CertificateNotReady
-          expr: certmanager_certificate_ready_status{condition="False"} == 1
+          expr: certmanager_certificate_ready_status{condition="False",issuer_name!="istio-ca"} == 1
           for: 1h
           labels: {severity: warning}
           annotations:
