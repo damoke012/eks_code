@@ -16,6 +16,11 @@ GO=0; [ "${1:-}" = "--go" ] && GO=1
 export KUBECONFIG="$HOME/.kube/op-usxpress-dev-fresh.yaml"
 
 step() { echo; echo "=== $* ==="; }
+newest_pod() {
+  kubectl -n cert-manager get pod -l app.kubernetes.io/name=cert-manager \
+    --field-selector=status.phase=Running --sort-by=.metadata.creationTimestamp \
+    -o jsonpath='{.items[-1:].metadata.name}'
+}
 die()  { echo; echo "ABORT: $*"; exit 1; }
 
 step "0. prove the cluster is op-usxpress-dev"
@@ -36,7 +41,7 @@ kubectl get mutatingwebhookconfigurations -o custom-columns='NAME:.metadata.name
 echo "OK: webhook can inject."
 
 step "2. current cert-manager pod: does it carry IRSA env"
-POD=$(kubectl -n cert-manager get pod -l app.kubernetes.io/name=cert-manager -o jsonpath='{.items[0].metadata.name}')
+POD=$(newest_pod)
 echo "pod: $POD  (created $(kubectl -n cert-manager get pod "$POD" -o jsonpath='{.metadata.creationTimestamp}'))"
 BEFORE=$(kubectl -n cert-manager get pod "$POD" -o jsonpath='{.spec.containers[*].env[*].name}' | tr ' ' '\n' | grep -c '^AWS_')
 echo "AWS_* env vars present: $BEFORE   (expected 0 before the fix, >=2 after)"
@@ -51,7 +56,10 @@ kubectl -n cert-manager rollout restart deploy cert-manager
 kubectl -n cert-manager rollout status deploy cert-manager --timeout=180s || die "rollout did not complete."
 
 step "4. VERIFY the new pod actually got the credentials"
-NEWPOD=$(kubectl -n cert-manager get pod -l app.kubernetes.io/name=cert-manager -o jsonpath='{.items[0].metadata.name}')
+# Pick the NEWEST RUNNING pod. During a rollout the predecessor is still listed while it
+# terminates, and .items[0] returns it -- the env lookup then 404s and reads as "no
+# credentials injected", byte-identical to the real failure this check exists to catch.
+NEWPOD=$(newest_pod)
 kubectl -n cert-manager get pod "$NEWPOD" -o jsonpath='{range .spec.containers[*]}{range .env[*]}{.name}{"\n"}{end}{end}' | grep '^AWS_' || true
 AFTER=$(kubectl -n cert-manager get pod "$NEWPOD" -o jsonpath='{.spec.containers[*].env[*].name}' | tr ' ' '\n' | grep -c '^AWS_')
 echo "AWS_* env vars now: $AFTER"
