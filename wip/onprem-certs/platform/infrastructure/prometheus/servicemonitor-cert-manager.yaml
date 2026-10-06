@@ -1,0 +1,44 @@
+# ServiceMonitor: cert-manager controller metrics
+#
+# WHY THIS EXISTS: on 2026-10-06 op-usxpress-dev had served expired TLS on every hostname for
+# 41 days with nothing to alert on, because NOTHING SCRAPES CERT-MANAGER. The metrics Service
+# has existed all along -- `cert-manager` in ns cert-manager, port 9402, portName
+# `tcp-prometheus-servicemonitor` -- and no ServiceMonitor selects it. Every
+# certmanager_* series is therefore absent, and `certificate-health.yaml`'s five rules would
+# sit `inactive` forever, which is indistinguishable from a healthy fleet.
+#
+# SHIP THIS FIRST, OR WITH the rules. Rules without this are worse than no rules.
+#
+# Scope: the CONTROLLER only. cainjector and webhook also listen on 9402, but every metric
+# the rules use (certmanager_certificate_expiration_timestamp_seconds,
+# certmanager_certificate_renewal_timestamp_seconds, certmanager_certificate_ready_status,
+# certmanager_http_acme_client_request_count) comes from the controller. The selector below
+# pins component=controller so cainjector and webhook are not swept in.
+#
+# Deliberately NOT done as `prometheus.servicemonitor.enabled: true` on the cert-manager
+# HelmRelease. That is the tidier form, but it re-renders a working release of the component
+# we spent today recovering, and a cert-manager restart is exactly how this outage began
+# (it came up with no IRSA credentials and ran 109 days reporting healthy). A standalone
+# ServiceMonitor creates one object, restarts nothing, and is deleted to revert.
+# Revisit the chart option once the alerts have proven themselves.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: security
+    release: prometheus-stack     # Prometheus adopts a monitor only if its selector matches.
+spec:
+  namespaceSelector:
+    matchNames: [cert-manager]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/instance: cert-manager
+      app.kubernetes.io/component: controller
+  endpoints:
+    - port: tcp-prometheus-servicemonitor
+      path: /metrics
+      interval: 60s
+      honorLabels: true

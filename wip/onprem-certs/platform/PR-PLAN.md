@@ -8,29 +8,41 @@ reconcile would notice.
 
 | File | Action |
 |---|---|
+| `infrastructure/prometheus/servicemonitor-cert-manager.yaml` | NEW — **without this the rules are dead** |
 | `infrastructure/prometheus/certificate-health.yaml` | NEW |
-| `infrastructure/prometheus/kustomization.yaml` | add `- certificate-health.yaml` to `resources` |
+| `infrastructure/prometheus/kustomization.yaml` | add BOTH filenames to `resources` |
 
 ⚠️ That directory **enumerates**. A file dropped in without the kustomization line applies to
 nothing, reports no error, and the alert simply never exists.
 
-## Gate before any of it — is cert-manager scraped?
+## ✅ Gate answered 2026-10-06 — nothing scrapes cert-manager
 
-Every rule here selects `certmanager_*`. If nothing scrapes cert-manager the rules are valid,
-healthy, `inactive` and dead, which looks exactly like "no certificate is expiring". That is
-the standing failure mode on these clusters — authoring has never been the problem, ingestion
-has ([[onprem-alerts-not-delivered]]).
+Measured on op-usxpress-dev: **zero ServiceMonitors** select it, while the metrics Service has
+been there all along (`cert-manager` in ns `cert-manager`, port **9402**, portName
+`tcp-prometheus-servicemonitor`). So every `certmanager_*` series is absent and the five rules
+would sit `inactive` forever — identical, from the outside, to a healthy fleet. That is the
+standing failure mode on these clusters: authoring has never been the problem, ingestion has
+([[onprem-alerts-not-delivered]]).
+
+**The ServiceMonitor is therefore the load-bearing half of this PR.** Rules without it are
+worse than no rules, because they look like coverage.
+
+It is a standalone manifest, not `prometheus.servicemonitor.enabled: true` on the cert-manager
+HelmRelease. The chart option is tidier, but it re-renders a working release of the component
+we spent today recovering — and a cert-manager restart is precisely how the outage began. One
+object, nothing restarts, `kubectl delete` to revert.
+
+### One thing still to confirm before merge
+
+Prometheus adopts a ServiceMonitor only if its own selector matches. Check what it requires:
 
 ```bash
-export KUBECONFIG=$HOME/.kube/op-usxpress-dev-fresh.yaml     # op-usxpress-dev
-kubectl get servicemonitors.monitoring.coreos.com -A | grep -i cert
-kubectl -n cert-manager get svc -o custom-columns='NAME:.metadata.name,PORTS:.spec.ports[*].port,LABELS:.metadata.labels'
+kubectl -n prometheus get prometheus -o jsonpath='{range .items[*]}serviceMonitorSelector={.spec.serviceMonitorSelector}{"\n"}serviceMonitorNamespaceSelector={.spec.serviceMonitorNamespaceSelector}{"\n"}{end}'
 ```
 
-* **A ServiceMonitor selecting cert-manager exists** → ship the rule file alone.
-* **None** → the PR needs a ServiceMonitor too (cert-manager's metrics Service, port 9402,
-  label `release: prometheus-stack` so Prometheus adopts it). Without it this PR delivers
-  five alerts that can never fire.
+Empty `{}` means it adopts everything. If it matches on `release: prometheus-stack`, the label
+is already on the manifest. If it matches something else, change the label to match — this is
+the single line that decides whether the whole PR does anything.
 
 ## Build it from the branch, not from here
 
@@ -52,6 +64,8 @@ git diff origin/op-dev        # read ALL of it, including hunks you did not inte
 
 ```bash
 kubectl -n prometheus get prometheusrule certificate-health          # exists
+kubectl -n cert-manager get servicemonitor cert-manager              # exists
+# the target is actually UP -- Prometheus UI, Status -> Targets, look for cert-manager
 # then, in the Prometheus UI: Status -> Rules -> certificates.health
 #   every rule must be listed and EVALUATING. A rule over a metric that is not ingested
 #   shows as inactive forever and is indistinguishable from "nothing is wrong".
