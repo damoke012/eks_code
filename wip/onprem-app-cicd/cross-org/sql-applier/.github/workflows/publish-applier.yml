@@ -48,13 +48,16 @@ jobs:
           provenance: false
 
       - name: Scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: applier-scan:${{ github.sha }}
           format: table
           exit-code: '1'
           ignore-unfixed: true
-          severity: CRITICAL,HIGH
+          timeout: 10m
+          severity: CRITICAL
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
 
       - name: Push
         id: push
