@@ -1,0 +1,51 @@
+# Build this repo's SQL into a container image and push it to ECR.
+#
+# This is the whole pipeline. Everything it does lives in a workflow published by
+# the platform team, so there is nothing here to maintain when the build changes.
+#
+# ⛔ THERE ARE NO SECRETS, and none are needed. GitHub signs a short-lived token
+#    saying "this is a run of this repo on this branch"; AWS checks that against a
+#    list the platform team holds and returns a session that expires in minutes.
+#    Nothing is stored here, so there is nothing to leak or rotate.
+#
+# Does NOT replace "Push to Octopus" (build.yaml). The two run independently.
+name: build-sql-image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'pipelines/**'
+      - '.github/workflows/build-sql-image.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # lets GitHub mint the OIDC token AWS trusts
+  contents: read
+
+jobs:
+  build:
+    uses: variant-inc/iaac-risingwave-cicd/.github/workflows/sql-pipeline-build-push.yml@v1
+    with:
+      ecr_repository: risingwave/poc-pipeline
+      push_role: arn:aws:iam::064859874041:role/gha-risingwave-poc-ecr-push
+      sql_dir: pipelines
+      # Pinned by DIGEST, not a tag. A tag would silently change what this image is
+      # built on between one run and the next.
+      applier_image: 064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/sql-applier@sha256:0a13bc0de62116d208d6281a5df5647ff57e34a9cd56b84f15dfce7ce43fb8d3
+
+# ---------------------------------------------------------------------------
+# What happens on a push to master
+#
+#   1. Checks pipelines/ actually contains SQL. An image with no SQL applies
+#      nothing and still deploys green, so the build stops rather than ship it.
+#   2. Gets a short-lived AWS session via OIDC. No stored credential.
+#   3. Builds: the platform's applier image (psql + the apply script) with this
+#      repo's pipelines/ copied in. No Dockerfile is needed here.
+#   4. Scans for CRITICAL vulnerabilities BEFORE anything is published.
+#   5. Pushes to ECR, identified by content digest.
+#
+# Deployment is separate: the platform picks that digest up, QA applies it, and
+# production is a second pull request a human merges against the SAME digest.
+# Nothing is rebuilt between environments, so what is tested is what ships.
+# ---------------------------------------------------------------------------
