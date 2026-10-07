@@ -532,3 +532,63 @@ about whether the app had something to build.
 push to ECR risingwave/etl-pipeline, main branch only"* — while the trust policy actually
 pins `master`. No `variant-inc` Terraform references it. So `gha-oidc-trust.tf` must
 **import** it, not declare it, and the description is already wrong about its own branch.
+
+---
+
+## ✅ DELIVERED 2026-10-07 — the full path, no GitHub credential anywhere
+
+| Piece | Where | State |
+|---|---|---|
+| `app-build-push.yml` (has a Dockerfile) | `variant-inc/iaac-risingwave-cicd@v1` | ✅ proven, 2 green runs |
+| `sql-pipeline-build-push.yml` (SQL only) | same repo, `@v1` | ✅ published, unproven |
+| `publish-applier.yml` + `build/Dockerfile` | same repo | ✅ image `sha256:0a13bc0d…`, Trivy clean |
+| ECR `risingwave/sql-applier` (MUTABLE) | 064859874041 | ✅ |
+| ECR `risingwave/poc-pipeline` (IMMUTABLE) | 064859874041 | ✅ empty |
+| `gha-sql-applier-ecr-push` | → `variant-inc/iaac-risingwave-cicd:main` | ✅ |
+| `gha-risingwave-poc-ecr-push` | → `usxpressinc/risingwave-poc:master` | ✅ unused |
+| Caller PR | `usxpressinc/risingwave-poc#5` | 🔜 Tim's to merge |
+| Helm `usxpress-app` + Argo | — | ⛔ **never applied to a cluster** |
+
+### Why an app repo needs no Dockerfile
+
+Tim's repo is SQL and nothing else, so the design that required `build/Dockerfile`
+could never have worked there. The applier tooling (alpine + psql + `apply.sh`) is
+published **once** as `risingwave/sql-applier`; the reusable workflow generates a
+two-line image `FROM` it at build time. The app repo then holds SQL, a caller, and
+no secrets — and a fix to `apply.sh` reaches every consumer on their next build
+rather than needing a PR per repo.
+
+The workflow **refuses to build when the SQL directory is empty.** An image that
+applies nothing deploys green, which is the failure that looks like a success.
+
+### ⚠️ The SQL is duplicated and has already drifted
+
+`variant-inc/risingwave-pipeline` carries **4** SQL files; `usxpressinc/risingwave-poc`
+carries **3**. Ours has `pipelines/Brand/300-transform.sql`; his does not. **QA is
+running a transform absent from the source of truth**, and nobody owns the difference.
+This is the strongest argument for the cutover and it needs deciding BEFORE it, not
+after. Named explicitly in PR #5 so Tim hears it from us.
+
+### What reading the house action changed
+
+`variant-inc/actions-collection` is public and already ships `build-push-image`. Two
+things came from reading it:
+
+- **`TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2`** — the default DB is
+  on ghcr.io and gets rate-limited. We would have hit that eventually.
+- **Severity `CRITICAL`**, matching the house. Being stricter than every other app at
+  USX on day one invites "why is mine different"; the input exists to tighten.
+
+Deliberately **not** copied: it pins `aquasecurity/trivy-action@master`, a floating ref
+on a third-party action, in the shared action every app uses. Own ticket.
+
+### Open, and not small
+
+1. **The deploy half is unproven.** `usxpress-app` renders and lints and has never been
+   applied to a cluster. Nothing consumes `risingwave/poc-pipeline`.
+2. **Three IAM roles are hand-made and untagged** in a shared account.
+   `gha-oidc-trust.tf` must import them; today they are drift we added to deliberately.
+3. **`iaac-risingwave-cicd` reports 2 critical Dependabot vulnerabilities** and is now
+   load-bearing for app delivery.
+4. **Renovate's open branch there deletes `publish-applier.yml`** — it branched before
+   tonight. Rebase it; merging it removes the applier build.
