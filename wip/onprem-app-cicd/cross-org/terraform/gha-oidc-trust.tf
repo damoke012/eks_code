@@ -19,6 +19,14 @@ variable "apps" {
     branches    = list(string)
   }))
   default = {}
+
+  # Confirmed 2026-10-07:
+  #   rw-poc = {
+  #     github_org  = "usxpressinc"
+  #     github_repo = "risingwave-poc"
+  #     ecr_repo    = "risingwave/etl-pipeline"
+  #     branches    = ["master"]        # NOT main -- that repo defaults to master
+  #   }
 }
 
 data "aws_caller_identity" "current" {}

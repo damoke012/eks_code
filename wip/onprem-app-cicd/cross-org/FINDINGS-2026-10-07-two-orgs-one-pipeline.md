@@ -119,6 +119,46 @@ Not yet measured. Each can invalidate part of the design.
 4. **Who adds the 44 lines to Tim's repo.** We cannot; we have no access. It is his change,
    and it should be a PR he reviews rather than something that appears.
 
+## ✅ MEASURED 2026-10-07 — the design is viable, and the call's premise was wrong
+
+```
+gh api -X PUT /repos/variant-inc/usx-cicd-workflows/actions/permissions/access \
+   -f access_level=enterprise
+gh api /repos/variant-inc/usx-cicd-workflows/actions/permissions/access
+  -> {"access_level": "enterprise"}
+```
+
+**It stuck.** `variant-inc` and `usxpressinc` are in the same GitHub enterprise, so a
+repo in `usxpressinc` CAN call a **private** reusable workflow in `variant-inc`. Unknown 1
+— the one everything depended on — is closed, and the public-repo fallback is not needed.
+
+### ⚠️ "Neither of us have permission to your repo" is false
+
+```
+gh api /repos/usxpressinc/risingwave-poc --jq .permissions
+  -> {"admin": false, "maintain": false, "pull": true, "push": true, "triage": true}
+```
+
+**`dare-x` has `push` on Tim's repo.** The credential gap that framed the whole call —
+and that produced the clone-our-repo workaround, which produced the org debate — does not
+exist in that direction. We could have opened the PR ourselves at any point.
+
+Correct conduct is unchanged: it is Tim's repo, so the 44 lines go in as a **pull request
+he reviews**, not a push. But "we are blocked on access" should not be said again without
+running the command above first. A belief about permissions, repeated on a call by three
+people, outranked a one-line check that contradicts it.
+
+### ⚠️ The default branch is `master`, not `main`
+
+`usxpressinc/risingwave-poc` defaults to **`master`**. The OIDC `sub` is a literal string
+match, so a trust policy written for `main` fails with *"Not authorized to perform
+sts:AssumeRoleWithWebIdentity"* — which reads as a permissions problem and sends you
+looking at IAM. Templates corrected.
+
+**Still open:** steps 3 and 4 (the `usxpressinc` Actions policy) need an org admin;
+`dare-x` is not one. An `allowed_actions=selected` allowlist there would still block us,
+and we have NOT measured whether one exists.
+
 ## Tim is blocked on something else entirely
 
 > *"I'm having some problems locally with Docker... the folder is being owned by the user,

@@ -8,7 +8,11 @@ name: deploy
 
 on:
   push:
-    branches: [main]
+    # usxpressinc/risingwave-poc defaults to MASTER, not main. The OIDC sub in the
+    # trust policy is a literal string match on this branch name -- getting it wrong
+    # fails as "Not authorized to perform sts:AssumeRoleWithWebIdentity", which reads
+    # like a permissions problem rather than a wrong branch.
+    branches: [master]
     paths-ignore:
       - '**/*.md'
   workflow_dispatch:
