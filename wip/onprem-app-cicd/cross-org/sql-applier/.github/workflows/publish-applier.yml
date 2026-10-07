@@ -1,0 +1,82 @@
+# Build and publish the SQL applier base image. Runs only when the tooling changes.
+#
+# This is the only place apply.sh lives. Every app repo's image is built FROM the
+# result, so a fix here reaches every consumer on their next build.
+name: publish-applier
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'build/Dockerfile'
+      - 'build/apply.sh'
+      - '.github/workflows/publish-applier.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 064859874041.dkr.ecr.us-east-2.amazonaws.com
+  ECR_REPOSITORY: risingwave/sql-applier
+  PUSH_ROLE: arn:aws:iam::064859874041:role/gha-sql-applier-ecr-push
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PUSH_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-applier-${{ github.run_id }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build (local, scan before anything is published)
+        uses: docker/build-push-action@v6
+        with:
+          context: build
+          file: build/Dockerfile
+          push: false
+          load: true
+          tags: applier-scan:${{ github.sha }}
+          provenance: false
+
+      - name: Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: applier-scan:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: build
+          file: build/Dockerfile
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+          provenance: false
+
+      - name: Report
+        run: |
+          set -euo pipefail
+          D='${{ steps.push.outputs.digest }}'
+          [ -n "$D" ] || { echo "no digest -- the push did not happen"; exit 1; }
+          {
+            echo "### Applier base image published"
+            echo '```'
+            echo "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}@${D}"
+            echo '```'
+            echo "Consumers pin this digest in sql-pipeline-build-push.yml's applier_image input."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,178 @@
+# REUSABLE. For an app repo that owns SQL and nothing else.
+#
+# The app repo has no Dockerfile, no apply.sh, and NO SECRETS. It has `pipelines/`
+# and a 15-line caller. This workflow generates a three-line image FROM the
+# published applier base, so the tooling is versioned centrally and a fix to
+# apply.sh reaches every consumer on their next build.
+#
+# ⚠️ PUBLISHING THIS so other repos can call it needs BOTH:
+#     1. host repo INTERNAL or PUBLIC (private cannot share, ever)
+#     2. gh api -X PUT /repos/<o>/<r>/actions/permissions/access -f access_level=enterprise
+#   access_level defaults to `none` and is PER REPOSITORY -- it does not travel.
+name: sql-pipeline-build-push
+
+on:
+  workflow_call:
+    inputs:
+      ecr_repository:
+        description: 'ECR repo path for THIS app, e.g. risingwave/poc-pipeline'
+        required: true
+        type: string
+      push_role:
+        description: 'IAM role ARN this repo is trusted to assume'
+        required: true
+        type: string
+      sql_dir:
+        description: 'Directory holding the SQL, copied to /pipeline/pipelines/'
+        required: false
+        default: pipelines
+        type: string
+      applier_image:
+        description: >
+          The applier base image. Pin a DIGEST in anything that matters -- a tag
+          silently changes what your image is built on.
+        required: false
+        default: '064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/sql-applier:latest'
+        type: string
+      aws_region:
+        required: false
+        default: us-east-2
+        type: string
+      ecr_registry:
+        required: false
+        default: '064859874041.dkr.ecr.us-east-2.amazonaws.com'
+        type: string
+      trivy_severity:
+        description: 'Fail on these severities. Empty disables the gate.'
+        required: false
+        default: 'CRITICAL,HIGH'
+        type: string
+    secrets:
+      teams_webhook:
+        required: false
+    outputs:
+      digest:
+        description: 'The image digest QA and then prod will run. Nothing is rebuilt.'
+        value: ${{ jobs.build.outputs.digest }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to build an empty pipeline
+        env:
+          SQL_DIR: ${{ inputs.sql_dir }}
+        run: |
+          set -euo pipefail
+          [ -d "$SQL_DIR" ] || { echo "::error::sql_dir '$SQL_DIR' does not exist"; exit 1; }
+          N=$(find "$SQL_DIR" -name '*.sql' -o -name '*.rw' | wc -l)
+          echo "$N SQL files under $SQL_DIR"
+          # An image with no SQL applies nothing and deploys green. That is the
+          # failure that looks like a success, so it stops here instead.
+          [ "$N" -gt 0 ] || { echo "::error::no .sql or .rw files -- refusing to build an image that applies nothing"; exit 1; }
+          find "$SQL_DIR" \( -name '*.sql' -o -name '*.rw' \) | sort
+
+      - name: Assume the push role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.push_role }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: gha-${{ github.repository_owner }}-${{ github.run_id }}
+
+      - name: Prove which identity we got
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --output text
+          echo "repo=${{ github.repository }} ref=${{ github.ref }}"
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate the Dockerfile
+        env:
+          BASE: ${{ inputs.applier_image }}
+          SQL_DIR: ${{ inputs.sql_dir }}
+        run: |
+          set -euo pipefail
+          {
+            echo "FROM ${BASE}"
+            echo "COPY --chown=10001:10001 ${SQL_DIR}/ /pipeline/pipelines/"
+          } > Dockerfile.generated
+          cat Dockerfile.generated
+
+      - name: Build (local, scan before anything reaches the registry)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.generated
+          push: false
+          load: true
+          tags: scan-target:${{ github.sha }}
+          provenance: false
+
+      - name: Scan
+        if: inputs.trivy_severity != ''
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: scan-target:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: ${{ inputs.trivy_severity }}
+
+      - name: Push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.generated
+          push: true
+          tags: ${{ inputs.ecr_registry }}/${{ inputs.ecr_repository }}:${{ github.sha }}
+          provenance: false
+
+      - name: Report the digest
+        run: |
+          set -euo pipefail
+          D='${{ steps.push.outputs.digest }}'
+          [ -n "$D" ] || { echo "no digest returned -- the push did not happen"; exit 1; }
+          {
+            echo "### SQL pipeline image pushed"
+            echo '```'
+            echo "${{ inputs.ecr_registry }}/${{ inputs.ecr_repository }}@${D}"
+            echo '```'
+            echo "Built on \`${{ inputs.applier_image }}\`."
+            echo "QA picks this digest up; prod is a separate human-merged PR against the"
+            echo "SAME digest. Nothing is rebuilt between environments."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify-failure:
+    needs: build
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      # The `secrets` context is NOT available in a step-level `if:` -- actionlint
+      # catches it, GitHub would not. The skip lives inside the script.
+      - name: Send Teams notification
+        env:
+          HOOK: ${{ secrets.teams_webhook }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOOK:-}" ]; then
+            echo "no teams_webhook passed by the caller -- nothing to notify"
+            exit 0
+          fi
+          curl -sS --fail-with-body -H "Content-Type: application/json" -d '{
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": "FF0000",
+            "summary": "SQL pipeline build failed",
+            "title": "SQL pipeline build failed",
+            "text": "**Repo:** ${{ github.repository }}<br>**Branch:** ${{ github.ref_name }}<br>**Actor:** ${{ github.actor }}<br>**Commit:** `${{ github.sha }}`<br><br>[View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          }' "$HOOK"
