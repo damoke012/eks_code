@@ -111,9 +111,11 @@ Not yet measured. Each can invalidate part of the design.
    the AWS trust policy is what grants anything. Decide this first; everything depends on it.
 2. **Does the USX org permit `id-token: write`?** An org can disable OIDC for its repos.
    One line of org policy silently removes the entire credential model.
-3. **Exact org and repo names.** The transcript garbles the USX one ("Usxsqlopsprd"). The
-   OIDC `sub` is an **exact string match**, so a guess does not fail loudly — it fails as a
-   generic authorization error that reads like a permissions bug.
+3. ~~**Exact org and repo names.**~~ **SETTLED 2026-10-07** by `gh api /user/orgs`: the two
+   orgs are **`variant-inc`** and **`usxpressinc`**. The transcript's "Usxsqlopsprd" was a
+   mis-transcription. The app repo name is still to confirm. The OIDC `sub` is an **exact
+   string match**, so a guess does not fail loudly — it fails as a generic authorization
+   error that reads like a permissions bug.
 4. **Who adds the 44 lines to Tim's repo.** We cannot; we have no access. It is his change,
    and it should be a PR he reviews rather than something that appears.
 
