@@ -1,0 +1,100 @@
+---
+name: two-orgs-join-at-ecr-not-github
+description: "USX app teams consume PUBLISHED reusable workflows and never hand over repo keys; our app-template violated both. Join the two GitHub orgs at ECR via OIDC, not with a cross-org token, and the repo-location question disappears"
+metadata:
+  node_type: memory
+  type: project
+---
+
+**2026-10-07 call** (Steve, Tim, Idris, Pujit, Doke). The question on the table was *which
+GitHub org the RisingWave pipeline repo should live in*. It is the wrong question and it
+cost three weeks.
+
+**Tim stated a USX standard, not a preference:** *"We have not been developing GitHub
+Actions, and we have not been custom curating our deployment from scratch. We have used
+actions that have come out of the variant space… you just create it and then you publish it
+and then it gets used."* And: *"We've never done those repo keys and passing things
+around."*
+
+`wip/onprem-app-cicd/app-template/.github/workflows/build-and-push.yml` breaks both — a
+90-line workflow the app team copies and then owns, whose promotion job needs a cross-org
+token. **Right content, wrong packaging.** Keep it as the reference implementation; stop
+shipping it as the interface.
+
+**The platform needs exactly one thing from an app repo: an image in ECR.** That is an AWS
+boundary, so it does not care which GitHub org the source sits in. Design in
+`wip/onprem-app-cicd/cross-org/` (all three workflows parse):
+
+- **Reusable workflow** `variant-inc/usx-cicd-workflows/.github/workflows/app-build-push.yml@v1`;
+  the app's own file is 44 lines with two values and **no secrets**.
+- **OIDC only.** A reusable workflow runs in the *caller's* secret context, so a variant-inc
+  org secret is invisible to it anyway — which forces the clean answer. Revoking access =
+  deleting a line of Terraform.
+- **The promotion PR is opened on the platform side** (`promote-from-ecr.yml`, polls ECR),
+  because the overlays live there. So the app repo needs no write access to ours, and Argo CD
+  never reads theirs.
+
+**How to apply:** when two orgs must cooperate, look for a boundary you already control that
+is not GitHub. Credential exchange was the problem; ECR made it unnecessary.
+
+✅ **MEASURED 2026-10-07.** `PUT /repos/variant-inc/usx-cicd-workflows/actions/permissions/access
+-f access_level=enterprise` **stuck**, so the two orgs share one GitHub enterprise and a
+`usxpressinc` repo CAN call a *private* `variant-inc` reusable workflow. No public fallback
+needed.
+
+⚠️ **"Neither of us have permission to your repo" (said on the call) is FALSE.**
+`gh api /repos/usxpressinc/risingwave-poc --jq .permissions` → `push: true` for `dare-x`.
+The credential gap that produced the clone-our-repo workaround, which produced the whole
+org debate, does not exist in that direction. Still PR rather than push — it is Tim's repo
+— but never repeat the access claim without running that one line.
+
+⚠️ **`usxpressinc/risingwave-poc` defaults to `master`, not `main`.** The OIDC `sub` is a
+literal match; a policy written for `main` fails as *"Not authorized to perform
+sts:AssumeRoleWithWebIdentity"* and sends you to IAM instead of to the branch name.
+
+⚠️ **Still unverified:** the exact app-repo name.
+
+**The two orgs are `variant-inc` and `usxpressinc`** (confirmed 2026-10-07, `gh api /user/orgs`). The call transcript's "Usxsqlopsprd" was a mis-transcription and is not an org.
+
+⚠️ **The OIDC `sub` is org-qualified.** A repo transferred between orgs stops authenticating
+at once, nothing changed on its side, and the error names permissions rather than the claim.
+Related: [[gha-oidc-needs-environment-claim]] — pinning `environment:` in the sub requires
+the calling job to declare it, so our policy pins repo + ref instead.
+
+**Tim is not blocked on the org decision.** He is blocked on a local Docker
+container-user/file-ownership mismatch and is days into it alone.
+
+Related: [[onprem-app-cicd]], [[usx-github-enterprise-not-personal]],
+[[two-gha-roles-one-pipeline-repo]], [[adjacent-step-green-signals]] (a promotion poll that
+finds nothing still reports success).
+Note: `wip/onprem-app-cicd/cross-org/FINDINGS-2026-10-07-two-orgs-one-pipeline.md`.
+
+
+## 2026-10-07 — proven, then blocked on one setting
+
+**The design is sound and the failure is access.** A six-line no-op reusable workflow fails
+identically to the real one, so content was never implicated; `actionlint 1.7.7` passes both
+files.
+
+⚠️ **`actions/permissions/access` is INERT on a private repo.** `enterprise` and
+`organization` are both accepted by the PUT, persisted, and read back — and neither grants
+anything. The source repo must be **internal** or **public**. I reported the successful PUT
+as "the deciding check passed"; it was a true statement about a stored setting and said
+nothing about the capability. The proof is a run.
+
+⚠️ **`gh workflow run` is the fast diagnostic.** A dispatch on a caller whose `uses:` cannot
+resolve returns **HTTP 422 with the literal parse error**. The same file triggered by push
+gives a failure with **no job, no log**, and only a generic "workflow file issue" in the UI —
+so `gh run view --log-failed` says "log not found" and `/jobs` returns empty. Neither absence
+is a finding.
+
+⚠️ **"Workflow was not found" means "you cannot see it" as often as "it does not exist".**
+
+**Blocked on:** an org owner making `variant-inc/usx-cicd-workflows` internal. `dare-x`
+created the repo and still gets 422 "Visibility can't be changed by this user".
+
+⚠️ **Three things today ended at a permission Doke does not hold** — both orgs' Actions
+policies (403) and repo visibility (422). He owns the delivery path without being an owner
+in either org hosting it. Raise as its own item.
+
+Note: `wip/onprem-app-cicd/cross-org/FINDINGS-2026-10-07-two-orgs-one-pipeline.md`.

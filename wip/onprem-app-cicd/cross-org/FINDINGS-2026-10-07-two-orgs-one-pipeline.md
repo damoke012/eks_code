@@ -438,3 +438,32 @@ Seven, each killed by a measurement rather than an argument. Two were mine to be
 I created a private repo without asking where shared workflows already live in this org
 (they live in `variant-inc/actions-*`, public, and `actions-collection` already ships a
 **`build-push-image`**), and I twice reported "one setting away" before it was.
+
+### Step C closed out — all three criteria measured
+
+```
+arn:aws:sts::064859874041:assumed-role/gha-risingwave-etl-ecr-push/gha-variant-inc-37687158336
+repo=variant-inc/risingwave-pipeline ref=refs/heads/master
+
+176d342  deploy  success     ECR 2026-10-07T17:09:35  sha256:c3f762435ad0a3a6…
+12b4527  deploy  success     ECR 2026-10-07T17:07:54  sha256:3e91003ff5d2c1f5…
+                             (before: 2026-09-29      sha256:b687e6c5c2e8ec2c…)
+```
+
+Two green runs on two commits, two new digests. **Repeatable, not a one-off.** The assumed
+role is exactly the scoped one and the session name carries the calling org and run id, so
+an ECR push is attributable to a single workflow run.
+
+`build-and-push.yml` removed in `176d342`; the copied pipeline is gone and the call replaces
+it. ⚠️ That file carried a **Teams notification** and a **QA-overlay digest bump** which
+`app-build-push.yml` does not yet have. Both must be added before a second app adopts this.
+
+⚠️ **`gh run view --log` returns ZERO lines for a reusable-workflow run.** The first grep for
+the identity came back empty and I nearly read that as a finding. It is a transport absence —
+see [[transport-failure-not-a-verdict]]. The job logs endpoint works:
+
+```
+gh api /repos/<owner>/<repo>/actions/jobs/<job_id>/logs
+```
+
+The job id is in `gh run watch` output, or `/actions/runs/<id>/jobs`.
