@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   build-and-push:
-    uses: variant-inc/usx-cicd-workflows/.github/workflows/app-build-push.yml@v1
+    uses: variant-inc/iaac-risingwave-cicd/.github/workflows/app-build-push.yml@v1
     with:
       ecr_repository: risingwave/etl-pipeline
       push_role: arn:aws:iam::064859874041:role/gha-risingwave-etl-ecr-push

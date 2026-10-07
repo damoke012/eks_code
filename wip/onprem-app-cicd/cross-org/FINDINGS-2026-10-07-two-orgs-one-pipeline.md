@@ -377,3 +377,64 @@ Owners as of 2026-08-20: `usx-devops`, `buddy-james`, `higdonmatthew`, `stevebdu
 repository visibility (422). The platform's delivery path is owned by someone who is not an
 owner in either org that hosts it. That is a standing constraint, not an incident, and it
 belongs in front of Steve on its own rather than as a footnote to this ticket.
+
+---
+
+## ✅ STEP C GREEN — 2026-10-07 17:07 EDT
+
+`variant-inc/risingwave-pipeline` commit `12b4527`, run `37687158336`, **success in 15s**.
+
+```
+✓ Assume the push role via OIDC
+✓ Build and push by digest
+ECR risingwave/etl-pipeline  2026-10-07T17:07:54  sha256:3e91003ff5d2c1f5…   (was 2026-09-29 / b687e6c5)
+```
+
+A 15-line caller, **zero secrets**, built and pushed an image by digest. The pipeline the
+app team maintains is now a `uses:` line.
+
+### ⚠️ THE RULE — two conditions, neither sufficient, one error message
+
+Sharing a reusable workflow across repositories requires **both**:
+
+| | |
+|---|---|
+| **Visibility** | `internal` or `public`. A **private** repo cannot share, whatever `access_level` says |
+| **`actions/permissions/access`** | `organization` or `enterprise`. Defaults to **`none`** on every repo |
+
+Every failure tonight was one of these missing:
+
+* `usx-cicd-workflows` — private, `access_level` set → **fails**
+* `iaac-risingwave-cicd` — internal, `access_level: none` → **fails**
+* `iaac-risingwave-cicd` — internal, `access_level: enterprise` → **works**
+
+**All three produce the identical string: `workflow was not found`** — which is also what a
+genuinely absent file produces. Four states, one message. The docs link in the error
+(`#access-to-reusable-workflows`) is the only hint it is access rather than absence.
+
+⚠️ **`access_level` is per repository and does not travel.** I set it on the first host,
+moved the workflow to a second host, and never set it there. That single oversight cost
+more than every other dead end combined.
+
+### Method, for next time
+
+1. **`gh workflow run` is the diagnostic.** A dispatch on an unresolvable caller returns
+   **422 with the literal parse error** in under a second. The same file triggered by push
+   gives a failure with no job, no log, and a generic "workflow file issue".
+2. **Bisect with a six-line no-op.** `ping.yml` — no inputs, no AWS, no Docker — failing
+   identically proved the fault was access, not content, and retired the whole
+   content branch of the hypothesis space in one commit.
+3. **Distinguish 404 from 422.** A 404 from `gh workflow run` means GitHub has not indexed
+   the newly pushed file yet; retry. Only the 422 is a real resolution failure. Collapsing
+   them into "blocked" wasted a round trip.
+4. **`actionlint` for schema, a run for reachability.** `yaml.safe_load` proves neither.
+
+### Hypotheses eliminated, in order
+
+content → tag existence → ref type (`@v1`, `@main`, `@<sha>` all identical) → calling org →
+`access_level` on the wrong repo → visibility → **`access_level` on the right repo**.
+
+Seven, each killed by a measurement rather than an argument. Two were mine to begin with:
+I created a private repo without asking where shared workflows already live in this org
+(they live in `variant-inc/actions-*`, public, and `actions-collection` already ships a
+**`build-push-image`**), and I twice reported "one setting away" before it was.
