@@ -276,3 +276,64 @@ is a single static binary, so it belongs in the pre-commit path for every workfl
 returns "log not found" and `/actions/runs/<id>/jobs` returns nothing. Neither absence is a
 finding about the workflow. The error text lives only in the run's annotation in the web UI.
 Read it there before theorising.
+
+## ⚠️ ROOT CAUSE — `access_level: enterprise` reads back true on a PRIVATE repo and grants nothing
+
+Bisected 2026-10-07 with a six-line no-op reusable workflow (`ping.yml`: no inputs, no AWS,
+no Docker). It fails **identically** to the real one:
+
+```
+error parsing called workflow
+"variant-inc/usx-cicd-workflows/.github/workflows/ping.yml@v1"
+: workflow was not found.
+```
+
+**So it is access, not content.** `app-build-push.yml` was never implicated. The bisection
+cost one commit and removed a whole branch of the hypothesis space.
+
+### The green signal that wasn't
+
+```
+PUT /repos/variant-inc/usx-cicd-workflows/actions/permissions/access -f access_level=enterprise
+GET /repos/variant-inc/usx-cicd-workflows/actions/permissions/access
+  -> {"access_level": "enterprise"}     # accepted, stored, read back
+GET /repos/variant-inc/usx-cicd-workflows --jq .visibility
+  -> "private"
+```
+
+The API accepts the write, persists it, and returns it. **It still grants nothing, because
+the repository is private.** Sharing a reusable workflow beyond its own repo needs the
+repository to be **public** or **internal**; on a private repo the access setting is stored
+and inert.
+
+I treated the successful `PUT` + matching `GET` as proof that cross-org calling worked, and
+reported it as the deciding check passing. It was a true statement about the stored setting
+and said nothing about the capability. Another [[adjacent-step-green-signals]] instance, and
+the most expensive kind: the check and the thing it was meant to prove live in the same API
+and disagree silently.
+
+**The real check is a run.** The validation script already said so in its closing banner —
+"a passing step 2 is not a substitute" — and I then substituted it anyway.
+
+### The fix
+
+`usx-cicd-workflows` holds workflow logic and no secrets, so **internal** is the correct
+visibility and is what "published from the variant space" means in practice: readable by
+every member of the enterprise, which is also exactly what step D needs.
+
+```
+gh api -X PATCH /repos/variant-inc/usx-cicd-workflows -f visibility=internal
+```
+
+⚠️ Changing visibility can reset `actions/permissions/access`. Re-read it after, and
+**re-run the ping probe** — the setting is not the proof.
+
+### Traps recorded
+
+- **`gh workflow run` on a caller whose `uses:` cannot resolve returns HTTP 422 with the
+  real parse error**, while a push-triggered run of the same file produces a failure with
+  **no job, no log, and only a generic "workflow file issue"** in the UI. The dispatch path
+  is the better diagnostic. Reach for it first.
+- `actionlint` passed both files. It validates schema, not whether a referenced workflow is
+  reachable. Clean `actionlint` plus "workflow was not found" is a coherent pair, not a
+  contradiction.
