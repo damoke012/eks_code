@@ -1,0 +1,109 @@
+# Promote the newest ECR image to QA, automatically.
+#
+# THIS IS THE LINK THAT WAS MISSING. The old build-and-push.yml opened a promotion
+# PR and then waited for a human. PR #67 sat open from 2026-09-29, so QA ran the
+# 11 September image for four weeks while builds kept succeeding. A pull request
+# that opens itself and waits for someone who is not watching is not automation;
+# it is a drawer.
+#
+# So this opens the PR *and merges it*. The PR still exists, which is what gives us
+# the audit trail and the revert point -- it just does not need a human to notice.
+#
+# QA ONLY. Production is a separate, human-merged PR against the SAME digest.
+name: promote-to-qa
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: [deploy]          # right after a build, don't wait for the cron
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: risingwave/etl-pipeline
+  READ_ROLE: arn:aws:iam::064859874041:role/gha-risingwave-etl-ecr-push
+  OVERLAY: deploy/overlays/qa/kustomization.yaml
+
+jobs:
+  promote:
+    # A failed build must not promote anything.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.READ_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: promote-${{ github.run_id }}
+
+      - name: Compare the newest digest against what QA runs
+        id: cmp
+        run: |
+          set -euo pipefail
+          LATEST=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+                     --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageDigest' --output text)
+          case "$LATEST" in
+            sha256:*) : ;;
+            *) echo "::error::no image in $ECR_REPOSITORY (got '$LATEST')"; exit 1 ;;
+          esac
+          CURRENT=$(grep -oE 'sha256:[0-9a-f]{64}' "$OVERLAY" | head -1 || true)
+          echo "ecr=$LATEST"
+          echo "qa =${CURRENT:-none}"
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "QA is already on the newest image -- nothing to promote"
+            echo "changed=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          sed -i "s|sha256:[0-9a-f]\{64\}|$LATEST|" "$OVERLAY"
+          # Prove the edit landed and the overlay still builds. A kustomization that
+          # does not render freezes the whole Application, and Argo reports the last
+          # good state while doing nothing.
+          git diff --quiet "$OVERLAY" && { echo "::error::sed matched nothing"; exit 1; }
+          kubectl kustomize deploy/overlays/qa > /dev/null
+          echo "changed=1"        >> "$GITHUB_OUTPUT"
+          echo "digest=$LATEST"   >> "$GITHUB_OUTPUT"
+
+      - name: Open the promotion PR and merge it
+        if: steps.cmp.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.cmp.outputs.digest }}
+        run: |
+          set -euo pipefail
+          BR="promote/qa-${DIGEST#sha256:}"
+          BR="${BR:0:40}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git commit -qam "promote: QA to ${DIGEST}"
+          git push -q origin "$BR"
+          gh pr create --base master --head "$BR" \
+            --title "promote: QA to ${DIGEST:0:19}" \
+            --body "Opened and merged automatically. QA was running an older image.
+
+          New digest: \`${DIGEST}\`
+
+          Merging makes Argo CD apply it on **op-usxpress-qa**. The Job runs as a sync
+          hook, so its logs appear in the Argo UI.
+
+          Production is a separate, human-merged PR against the SAME digest. Nothing is
+          rebuilt between environments.
+
+          This PR exists for the audit trail and the revert point, not for a review gate --
+          PR #67 sat open for four weeks and QA ran a stale image the whole time."
+          gh pr merge "$BR" --squash --delete-branch
+          echo "promoted ${DIGEST}"
+
+      - name: Say plainly when nothing happened
+        if: steps.cmp.outputs.changed != '1'
+        run: echo "No promotion. Green here means the check ran, not that anything deployed."

@@ -592,3 +592,60 @@ on a third-party action, in the shared action every app uses. Own ticket.
    load-bearing for app delivery.
 4. **Renovate's open branch there deletes `publish-applier.yml`** — it branched before
    tonight. Rebase it; merging it removes the applier build.
+
+---
+
+## ✅ THE LOOP IS CLOSED — 2026-10-07 22:52 UTC
+
+```
+phase: Succeeded
+Job  etl-pipeline-apply   "Reached expected number of succeeded pods"   hookPhase: Succeeded
+pod  etl-pipeline-apply-ncm67  →  pulled …/risingwave/etl-pipeline@sha256:56f83c27…  →  completed
+cm   etl-pipeline-image created, digest sha256:56f83c27…
+```
+
+SQL commit → image → promotion PR opened and merged → Argo sync → Job pulled that digest and
+ran. **The first real deployment on op-usxpress-qa since 2026-09-11.**
+
+### ⚠️ TWO faults, in series, both invisible
+
+**1. A promotion PR that waits for a human nobody appointed.** PR #67 opened 2026-09-29 and
+was still open tonight. The automation worked; the gate did not. Fixed by `promote-to-qa.yml`,
+which opens the PR *and merges it* — the PR survives as the audit trail and revert point, it
+just no longer needs anyone to notice.
+
+**2. A sync hook nothing could trigger.** `deploy/base/job.yaml` carries
+`argocd.argoproj.io/hook: Sync`, so the Job is **not in the tracked resource set** —
+`status.resources` listed only the ConfigMap and the ExternalSecret. A digest bump therefore
+changed nothing Argo watched: `sync.status` stayed `Synced`, **no sync operation ran, and the
+hook never fired.**
+
+**Merging PR #67 in September would not have deployed either.** Fixing the gate alone would
+have produced a merged PR, a green Application, and still nothing running — and we would have
+believed it was working.
+
+The file's own comment said *"a Sync hook so it re-runs on every sync"*. True, and the trap:
+nothing ever caused a sync.
+
+**Fix:** `deploy/overlays/qa/image-digest.yaml`, a ConfigMap whose only job is to hold the
+digest. It IS tracked, so a promotion creates real drift → sync → hook fires. The promotion
+workflow bumps it and the kustomization together.
+
+### The general rule
+
+**A resource Argo does not track cannot pull itself into a sync.** If the only thing a
+release changes is a hook, a hook's image, or anything outside `status.resources`, the
+Application stays Synced and the release never happens. Pair every hook with a tracked
+artifact that changes when it should run.
+
+And: `status.sync.status: Synced` answers "does the tracked set match git", **not** "did the
+release happen". Those came apart for four weeks here. Another
+[[adjacent-step-green-signals]] instance, and the most expensive yet — three green signals in
+a row (build, promotion PR, Application) over a deployment that never occurred.
+
+### ⚠️ Still wrong: the evidence is deleted on success
+
+`hook-delete-policy: BeforeHookCreation,HookSucceeded` destroys the Job the moment it
+succeeds. The single most important artefact — did the SQL apply, and what did it say — only
+survives when it fails. Dropping `HookSucceeded` keeps the last Job until the next sync
+replaces it.
