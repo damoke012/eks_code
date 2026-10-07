@@ -1,0 +1,34 @@
+# variant-inc/risingwave-pipeline -- the whole pipeline this repo maintains.
+#
+# STEP C, the same-org proof: this repo's sub is ALREADY in the trust policy of
+# gha-risingwave-etl-ecr-push, so this runs with no IAM change.
+#
+# ⚠️ MUST RUN ON master. The trust policy is StringEquals on the single literal
+#    repo:variant-inc/risingwave-pipeline:ref:refs/heads/master
+#    A run from any other branch presents a different sub and fails with
+#    "Not authorized to perform sts:AssumeRoleWithWebIdentity" -- an IAM-shaped
+#    error for a branch-name mismatch. Do not go hunting in IAM for it.
+#
+# No secrets. None. The only credential is a per-run OIDC token.
+name: deploy
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - 'deploy/overlays/**'    # a promotion merge must not trigger a rebuild
+      - '**/*.md'
+  workflow_dispatch:            # manual trigger, still only valid on master
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    uses: variant-inc/usx-cicd-workflows/.github/workflows/app-build-push.yml@v1
+    with:
+      ecr_repository: risingwave/etl-pipeline
+      push_role: arn:aws:iam::064859874041:role/gha-risingwave-etl-ecr-push
+      dockerfile: build/Dockerfile
+      build_context: .
