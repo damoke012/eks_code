@@ -159,6 +159,52 @@ looking at IAM. Templates corrected.
 `dare-x` is not one. An `allowed_actions=selected` allowlist there would still block us,
 and we have NOT measured whether one exists.
 
+## Measured in AWS 064859874041 — 2026-10-07
+
+Everything the original plan's PR 1 called for **already exists**: ECR repo
+`risingwave/etl-pipeline`, IAM role `gha-risingwave-etl-ecr-push`, and the GitHub OIDC
+provider. So `gha-oidc-trust.tf` must be **reconciled against whatever already manages
+them**, never applied as a second definition — see [[two-projects-one-resource]].
+
+### The same-org proof needs NO change at all
+
+```json
+"token.actions.githubusercontent.com:sub":
+    "repo:variant-inc/risingwave-pipeline:ref:refs/heads/master"
+```
+
+`variant-inc/risingwave-pipeline` on `master` **is already trusted**. Step C can run today
+by adding the 44-line caller to that repo. No IAM mutation, no Terraform, no waiting.
+
+⚠️ **It is `StringEquals` on a single string, and the ref is `master`.** Two consequences:
+
+1. A test run from a **feature branch** presents `…:ref:refs/heads/<branch>`, which does
+   not match, and fails as *"Not authorized to perform sts:AssumeRoleWithWebIdentity"* —
+   an IAM-shaped error for a branch-name mismatch. **The proof run must be on `master`.**
+2. Adding `usxpressinc/risingwave-poc` means adding a **second value** to that
+   `StringEquals` list. `StringEquals` accepts an array; it does not need to become
+   `StringLike`, and making it a wildcard would be a widening nobody asked for.
+
+### The Manhattan precedent exists, and we should not copy it
+
+`usxpress/manhattan-dl-pipeline` (pushed 2026-10-05, actively used) has **no scoped role**.
+Its ECR repository policy is:
+
+```json
+"Principal": {"AWS": "*"},
+"Condition": {"StringEquals": {"aws:PrincipalOrgID": "o-yza5l1xhrc"}}
+```
+
+**Any principal anywhere in the AWS Organization can push to it.** That is how the Manhattan
+pipelines cross the org boundary — not with an identity, but by the registry being open to
+the whole Organization. It is the same posture already recorded in
+[[ecr-shared-registry-posture]] (515 of 517 repos grant org-wide push).
+
+So the cross-org problem *is* already "solved" in production, by not solving it. The
+RisingWave role — one repo, one ref, one registry path — is the stronger pattern and it
+already exists. **Copy RisingWave's shape to Manhattan eventually, not the other way
+round.** Worth its own ticket; out of scope here.
+
 ## Tim is blocked on something else entirely
 
 > *"I'm having some problems locally with Docker... the folder is being owned by the user,
