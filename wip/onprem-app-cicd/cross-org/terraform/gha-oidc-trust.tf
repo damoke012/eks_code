@@ -20,6 +20,14 @@ variable "apps" {
   }))
   default = {}
 
+  # ⚠️ These resources ALREADY EXIST in 064859874041 (measured 2026-10-07):
+  #     ECR repo       risingwave/etl-pipeline
+  #     IAM role       gha-risingwave-etl-ecr-push
+  #     OIDC provider  token.actions.githubusercontent.com
+  # So this file must be IMPORTED or reconciled against whatever already manages
+  # them -- creating a second definition of the same role is how a destroy takes
+  # out a live one. Find the owning repo before applying. See two-projects-one-resource.
+  #
   # Confirmed 2026-10-07:
   #   rw-poc = {
   #     github_org  = "usxpressinc"
