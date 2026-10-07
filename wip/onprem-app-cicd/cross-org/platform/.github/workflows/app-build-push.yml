@@ -1,21 +1,28 @@
-# REUSABLE workflow. Lives in variant-inc. Called by an app repo in ANY org.
+# REUSABLE workflow. Lives in variant-inc/iaac-risingwave-cicd (INTERNAL).
+# Called by an app repo in any org of the enterprise.
 #
-# This is the "action" shape Tim asked for on the 2026-10-07 call: the app team
-# does not curate a pipeline, it CALLS one. The whole caller is ~15 lines and
-# carries no secrets, because the only credential used here is a GitHub OIDC
-# token that AWS trades for a short-lived role session.
+# This is the "action" shape asked for on the 2026-10-07 call: an app team does not
+# curate a pipeline, it CALLS one. The caller is ~15 lines and carries NO SECRETS,
+# because the only credential is a GitHub OIDC token AWS trades for a short-lived
+# role session.
 #
-# ⛔ NO GITHUB SECRETS ARE ACCEPTED OR NEEDED.
-#    A reusable workflow runs in the CALLER's secret context, so a variant-inc
-#    org secret would not be visible here anyway. That is a feature: it forces
-#    the only cross-boundary credential to be OIDC, which is issued per run,
-#    expires in minutes, and is never stored anywhere.
+# ⚠️ TO PUBLISH THIS SO OTHERS CAN CALL IT, BOTH ARE REQUIRED:
+#     1. the host repo is INTERNAL or PUBLIC  (private cannot share, ever)
+#     2. gh api -X PUT /repos/<o>/<r>/actions/permissions/access -f access_level=enterprise
+#   access_level defaults to `none` and is PER REPOSITORY -- it does not travel when
+#   the workflow moves. Every failure mode, plus a genuinely missing file, emits the
+#   same string: "workflow was not found".
 #
-# What this does NOT do: open the promotion PR. The deploy overlays live in the
-# platform repo, in the other org, and writing there would need a token in the
-# caller's org -- exactly the "repo keys passed around" the app teams don't do.
-# Promotion is picked up on the platform side from the ECR push. See
-# promote-from-ecr.yml.
+# Why not variant-inc/actions-collection/build-push-image@v2 (the house action)?
+#   It is tag-based (GitVersion + check_tag_exists), creates the ECR repo itself, and
+#   requires LAZY_API_URL + LAZY_API_KEY. We need DIGEST-based promotion -- overlays
+#   pin a digest so nothing is rebuilt between environments -- against an existing
+#   immutable repo. And requiring LAZY_API_KEY would put a secret back in the app
+#   repo, which is the one thing this design exists to avoid. Reviewed 2026-10-07.
+#
+# What this does NOT do: open the promotion PR. Deploy overlays live in the platform
+# repo; writing there from a caller's context would need a stored token. Promotion is
+# picked up from the ECR push on the platform side.
 name: app-build-push
 
 on:
@@ -30,12 +37,10 @@ on:
         required: true
         type: string
       dockerfile:
-        description: 'Path to the Dockerfile'
         required: false
         default: build/Dockerfile
         type: string
       build_context:
-        description: 'Docker build context'
         required: false
         default: '.'
         type: string
@@ -47,14 +52,23 @@ on:
         required: false
         default: '064859874041.dkr.ecr.us-east-2.amazonaws.com'
         type: string
+      trivy_severity:
+        description: 'Fail the build on these severities. Empty string disables the gate.'
+        required: false
+        default: 'CRITICAL,HIGH'
+        type: string
+    secrets:
+      teams_webhook:
+        description: 'Optional. If set, a failure posts to this Teams webhook.'
+        required: false
     outputs:
       digest:
         description: 'The image digest QA and then prod will run. Nothing is rebuilt.'
         value: ${{ jobs.build.outputs.digest }}
 
 permissions:
-  id-token: write        # the OIDC token. This is the only credential in play.
-  contents: read         # checkout only. This workflow never writes to the app repo.
+  id-token: write
+  contents: read
 
 jobs:
   build:
@@ -64,10 +78,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # If the role's trust policy pins `environment:<name>` in its sub claim,
-      # the CALLING job must declare `environment:` or the token's sub will not
-      # match and this step fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity".
-      # Our trust policies pin repo + ref, not environment. See gha-oidc-trust.tf.
+      # If a trust policy pins `environment:<name>` in its sub claim, the CALLING job
+      # must declare `environment:` or the sub will not match and this fails with
+      # "Not authorized to perform sts:AssumeRoleWithWebIdentity" -- an IAM-shaped
+      # error for a missing declaration. Our policies pin repo + ref instead.
       - name: Assume the push role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -83,7 +97,30 @@ jobs:
 
       - uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push by digest
+      # Build locally first so the scan runs BEFORE anything reaches the registry.
+      # Scanning after the push means the bad image already exists and something can
+      # pull it.
+      - name: Build (local, not pushed yet)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.build_context }}
+          file: ${{ inputs.dockerfile }}
+          push: false
+          load: true
+          tags: scan-target:${{ github.sha }}
+          provenance: false
+
+      - name: Scan the image
+        if: inputs.trivy_severity != ''
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: scan-target:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: ${{ inputs.trivy_severity }}
+
+      - name: Push by digest
         id: push
         uses: docker/build-push-action@v6
         with:
@@ -98,6 +135,38 @@ jobs:
           set -euo pipefail
           D='${{ steps.push.outputs.digest }}'
           [ -n "$D" ] || { echo "no digest returned -- the push did not happen"; exit 1; }
-          echo "Pushed ${{ inputs.ecr_registry }}/${{ inputs.ecr_repository }}@${D}"
-          echo "QA picks this up automatically. Prod is a separate, human-merged PR"
-          echo "against the SAME digest -- nothing is rebuilt between environments."
+          {
+            echo "### Image pushed"
+            echo '```'
+            echo "${{ inputs.ecr_registry }}/${{ inputs.ecr_repository }}@${D}"
+            echo '```'
+            echo "QA picks this up automatically. Prod is a separate, human-merged PR"
+            echo "against the SAME digest -- nothing is rebuilt between environments."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify-failure:
+    needs: build
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      # Silently skipped when the caller passes no webhook, so a repo that does not
+      # want Teams notifications needs no configuration at all.
+      # The `secrets` context is NOT available in a step-level `if:` -- actionlint
+      # catches it, GitHub would not. So the skip is inside the script instead.
+      - name: Send Teams notification
+        env:
+          HOOK: ${{ secrets.teams_webhook }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOOK:-}" ]; then
+            echo "no teams_webhook passed by the caller -- nothing to notify"
+            exit 0
+          fi
+          curl -sS --fail-with-body -H "Content-Type: application/json" -d '{
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": "FF0000",
+            "summary": "Build and push failed",
+            "title": "Build and push failed",
+            "text": "**Repo:** ${{ github.repository }}<br>**Branch:** ${{ github.ref_name }}<br>**Actor:** ${{ github.actor }}<br>**Commit:** `${{ github.sha }}`<br><br>[View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          }' "$HOOK"

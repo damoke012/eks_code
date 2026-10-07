@@ -467,3 +467,68 @@ gh api /repos/<owner>/<repo>/actions/jobs/<job_id>/logs
 ```
 
 The job id is in `gh run watch` output, or `/actions/runs/<id>/jobs`.
+
+---
+
+## ⛔ STEP D CANNOT BE BUILT AS SPECIFIED — Tim's repo has no image
+
+Measured 2026-10-07 on `usxpressinc/risingwave-poc`:
+
+```
+git/trees/master?recursive=1  ->  no Dockerfile anywhere
+pipelines/Template/000-postgres.sql
+pipelines/employee/001-create_rdms_tables.sql
+pipelines/shared/scripts/db-init/100-helpers.sql
+```
+
+**It is a SQL pipeline repo**, not a container application. `docker/` holds `kafka`,
+`monitoring`, `postgres`, `required` and pairs with a root `docker-compose.yaml` — local
+development, not a build. The caller workflow I wrote would fail at `docker build`.
+
+### And its existing pipeline targets Octopus, not ECR
+
+`.github/workflows/build.yaml`:
+
+```yaml
+name: Push to Octopus
+on: { push: { branches: ["**"] } }
+steps:
+  - uses: variant-inc/actions-setup@v2
+  - uses: variant-inc/actions-octopus@v3
+```
+
+Two things follow. **His repo already consumes `variant-inc/actions-*`** — the convention he
+described on the call is in use today, not aspirational. And **his delivery target is
+Octopus**, while the platform path is GHA → ECR → Argo CD. Those are two mechanisms, which
+is what Idris meant by "we have to redirect the pipeline and every other thing pointing to
+the RisingWave server". That line was accurate and I under-read it.
+
+### The question that has to be answered before any more is built
+
+`variant-inc/risingwave-pipeline` is the repo that *packages* SQL into an image — it has
+`build/Dockerfile`, `deploy/overlays/{qa,prod}` and now the reusable-workflow call. So
+"Tim stays in his repo and uses our CI/CD" has at least three possible meanings, and they
+are different pieces of work:
+
+1. **His repo gains a Dockerfile** and builds its own image. Largest change, and duplicates
+   what `risingwave-pipeline` already does.
+2. **His repo stays the SQL source**; `risingwave-pipeline` consumes it as input and builds.
+   Then he needs no build pipeline at all — he needs a trigger and a contract for where the
+   SQL lands.
+3. **He keeps Octopus** and the ECR/Argo path is only for the packaged artefact. Then the
+   two pipelines coexist by design and nothing crosses the org boundary at all.
+
+**This is Tim's and Idris's call, not ours.** Building any of the three before it is decided
+is how three weeks got spent on a repo-location argument.
+
+⚠️ **I designed step D without reading the repo it was for.** Everything about it — the
+44-line caller, the trust-policy entry, the `master` branch pin — assumed a container build
+that does not exist. The validation probe asked four questions about GitHub and AWS and none
+about whether the app had something to build.
+
+### The IAM role is hand-made
+
+`gha-risingwave-etl-ecr-push`: **no tags**, created 2026-08-18, description *"GitHub Actions
+push to ECR risingwave/etl-pipeline, main branch only"* — while the trust policy actually
+pins `master`. No `variant-inc` Terraform references it. So `gha-oidc-trust.tf` must
+**import** it, not declare it, and the description is already wrong about its own branch.
