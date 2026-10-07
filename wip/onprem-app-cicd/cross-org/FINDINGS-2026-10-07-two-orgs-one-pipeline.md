@@ -337,3 +337,43 @@ gh api -X PATCH /repos/variant-inc/usx-cicd-workflows -f visibility=internal
 - `actionlint` passed both files. It validates schema, not whether a referenced workflow is
   reachable. Clean `actionlint` plus "workflow was not found" is a coherent pair, not a
   contradiction.
+
+### Both access levels are inert on a private repo
+
+```
+PUT …/actions/permissions/access -f access_level=organization  -> {"access_level":"organization"}
+gh workflow run ping-caller.yml --ref master
+  -> 422 … "variant-inc/usx-cicd-workflows/.github/workflows/ping.yml@v1": workflow was not found
+```
+
+`enterprise` and `organization` both accepted, both persisted, both read back, **both
+inert.** GitHub's docs say this endpoint "only applies to private repositories", which reads
+as though it is the mechanism for sharing a private repo's workflows. In this enterprise it
+is not sufficient: the source repository must be **internal** or **public**.
+
+`PATCH /repos/… -f visibility=internal` → **422 "Visibility can't be changed by this user."**
+`variant-inc` restricts visibility changes to org owners. `dare-x` created the repo and
+still cannot change it.
+
+**"Workflow was not found" means "you cannot see it" as often as "it does not exist".** The
+message is identical for both, and the docs link in the error (`#access-to-reusable-workflows`)
+is the only hint which one you have.
+
+### Withdrawn, not left red
+
+`deploy.yml` and `ping-caller.yml` were removed from `variant-inc/risingwave-pipeline`.
+A caller that fails on every push to master is a red signal that means nothing, and those
+train people to ignore red. `build-and-push.yml` was never modified and remains the live
+path — the migration has not started, so nothing has regressed.
+
+### Blocked on, and the ask
+
+**One org owner, 30 seconds:** make `variant-inc/usx-cicd-workflows` **internal**.
+Owners as of 2026-08-20: `usx-devops`, `buddy-james`, `higdonmatthew`, `stevebduckjr`,
+`svivesusx`. Steve was on the call and owns the outcome.
+
+⚠️ **Three separate things today ended at a permission `dare-x` does not hold:** the
+`variant-inc` Actions org policy (403), the `usxpressinc` Actions org policy (403), and now
+repository visibility (422). The platform's delivery path is owned by someone who is not an
+owner in either org that hosts it. That is a standing constraint, not an incident, and it
+belongs in front of Steve on its own rather than as a footnote to this ticket.
