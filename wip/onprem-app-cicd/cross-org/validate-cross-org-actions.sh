@@ -44,7 +44,9 @@ for O in "$PLATFORM_ORG" "$USX_ORG"; do
   R=$(gh api "/orgs/$O" 2>/dev/null)
   if [ -z "$R" ]; then fail "$O -- not visible to this account"; continue; fi
   ENT=$(printf '%s' "$R" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("business_plus") and "business_plus" or "", d.get("plan",{}).get("name","?"))' 2>/dev/null)
-  pass "$O exists (plan: $ENT)"
+  pass "$O exists (billing plan: $ENT)"
+  echo "    ^ plan name only. 'enterprise' here is the BILLING TIER and is NOT evidence"
+  echo "      that the two orgs belong to the same enterprise ACCOUNT."
 done
 echo "  NOTE: the REST API does not expose enterprise membership to a non-admin."
 echo "  The decisive check is step 2 -- if access_level can be set to 'enterprise',"
@@ -53,7 +55,9 @@ echo
 
 echo "=== 2. THE DECIDING CHECK -- the workflow repo's Actions access level ==="
 ACC=$(gh api "/repos/$PLATFORM_ORG/$WF_REPO/actions/permissions/access" 2>/dev/null)
-if [ -z "$ACC" ]; then
+# gh writes the error BODY to stdout, so a 404 leaves ACC non-empty. Treat any
+# payload carrying "status" as an error, never as a reading.
+if [ -z "$ACC" ] || printf '%s' "$ACC" | grep -q '"status"'; then
   open_ "$PLATFORM_ORG/$WF_REPO does not exist yet (expected -- we have not created it)."
   echo "  After creating it, set this and re-run:"
   echo "    gh api -X PUT /repos/$PLATFORM_ORG/$WF_REPO/actions/permissions/access \\"
@@ -79,8 +83,10 @@ echo
 
 echo "=== 3. Does the USX org allow Actions, and what can they run? ==="
 P=$(gh api "/orgs/$USX_ORG/actions/permissions" 2>/dev/null)
-if [ -z "$P" ]; then
+if [ -z "$P" ] || printf '%s' "$P" | grep -q '"status"'; then
   open_ "cannot read /orgs/$USX_ORG/actions/permissions -- needs org admin. ASK, do not assume."
+  printf '%s' "$P" | head -c 200; echo
+  echo "  NOT MEASURED. An allowlist may or may not be in force; this run does not know."
 else
   printf '%s' "$P" | python3 -c '
 import json,sys
