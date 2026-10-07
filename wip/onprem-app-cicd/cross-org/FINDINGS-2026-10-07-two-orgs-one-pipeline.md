@@ -239,3 +239,40 @@ repository placement.
   `gha-oidc-needs-environment-claim`.
 - **Trap:** a scheduled promotion workflow that finds nothing still reports success. Green
   here means "the poll ran", not "an image was promoted". Read the digest line.
+
+---
+
+## Step C failed at workflow load — and "PARSES OK" was never evidence
+
+2026-10-07 19:42Z. `variant-inc/risingwave-pipeline` commit `1ad0733`, run `37676459556`:
+**failure, zero jobs created, no logs.** GitHub's message is its generic *"This run likely
+failed because of a workflow file issue."*
+
+Eliminated by measurement:
+
+| Hypothesis | Verdict |
+|---|---|
+| `v1` unresolvable / missing the file | **DEAD.** Tag resolves to `c8a5588`, file present, 4042 bytes |
+| Invalid workflow schema | **DEAD.** `actionlint 1.7.7` passes BOTH files, exit 0 |
+| Double-push with the existing workflow | **DID NOT HAPPEN.** `build-and-push` last ran 2026-09-29; ECR unchanged |
+| `variant-inc` org Actions policy blocks it | **OPEN** — `/orgs/variant-inc/actions/permissions` → 403, `dare-x` is not an org admin |
+
+⚠️ **I validated three workflow files today with `python3 -c "import yaml; yaml.safe_load(...)"`
+and reported "PARSES OK".** That proves the bytes are YAML. It does not prove GitHub accepts
+the workflow schema, and GitHub rejected one of them at load time while my check was green.
+Another instance of [[adjacent-step-green-signals]] — a true statement about the step next to
+the one that matters.
+
+**The gate is `actionlint`, not a YAML parse:**
+
+```
+actionlint -shellcheck= -pyflakes= .github/workflows/*.yml
+```
+
+It validates the schema, the expression syntax, `uses:` references and job dependencies. It
+is a single static binary, so it belongs in the pre-commit path for every workflow we ship.
+
+⚠️ **A reusable-workflow load failure produces no logs and no jobs**, so `gh run view --log-failed`
+returns "log not found" and `/actions/runs/<id>/jobs` returns nothing. Neither absence is a
+finding about the workflow. The error text lives only in the run's annotation in the web UI.
+Read it there before theorising.
