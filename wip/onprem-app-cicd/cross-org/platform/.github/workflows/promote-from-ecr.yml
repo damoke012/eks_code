@@ -1,0 +1,87 @@
+# Platform side. Watches ECR for a digest the QA overlay is not yet running,
+# and opens the promotion PR HERE, where the overlays live.
+#
+# This exists so the app repo needs no write access to this repo, and therefore
+# no token. The two orgs are joined by ECR -- an AWS boundary we already control
+# -- rather than by a GitHub credential handed across.
+#
+# Day one this polls. The upgrade is an EventBridge rule on the ECR push event
+# -> Lambda -> repository_dispatch here, which removes the latency and the empty
+# runs. The poll is deliberately first: it needs no new AWS resource, no inbound
+# path into GitHub, and no credential anywhere near the app team.
+name: promote-from-ecr
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'App key from apps.json (blank = all)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-2
+  READ_ROLE: arn:aws:iam::064859874041:role/gha-platform-ecr-read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.READ_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # apps.json: [{"key":"rw-etl","ecr":"risingwave/etl-pipeline",
+      #              "overlay":"apps/rw-etl/deploy/overlays/qa/kustomization.yaml"}]
+      - name: Find digests QA is not running yet
+        id: scan
+        run: |
+          set -euo pipefail
+          [ -f apps.json ] || { echo "apps.json missing -- nothing to promote"; exit 1; }
+          FILTER='${{ inputs.app }}'
+          CHANGED=0
+          while read -r key ecr overlay; do
+            [ -n "$FILTER" ] && [ "$FILTER" != "$key" ] && continue
+            [ -f "$overlay" ] || { echo "::warning::$key overlay missing: $overlay"; continue; }
+            LATEST=$(aws ecr describe-images --repository-name "$ecr" \
+                       --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageDigest' \
+                       --output text 2>/dev/null)
+            case "$LATEST" in
+              sha256:*) : ;;
+              *) echo "::warning::$key: no image in $ecr yet"; continue ;;
+            esac
+            CURRENT=$(grep -oE 'sha256:[0-9a-f]{64}' "$overlay" | head -1 || true)
+            if [ "$LATEST" = "$CURRENT" ]; then
+              echo "$key: QA already on ${LATEST:0:19}"
+            else
+              echo "$key: ${CURRENT:-none} -> ${LATEST:0:19}"
+              sed -i "s|sha256:[0-9a-f]\{64\}|$LATEST|" "$overlay"
+              CHANGED=1
+            fi
+          done < <(jq -r '.[] | "\(.key) \(.ecr) \(.overlay)"' apps.json)
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - uses: peter-evans/create-pull-request@v6
+        if: steps.scan.outputs.changed == '1'
+        with:
+          branch: promote/qa-auto
+          title: 'promote: QA to the newest built digest'
+          commit-message: 'promote: QA overlay to the digest now in ECR'
+          body: |
+            Opened automatically because an app pushed a new image to ECR.
+
+            Merging this makes Argo CD apply that digest on **op-usxpress-qa**.
+            Production is a separate PR against the prod overlay using the
+            **same** digest. Nothing is rebuilt between environments.
+
+            The app repo did not open this PR and holds no credential here.

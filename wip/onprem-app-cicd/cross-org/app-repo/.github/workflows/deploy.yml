@@ -1,0 +1,44 @@
+# This is the ENTIRE pipeline an app team maintains. It lives in the app's own
+# repo, in the app team's own org. Everything else is called, not copied.
+#
+# ⚠️ TWO VALUES TO SET, both on the `with:` block below. Nothing else changes.
+# ⛔ There are no secrets to create. None. If someone asks you for a key to make
+#    this work, the setup is wrong -- see the note at the bottom.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  id-token: write      # lets GitHub mint the short-lived OIDC token AWS trusts
+  contents: read
+
+jobs:
+  build-and-push:
+    uses: variant-inc/usx-cicd-workflows/.github/workflows/app-build-push.yml@v1
+    with:
+      ecr_repository: risingwave/etl-pipeline
+      push_role: arn:aws:iam::064859874041:role/gha-risingwave-etl-pipeline-ecr-push
+      # dockerfile:    build/Dockerfile      # default, override only if yours differs
+      # build_context: .                     # default
+
+# ---------------------------------------------------------------------------
+# Why there is no secret here
+#
+# GitHub mints a signed OIDC token for this run. AWS is configured to trust
+# tokens that say "I am a run of THIS repository on THIS branch", and hands back
+# a session that lasts minutes and can push to exactly one ECR repository.
+#
+# Nothing is stored. Nothing is shared. Nothing expires and silently breaks.
+# Adding a new app repo is a change to the AWS trust policy on the platform
+# side -- the app team is never handed a credential.
+#
+# Where the deploy goes next: the image lands in ECR by digest. The platform
+# picks that digest up and opens the QA promotion PR on its side. Production is
+# a separate PR a human merges, pointing at the SAME digest. No rebuild happens
+# between environments, so what is tested is what ships.
+# ---------------------------------------------------------------------------

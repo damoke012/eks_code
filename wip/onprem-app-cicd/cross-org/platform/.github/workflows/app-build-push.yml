@@ -1,0 +1,103 @@
+# REUSABLE workflow. Lives in variant-inc. Called by an app repo in ANY org.
+#
+# This is the "action" shape Tim asked for on the 2026-10-07 call: the app team
+# does not curate a pipeline, it CALLS one. The whole caller is ~15 lines and
+# carries no secrets, because the only credential used here is a GitHub OIDC
+# token that AWS trades for a short-lived role session.
+#
+# ⛔ NO GITHUB SECRETS ARE ACCEPTED OR NEEDED.
+#    A reusable workflow runs in the CALLER's secret context, so a variant-inc
+#    org secret would not be visible here anyway. That is a feature: it forces
+#    the only cross-boundary credential to be OIDC, which is issued per run,
+#    expires in minutes, and is never stored anywhere.
+#
+# What this does NOT do: open the promotion PR. The deploy overlays live in the
+# platform repo, in the other org, and writing there would need a token in the
+# caller's org -- exactly the "repo keys passed around" the app teams don't do.
+# Promotion is picked up on the platform side from the ECR push. See
+# promote-from-ecr.yml.
+name: app-build-push
+
+on:
+  workflow_call:
+    inputs:
+      ecr_repository:
+        description: 'ECR repo path, e.g. risingwave/etl-pipeline'
+        required: true
+        type: string
+      push_role:
+        description: 'IAM role ARN this repo is trusted to assume'
+        required: true
+        type: string
+      dockerfile:
+        description: 'Path to the Dockerfile'
+        required: false
+        default: build/Dockerfile
+        type: string
+      build_context:
+        description: 'Docker build context'
+        required: false
+        default: '.'
+        type: string
+      aws_region:
+        required: false
+        default: us-east-2
+        type: string
+      ecr_registry:
+        required: false
+        default: '064859874041.dkr.ecr.us-east-2.amazonaws.com'
+        type: string
+    outputs:
+      digest:
+        description: 'The image digest QA and then prod will run. Nothing is rebuilt.'
+        value: ${{ jobs.build.outputs.digest }}
+
+permissions:
+  id-token: write        # the OIDC token. This is the only credential in play.
+  contents: read         # checkout only. This workflow never writes to the app repo.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # If the role's trust policy pins `environment:<name>` in its sub claim,
+      # the CALLING job must declare `environment:` or the token's sub will not
+      # match and this step fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity".
+      # Our trust policies pin repo + ref, not environment. See gha-oidc-trust.tf.
+      - name: Assume the push role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.push_role }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: gha-${{ github.repository_owner }}-${{ github.run_id }}
+
+      - name: Prove which identity we got
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --output text
+          echo "repo=${{ github.repository }} ref=${{ github.ref }}"
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.build_context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ inputs.ecr_registry }}/${{ inputs.ecr_repository }}:${{ github.sha }}
+          provenance: false
+
+      - name: Report the digest
+        run: |
+          set -euo pipefail
+          D='${{ steps.push.outputs.digest }}'
+          [ -n "$D" ] || { echo "no digest returned -- the push did not happen"; exit 1; }
+          echo "Pushed ${{ inputs.ecr_registry }}/${{ inputs.ecr_repository }}@${D}"
+          echo "QA picks this up automatically. Prod is a separate, human-merged PR"
+          echo "against the SAME digest -- nothing is rebuilt between environments."
