@@ -48,3 +48,34 @@ meta dashboard. Splitting one app's auth across two backends by path is worse th
 Related: [[onprem-ingress-dns-convention]], [[config-can-outrun-the-image]],
 [[proxy-is-not-the-property]] (verifying `/` is a proxy for verifying the host).
 Note: `wip/rw-dns/STATE.md`.
+
+## ✅ RESOLVED 2026-10-08 — and the resolution is the lesson
+
+`risingwave-dashboard.op-dev.usxpress.io` now serves the meta dashboard
+(`cc738d9a03a28c9a`), `risingwave-console.op-dev` serves the console
+(`9980ad26c2748234`), and a human signed in on the console hostname at 16:38 UTC.
+
+**The hostname was pinned in config, never in routing.** Three values, found by reading the
+live cluster rather than the manifests: the Dex `issuer`, the Entra connector `redirectURI`
+(both in `cm/risingwave-console-dex`), and `RCONSOLE_SSO_DEX_ISSUERURL` on the console
+Deployment. Plus a fourth outside Kubernetes entirely — the shared Entra app registration
+`e112d6ce`, where the new `/dex/callback` was **added**, never replacing the list that also
+serves QA and prod ([[rw-dex-entra-shared-app-registration]]).
+
+**The safe order, which is the reusable part.** The console VirtualService already declared
+three hosts against one catch-all route, so `/dex/*` was *already* served on the new
+hostname. Config first, route last: in between, a user starting at the old hostname is
+bounced to the new one and signs in there. There is no window without a working login, and
+no flag-day.
+
+**The risk that was real but did not fire:** the console self-registers its OIDC client over
+gRPC and Dex stores clients in sqlite on a 129-day-old PVC, so the old callback was a row in
+a database, not a manifest. Read the console's startup log for the re-registration line
+**before** a human opens a browser — `SSO self-registered OIDC client … (redirect_uri …)`.
+
+**`/dex/auth` → 200 is worthless as a gate.** It returned 200 before the change, during the
+broken #166 window, and after. The valid values are Dex's `login successful` line and a human
+in a browser ([[adjacent-step-green-signals]]).
+
+Full record: `wip/rw-dns/BASELINE-2026-10-08-before-change-B.md`.
+
