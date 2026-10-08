@@ -45,6 +45,7 @@
 - [Argo SSO / Identity Center limits](argocd-sso-blocked-on-management-account.md) — SAML+Dex decided; mgmt account 660075424663 needed, and the SAML app is CONSOLE-ONLY (create/ACS/audience/mappings have no API)
 - [Corp AD reachable from op-dev](onprem-ad-ldap-reachable.md) — CoreDNS forwards usxpress.com, 636 LDAPS open from the argocd namespace; makes a zero-console Dex LDAP connector viable
 
+- [Doke's own voice is plain](dokes-own-voice-is-plain.md) — his Teams messages are short plain lines, no headers/bold/tables/preamble; draft outbound messages the way he writes them, not the way I write to him
 - [Explain simply, for delegation](explain-simply-for-delegation.md) — Doke assigns work and briefs people; answers must be short, decision-first, and end with who does what
 - [Transport failure is not a verdict](transport-failure-not-a-verdict.md) — a probe must abort on a connection/exec failure, never report it as a finding about the system under test; discriminate by exit code
 - [On-prem GitOps repo topology](onprem-gitops-repo-topology.md) — FOUR repos, two different branch models; RisingWave lives in iaac-risingwave-onprem, NOT the platform or cluster repo
