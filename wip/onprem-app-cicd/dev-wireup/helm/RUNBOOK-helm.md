@@ -264,3 +264,36 @@ inside a block written to that skill. Capture to a file, test it is non-empty, t
 **Still unmeasured, therefore still unwritable:** QA's live ConfigMap, QA's running digest,
 QA's secret key count, and whether QA's Application is already Helm. `values-qa.yaml` stays
 unwritten until those are read — deriving it is the trap this runbook already warns about.
+
+## 2026-10-08 — `usxpress-app` is NOT in the org. The house library is `variant-inc/helm-charts`.
+
+A whole-org scan (control passed: `octopus-worker/chart/Chart.yaml` found) returned **no repo
+containing `usxpress-app`**. The chart in `wip/onprem-app-chart/` never landed. Every
+`values-dev.yaml` written against it is therefore written against a chart that does not exist
+outside this repo.
+
+**What does exist, and is the house standard:**
+
+| repo | contents |
+|---|---|
+| `variant-inc/helm-charts` | `dx-api`, `dx-cron`, `dx-handler`, `dx-test`, `dx-ui`, `routes`, `extras`, `fluxcd-release`, and a shared `library` of named templates |
+| `variant-inc/dx-schemas` | `values.schema.json` per chart — `dx-api`, `dx-cron`, `dx-handler`, `dx-test`, `dx-ui`, `extras`, `fluxcd-release`, `library`, `routes` |
+| `variant-inc/lazy-helm-charts` | older `variant-api` / `variant-cron` / `variant-handler` / `variant-ui` family |
+
+`dx-handler` and `dx-cron` already render Deployment/CronJob + ConfigMap + **ExternalSecret** +
+ServiceAccount + HPA + PDB + ServiceMonitor, with a schema that fails the render on a bad
+values file. That is the same object matrix `usxpress-app` was drafted to cover.
+
+**So the question is not "where did our chart go" but "which existing chart does the ETL Job
+use".** And standardising on `dx-*` has a second benefit: it is the family the cloud side
+already deploys, so Tim's DX mental model and the on-prem flow converge instead of diverging.
+
+⚠️ **My scan was defective twice.** The pattern `charts?/` matched any repo with a `charts/`
+directory — a vendored Boost tree, a PHP charting library — so the signal drowned. And an empty
+repository's 409 JSON body was printed as a HIT. A widened pattern is not a better search; it
+is a different question. Narrow the selector, keep the control.
+
+## Traps added
+
+- `wip/onprem-app-chart/` reads like a landed artefact. It is a draft. Its README says
+  "not yet landed in a repo" and that line is the only accurate status in it.
