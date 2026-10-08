@@ -203,3 +203,64 @@ One change at a time is what makes a failure attributable.
 - `externalSecrets.secretStore` defaults to `cluster-secret-store`; ours is `default`.
 - Dev's secret properties are `KAFKA__*`, QA's are `kafka__*`. A wrong spelling resolves to
   nothing, silently.
+
+---
+
+## 2026-10-08 — step 0 run. One PR landed, two facts found, two blocked.
+
+### ✅ PR 1 is open: variant-inc/iaac-talos-flux-platform **#171** → `op-dev`
+
+One line inserted above `namespace.yaml` in `infrastructure/argocd/kustomization.yaml`, plus
+the new ExternalSecret. The guard chain held: `INSERTED`, a two-file diff, then the PR URL.
+Note dev's `argocd/kustomization.yaml` carries a comment warning against a top-level
+`namespace:` transformer — that trap once rewrote a Velero Schedule out of its namespace.
+
+### ✅ Dev's kafka secret is measured, and `values-dev.yaml` matches it exactly
+
+`op-usxpress-dev/risingwave/kafka`, **9 properties, zero empty**:
+
+    KAFKA__api_key                      16
+    KAFKA__api_secret                   64
+    KAFKA__bootstrap_server             55
+    KAFKA__resource_id                  10
+    KAFKA__rest_endpoint                51
+    KAFKA__schema_registry_api_key      16
+    KAFKA__schema_registry_api_secret   64
+    KAFKA__schema_registry_endpoint     48
+    KAFKA__service_account              10
+
+All nine names in `values-dev.yaml` are confirmed, uppercase `KAFKA__` confirmed, and the
+48-char registry endpoint matches the 2026-09-11 reading. **There is no
+`kafka__group_id_prefix` on dev** — QA has one in Secrets Manager, dev does not, so dev's
+group prefix must come from the ConfigMap. `values-dev.yaml` already puts it there.
+
+### ❌ The chart is NOT in the three repos I searched
+
+Searching `risingwave-pipeline`, `iaac-talos-flux-platform` and `iaac-talos-flux-cluster` for
+`usxpress-app|Chart.yaml|values-(dev|qa)` returned one unrelated hit,
+`infrastructure/octopus-worker/chart/Chart.yaml`. So wherever Helm was wired on 2026-10-07, it
+is not those three. Candidates to search next: `iaac-risingwave-cicd`, `iaac-risingwave-onprem`,
+`usx-cicd-workflows`, `actions-collection`, and the `usxpressinc` org.
+
+### ❌ Both clusters unreachable — and that was MY error, not an outage
+
+I used `--context admin@op-usxpress-qa`. The on-prem clusters are in **separate kubeconfig
+files**, not the default, and op-qa's context is **`op-usxpress-qa-sso`**:
+
+| cluster | file | server |
+|---|---|---|
+| op-dev | `~/.kube/op-usxpress-dev-fresh.yaml` | `https://10.10.82.50:6443` |
+| op-qa | `~/.kube/op-usxpress-qa-sso.yaml` (context `op-usxpress-qa-sso`) | `https://10.10.82.51:6443` |
+
+QA also needs **two** SSO logins — `usx-qa` for the AWS API and `op-qa` for the cluster's
+`aws-iam-authenticator` exec plugin. A green one says nothing about the other, and the symptom
+of the wrong one is an expired-session trace that reads like an unreachable cluster.
+
+**And a second defect of mine:** the blocks piped `kubectl` straight into `python3`, so when
+kubectl failed python printed a JSONDecodeError traceback *before* the `NOT MEASURED` line. A
+transport failure rendered as a stack trace is the thing the handover skill exists to prevent,
+inside a block written to that skill. Capture to a file, test it is non-empty, then parse.
+
+**Still unmeasured, therefore still unwritable:** QA's live ConfigMap, QA's running digest,
+QA's secret key count, and whether QA's Application is already Helm. `values-qa.yaml` stays
+unwritten until those are read — deriving it is the trap this runbook already warns about.
