@@ -102,10 +102,16 @@ database and collection. All go in the Helm values file, in the section Tim rais
    check and then fails inside RisingWave at decode time, the same class as the `unknown` that
    blocked PR #29. The real value is the Avro subject's namespace + record, read from the
    registry: QA's Brand is `USXpress.Standard.Types.Brand.V1.company_master`.
-2. **`GROUP_ID_PREFIX=dx__dev_risingwave_risingwave_dev`** — `risingwave` appears twice.
-   QA's working value is `dx__qa_risingwave`, and the Confluent ACL grants the consumer-group
-   prefix `risingwave`. A prefix no ACL covers produces `GroupAuthorizationFailed` and an
-   empty materialized view, which reads as "no data" rather than "not authorised".
+2. ~~**`GROUP_ID_PREFIX=dx__dev_risingwave_risingwave_dev`** — `risingwave` appears twice.~~
+   ⛔ **WRONG, corrected the same evening.** The doubled form is the **house convention**, not
+   a typo: our own `deploy/overlays/qa/endpoints.yaml` sets
+   `KAFKA_GROUP_ID_PREFIX: dx__qa_risingwave_risingwave_qa` and its comment names dev's as
+   `dx__dev_risingwave_risingwave_dev` — Tim's value exactly. I compared it against
+   `kafka__group_id_prefix = dx__qa_risingwave` in Secrets Manager, which is a **different
+   key in a different system**, and called a convention a defect.
+   What *is* true and worth keeping: the two environments must never share a prefix, because
+   one consumer group across both splits the partitions between them — QA would take messages
+   dev never sees, and dev would go silently, partially blind.
 3. **Three of four entity topics are `_json`, not `_avro`.** Only Brand
    (`dev_brand_management_cdc_brand_avro`) is Avro. Employee, Driver and ActiveResource are
    JSON, so they use a different `FORMAT … ENCODE` and **do not touch the schema registry at
