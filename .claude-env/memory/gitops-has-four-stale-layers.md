@@ -95,3 +95,43 @@ never land. There is no Alertmanager delivery on-prem to say otherwise
 
 Same family as [[server-side-apply-keeps-dropped-fields]], where one rejected field froze a
 whole Kustomization for 4h with every other signal green.
+
+## 2026-10-08 — the ANNOTATION form of `--with-source` is two annotations, not one
+
+Flipping dev's ETL Application to Helm (platform #173). After the merge I forced a reconcile
+with:
+
+    kubectl -n flux-system annotate kustomization argocd-apps \
+      reconcile.fluxcd.io/requestedAt=<now> --overwrite
+
+and read back:
+
+    argocd-apps ready=True  applied=op-dev@sha1:03c6e830      <-- the PRE-MERGE sha
+    Application  path=deploy/overlays/dev  helm=null
+
+**Annotating the Kustomization re-applies whatever the GitRepository is already serving.** It
+does not fetch. `Ready=True` was truthful: it had successfully applied an old commit. The
+merge commit `797a56c5` was sitting in GitHub, unfetched.
+
+`flux` is **not installed on the WSL box**, so `flux reconcile kustomization --with-source` is
+unavailable and the annotation path is what we actually use. The equivalent is **two**
+annotations in order, with a check between them:
+
+    kubectl -n flux-system annotate gitrepository infra  reconcile.fluxcd.io/requestedAt=<now> --overwrite
+    # then assert .status.artifact.revision contains the branch HEAD from `gh api`
+    kubectl -n flux-system annotate kustomization argocd-apps reconcile.fluxcd.io/requestedAt=<now> --overwrite
+    # then assert .status.lastAppliedRevision is that same sha
+
+**How to apply.** Before reading any Kustomization's result, assert its SOURCE is current
+against `gh api repos/<org>/<repo>/commits/<branch> --jq .sha`. A reconcile that returns
+quickly with `Ready=True` and an unchanged `lastAppliedRevision` is the signature — and it is
+indistinguishable from a successful no-op change, which is exactly what I had expected to see.
+
+This note already said "lastAppliedRevision is not your change is live" and "flux reconcile
+kustomization --with-source". I read the note and still annotated the wrong object, because
+the no-CLI workaround was not written down. **A procedure that exists only as a CLI flag does
+not survive the absence of the CLI.**
+
+Once the source was fetched, all four layers went current and **every object kept its
+resourceVersion** — the strongest available confirmation that the Helm render was identical
+to the Kustomize render.
