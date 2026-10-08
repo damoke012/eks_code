@@ -49,80 +49,95 @@ Today op-dev serves one console UI under four names and the meta dashboard under
 `risingwave-console.op-dev.usxpress.io` and that nothing of his hardcodes the others.
 His word comes before the merge, not after ([[promotion-order-qa2-dev-qa-prod]]).
 
-### A1. Find which files declare the two names — on the branch
+### A1–A3. ⛔ CORRECTED 2026-10-08 — it is ONE VirtualService with three hosts
+
+Measured on op-usxpress-dev:
+
+```
+risingwave/risingwave-console | risingwave-console.op-dev.usxpress.io,
+                                risingwave.op-dev.usxpress.io,
+                                risingwave-web.op-dev.usxpress.io
+```
+
+**All three console names are `spec.hosts` entries on a single VirtualService.** The
+earlier version of this section assumed two separate files to `git rm`, each with a
+`kustomization.yaml` line. That was wrong, and it was never measured — it was inferred
+from the three names having appeared on three different days.
+
+Consequences:
+
+* The change is **two lines deleted from one file's `hosts:` list**. No file is removed.
+* `kustomization.yaml` is **not touched**, so the enumerate-the-resources trap does not
+  apply to Change A at all. It still applies to A5/B5, which do delete a file.
+* The old A3 script would have aborted rather than done damage — its
+  `[ "$(… | grep -c .)" -eq 2 ]` guard would have found 1 file and stopped. A guard that
+  fires is the only reason this is a correction and not an incident.
+
+### A1. Confirm the live state still matches, and find the file
 
 ```bash
+kubectl --context admin@op-usxpress-dev -n risingwave \
+  get virtualservice risingwave-console -o jsonpath='{.spec.hosts}'; echo
+
 cd ~/src/iaac-talos-flux-platform
-git fetch origin
-git checkout -B dns/consolidate-rw-console origin/op-dev
-grep -rln -e 'risingwave-web' -e 'hosts:' infrastructure/risingwave-routes/
-grep -rn 'risingwave-web\.op-dev\|risingwave\.op-dev' infrastructure/
+git fetch origin && git checkout -B dns/consolidate-rw-console origin/op-dev
+grep -rln 'risingwave-web\.op-dev' infrastructure/
 ```
 
-The grep decides which files to touch. Do not assume a filename — three of the five
-hostnames were created ad hoc and their files are not named after them.
+Expect exactly **one** file. If the grep returns two, the live state has changed since
+this was measured — re-read it before editing.
 
-### A2. Confirm the two names carry nothing but the console
+### A2. Confirm the two doomed names carry nothing but the console
 
-A single-route VirtualService carries **every** path, which is exactly how PR #166 moved
-Dex. Before deleting, check nothing else is mounted:
+A single-route VirtualService carries **every** path, which is how PR #166 moved Dex. The
+three hosts share one route here, so whatever is mounted under one is mounted under all
+three:
 
 ```bash
 kubectl --context admin@op-usxpress-dev -n risingwave \
-  get virtualservices.networking.istio.io -o yaml \
-  | grep -nE 'hosts:|- risingwave|uri:|prefix:|host:'
+  get virtualservice risingwave-console -o yaml | grep -nE 'hosts:|uri:|prefix:|host:|- risingwave'
 
 kubectl --context admin@op-usxpress-dev -n risingwave \
-  get deploy,cm -o yaml | grep -iE 'risingwave-web|issuer|redirect|callback|_url'
+  get deploy,cm -o yaml | grep -iE 'risingwave-web|risingwave\.op-dev|issuer|redirect|callback|_url'
 ```
 
-An empty second grep is the clearance. An OIDC issuer URL lives in the app's config, not
-in the routing — [[hostname-is-not-one-application]].
+The second grep must return **no reference to the two doomed names**. It *will* return
+`risingwave-dashboard.op-dev` — that is the Dex issuer, and it is Change B's problem, not
+Change A's. Deleting `risingwave-web` and `risingwave` does not touch it.
 
-### A3. Delete the files and their kustomization lines, together
-
-Self-discovering — it finds the files by the hostnames they declare, so there is nothing
-to fill in and no filename to guess wrong:
+### A3. Remove the two hosts from the one file
 
 ```bash
 cd ~/src/iaac-talos-flux-platform
 D=infrastructure/risingwave-routes
+F=$(grep -rln 'risingwave-web\.op-dev' "$D")
+[ "$(echo "$F" | grep -c .)" -eq 1 ] || { echo "ABORT -- expected 1 file, got $(echo "$F" | grep -c .)"; exit 1; }
+echo "editing: $F"
 
-# baseline, before anything changes
 kustomize build "$D" > /tmp/routes-before.yaml || { echo "ABORT -- branch does not build"; exit 1; }
 BEFORE=$(grep -c 'kind: VirtualService' /tmp/routes-before.yaml)
-echo "VirtualServices before: $BEFORE"
 
-# the files that declare exactly the two doomed hostnames
-DOOMED=$(grep -rlE 'risingwave-web\.op-dev\.usxpress\.io|(^|[^-])risingwave\.op-dev\.usxpress\.io' "$D" | sort -u)
-echo "will delete:"; echo "$DOOMED"
-[ "$(echo "$DOOMED" | grep -c .)" -eq 2 ] || { echo "ABORT -- expected 2 files, got $(echo "$DOOMED" | grep -c .). Read A1 again."; exit 1; }
+# drop exactly the two host lines; keep risingwave-console
+sed -i '/- *risingwave-web\.op-dev\.usxpress\.io/d;/- *risingwave\.op-dev\.usxpress\.io/d' "$F"
 
-# delete each file AND its line in the resources list, together -- this is trap 2
-for f in $DOOMED; do
-  b=$(basename "$f")
-  git rm -q "$f"
-  sed -i "\|$b|d" "$D/kustomization.yaml"
-done
-
-# PROVE the build still renders, and that exactly two routes went
-kustomize build "$D" > /tmp/routes-after.yaml || { echo "ABORT -- build broken, do not push"; exit 1; }
+# the keeper must survive, and the route COUNT must not change -- no file was removed
+grep -q 'risingwave-console\.op-dev\.usxpress\.io' "$F" \
+  && echo "keeper present" || { echo "ABORT -- sed ate the keeper"; exit 1; }
+kustomize build "$D" > /tmp/routes-after.yaml || { echo "ABORT -- build broken"; exit 1; }
 AFTER=$(grep -c 'kind: VirtualService' /tmp/routes-after.yaml)
-echo "VirtualServices after: $AFTER (expected $((BEFORE - 2)))"
-[ "$AFTER" -eq "$((BEFORE - 2))" ] || { echo "ABORT -- wrong number of routes removed"; exit 1; }
+[ "$AFTER" -eq "$BEFORE" ] || { echo "ABORT -- route count changed, expected $BEFORE got $AFTER"; exit 1; }
 
-# the keepers must still be in the render
-for h in risingwave-console risingwave-dashboard risingwave-overview; do
-  grep -q "$h.op-dev.usxpress.io" /tmp/routes-after.yaml \
-    && echo "keeper present: $h" || echo "ABORT -- keeper MISSING: $h"
+for h in risingwave-web risingwave-overview risingwave-dashboard risingwave-console; do
+  printf '%-22s %s\n' "$h" "$(grep -c "$h.op-dev.usxpress.io" /tmp/routes-after.yaml)"
 done
+# expect: risingwave-web 0, the other three >= 1
 
-# read the whole diff, including lines you did not mean to change
 git diff origin/op-dev
 ```
 
-Every failure path exits rather than continuing, because the two destructive steps
-(`git rm` and the `sed`) must either both land or neither.
+The `risingwave.op-dev` pattern is anchored on `- ` and a literal `.op-dev` so it cannot
+match `risingwave-console.op-dev` or `risingwave-dashboard.op-dev`. The keeper check is
+there because a `sed` that over-matches is the one failure this cannot detect by counting.
 
 ### A4. PR, merge, verify
 
