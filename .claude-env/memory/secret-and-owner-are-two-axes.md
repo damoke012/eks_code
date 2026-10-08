@@ -35,3 +35,23 @@ credential.
 
 Related: [[eso-writes-partial-secrets]] (why the key list must be *complete* before the first
 deploy), [[pod-env-secret-resolution]], [[rw-database-is-named-dev-everywhere]].
+
+## 2026-10-08 later — the model held, and the ask leaked anyway
+
+Tim returned the file split three ways. The ownership groups were right and **the platform
+group mixed secret with non-secret**, exactly as the two axes predict. So the grid is the
+correction to make the moment someone proposes an ownership-only split.
+
+**But values came back where key names were asked for** — live Confluent SASL and
+schema-registry credentials, in plaintext, by email. They were copies of the per-account
+masters, so the disclosure reached every consumer of those masters, not just his file.
+
+**How to apply:** when asking for key names, say *why* in the same breath — "names only, a
+value in an email is in a system we don't control, and if it is a copy of a shared master it
+is everyone's problem." A bare "send me the key names" reads as a format preference and gets
+helpfully over-delivered. And on the destination side the rule has to be stated too: a Helm
+`values-<env>.yaml` is Git exactly like a kustomize overlay was, so the Helm move does not
+create a safe place to put a value.
+
+Related: [[ccloud-registry-master-per-account]] — a credential that is a copy of an
+account-level master has no blast radius of one.
