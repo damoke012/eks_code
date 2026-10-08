@@ -297,3 +297,68 @@ is a different question. Narrow the selector, keep the control.
 
 - `wip/onprem-app-chart/` reads like a landed artefact. It is a draft. Its README says
   "not yet landed in a repo" and that line is the only accurate status in it.
+
+## 2026-10-08 — `dx-cron` read from the branch. It implies a different trigger model.
+
+`variant-inc/helm-charts`, `charts/dx-cron`, version **2.1.10**, appVersion 1.5.0. Templates:
+`cron.yaml`, `configmap.yaml`, `external-secret.yaml`, `secrets.yaml`, `serviceaccount.yaml`,
+`_jobspec.yaml`, `_helpers.tpl`, `NOTES.txt`.
+
+**Published to ECR OCI**, not a Helm repo: the chart's own `library` dependency is
+`oci://064859874041.dkr.ecr.us-east-2.amazonaws.com/helm-charts` at `~2.1.0-0`, and the repo's
+workflows are `ecr-release.yml` and `publish-schema.yml`. So consuming it on-prem needs the
+cluster to authenticate to that ECR **for Helm**, which is a different credential path from the
+`ecr-pull-secret` that `ecr-credentials-sync` writes for images.
+
+### What the schema actually demands
+
+    required: ['cronJob']
+    cronJob  required: ['schedule']     # strict cron regex, 5 fields
+
+So the chart renders a **CronJob** and will not render without a schedule. It cannot produce a
+bare Job, and therefore cannot carry `argocd.argoproj.io/hook: Sync`. **That is not a defect in
+the chart — it is a different trigger model**, and the choice is ours:
+
+| | sync-hook Job (QA today) | scheduled CronJob (`dx-cron`) |
+|---|---|---|
+| applies | on every Argo sync, i.e. on deploy | on a clock |
+| logs | Argo UI, where the RW team watch deploys | CronJob job history |
+| alignment | on-prem only | same chart family as the cloud estate |
+| `apply.sh` fit | fine | fine — it is idempotent, so a clock converges the DB |
+
+### Two things that would still need fixing to use it on-prem
+
+1. **`global.cluster_name` is an enum of cloud clusters only** — `devops-playground`,
+   `ops-controller`, `usxpress-dev`, `qa-one`, `usxpress-stage`, `usxpress-prod`. No
+   `op-usxpress-*`. The field ships null so it may be omittable, but it cannot be set
+   correctly, and anything in the templates keyed on it renders empty. A real fix is a PR to
+   `variant-inc/dx-schemas` adding the three on-prem names.
+2. **`awsSecrets` is marked "User input not supported — see configVars or secretVars"**, so the
+   `external-secret.yaml` template is driven by values DX's infrastructure injects. Whether
+   `secretVars` reaches that template or the plain `secrets.yaml` decides if our twelve keys can
+   come from `op-usxpress-<env>/risingwave/*` at all. **Unmeasured** — it needs
+   `external-secret.yaml` and `secrets.yaml` read, not inferred from values.yaml.
+
+`global.environment` (`dev|qa|prod`) and `fullEnvironment` (`development|qa|production`) are
+both fine for on-prem.
+
+### Useful defaults it already gets right
+
+`readOnlyRootFilesystem: false` (so no `mktemp` trap), `restartPolicy: Never`,
+`ttlSecondsAfterFinished: 86400`, `concurrencyPolicy: Replace`. And
+`usxpressCACertBundle.enabled: true` mounts a `custom-ca-certs` secret — **confirm that secret
+exists in `app-risingwave` on-prem**, or the pod will not start for a missing volume source.
+
+## Decision pending
+
+Dev ships on the kustomize overlay, which is proven on QA and needs nothing from another team's
+repo. The `dx-cron` alignment is a separate piece of work with two prerequisites (the schema PR
+and the ECR-OCI Helm credential) and one design question (sync-triggered vs scheduled), and it
+belongs with whoever owns `helm-charts`.
+
+## Correct in place
+
+⛔ I recommended `dx-cron` from a directory listing before reading its schema, and called it
+"the better call". The schema says it cannot render this workload as currently designed. Read
+the artefact before recommending it — the same lesson as [[proxy-is-not-the-property]], and the
+third time in this session.
