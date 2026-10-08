@@ -96,3 +96,4 @@
 - [A validator checks every value, not the selected ones](validator-checks-every-value-not-the-selected-ones.md) — apply.sh validates ALL runtime values before applying EXCLUDE_RE, so excluding a feature does not exclude its variables; a deliberate blank fails the whole run
 - [A hook Job's failure destroys its own log](hook-job-failure-destroys-its-own-log.md) — Argo deletes a sync-hook Job on final failure AND on success, so both look identical; operationState.syncResult is the only record, and recovery is re-running the same DIGEST as a plain Job (Kyverno refuses an unpinned tag)
 - [A declared grant is not the literal ACL](declared-grant-is-not-the-literal-acl.md) — the module composes the ACL name; compare the RENDERED string, never the declared one
+- [A guard can measure the wrong thing](a-guard-can-measure-the-wrong-thing.md) — a failing guard has two causes: the system, or itself

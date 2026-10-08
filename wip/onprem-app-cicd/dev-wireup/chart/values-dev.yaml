@@ -1,4 +1,4 @@
-# op-usxpress-dev — GENERATED FROM LIVE STATE 2026-10-08, not from notes.
+# op-usxpress-dev - GENERATED FROM LIVE STATE 2026-10-08, not from notes.
 #
 # Source of truth: ConfigMap etl-pipeline-endpoints and ExternalSecret
 # etl-pipeline-credentials in namespace app-risingwave on op-usxpress-dev,

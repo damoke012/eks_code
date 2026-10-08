@@ -98,6 +98,53 @@ Quoted output, YAML fragments and expected results reach the terminal as command
 **Put only runnable lines in ```bash fences.** Quote expected output as indented text or a
 table, and pass any prose to a tool with `--body-file`, never `--body`.
 
+## 6. A guard is a measurement, and it can measure the wrong thing
+
+```bash
+N=$(git status --porcelain | wc -l)
+[ "$N" = "8" ] || echo "ABORT - expected 8 new files"     # aborts on a CORRECT 8-file add
+```
+
+`git status --porcelain` **collapses an untracked directory into one line**, so eight
+new files under a new directory report as `?? deploy/chart/` — one line. The guard aborted a
+good change, and the follow-on `gh pr create` then failed with `No commits between`, which
+reads like a branch problem and is not.
+
+Use `--porcelain -uall` to list each file, and assert the *shape* as well as the count:
+
+```bash
+N=$(git status --porcelain -uall | wc -l)
+O=$(git status --porcelain -uall | grep -vc ' deploy/chart/')
+[ "$N" = "8" ] && [ "$O" = "0" ] || echo "ABORT - unexpected file set"
+```
+
+The general rule: **a guard that fails has two possible causes — the thing it watches, or
+itself.** Print the measurement next to the threshold (`files=$N (want 8)`) so the two are
+distinguishable without another round trip. A guard whose output is only ABORT cannot be
+debugged remotely.
+
+## 7. A long prose body truncates mid-heredoc and strands the shell
+
+A ~40-line markdown PR body inside `<<'BODY'` truncated on paste. The heredoc never
+terminated, so the shell sat at a `>` continuation prompt with the subshell unclosed —
+nothing ran, and the next pasted block was eaten as heredoc content. This is mode 5 again,
+by volume rather than by backticks: quoting the heredoc makes it *safe*, not *short*.
+
+**Keep a handed-over body under ~20 lines.** For anything longer, build it in its own block
+with repeated appends, then pass the file:
+
+```bash
+( B=/tmp/pr-body.md; : > "$B"
+  echo 'First line.' >> "$B"
+  echo '' >> "$B"
+  echo 'Second paragraph.' >> "$B"
+  echo "  body lines: $(wc -l < "$B")" )
+```
+
+Each line is independently short, a truncated paste loses only the tail, and the line count
+is a cheap check that the whole thing arrived. Then `gh pr create --body-file "$B"` in a
+separate block, guarded on `[ -s "$B" ]`.
+
 ## Before sending any block
 
 - [ ] Every line under ~120 characters.
@@ -109,6 +156,10 @@ table, and pass any prose to a tool with `--body-file`, never `--body`.
 - [ ] Destructive steps and their guard are in **one** block, with the guard inside the
       script — never "check this, then run that".
 - [ ] It says what the pass looks like, so a wrong answer is visible without me.
+- [ ] Every guard prints its measurement beside its threshold, so an ABORT can be told apart
+      from a broken guard without another round trip.
+- [ ] No handed-over heredoc body exceeds ~20 lines; longer prose is built with appends in a
+      block of its own and passed with `--body-file`.
 
 ## Why this exists
 

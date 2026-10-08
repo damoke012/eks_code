@@ -7,7 +7,7 @@
 #
 # apply.sh is idempotent: a re-sync with no SQL change is a no-op.
 #
-# ⚠️ On FINAL failure Argo removes the hook Job entirely, taking the pod and its
+# On FINAL failure Argo removes the hook Job entirely, taking the pod and its
 # logs with it. To read a failure, re-run the same digest as a plain Job under a
 # different name - and pin the digest, because Kyverno on these clusters refuses
 # both an unapproved registry and an unpinned tag at admission.
