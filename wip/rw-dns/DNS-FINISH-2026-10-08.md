@@ -134,3 +134,128 @@ from this repo.
    radius is this session. It is still the documented trap, committed by the person who
    documented it, one file away from the warning. **The script is the fix: it cannot do
    this.**
+
+---
+
+# ✅ MEASURED ON THE CLUSTERS, 2026-10-08 (both halves)
+
+Everything above was the public-DNS half from the codespace. This is the full measurement,
+run on WSL: Route 53 zone `Z0658284PVIFD4Q8I9PO` (1145 record sets) cross-referenced against
+every Istio VirtualService **and Gateway** on all three clusters.
+
+## The `op-*` scheme reconciles exactly — zero orphans, zero missing records
+
+| Cluster | Records | Declared hosts | Record with no route | Route with no record |
+|---|---|---|---|---|
+| op-dev | 12 | 12 | none | none |
+| op-qa | 6 | 6 | none | none |
+| op-prod | 6 | 6 | none | none |
+
+## ✅ Node topology resolved — the earlier "7 workers" count was right
+
+`kubectl get nodes` returns control planes too, which is what made the counts look wrong.
+
+| Cluster | Control planes | Workers | Targeted |
+|---|---|---|---|
+| op-dev | 3 (`.29 .181 .179`) | 7, **no pool split** (`wk-1..7`) | all 7 |
+| op-qa | 3 (`.25 .24 .177`) | 10 — app 5 / **platform 3** / sys 2 | **3, platform only** |
+| op-prod | 3 (`.187 .186 .188`) | 10 — app 5 / platform 3 / sys 2 | **all 10** |
+
+## ⚠️ NEW FINDING — prod routes ingress onto application and system nodes
+
+QA and prod have identical worker topology and make opposite choices. QA targets only its
+three `platform` nodes; prod targets all ten workers, including
+`application-1..5` (`.109 .190 .191 .112 .189`) and `system-1..2` (`.113 .185`).
+
+**It works today** — `istio-ingressgateway` is a DaemonSet on every worker, so all ten
+answer. The risk is latent and would present as intermittent: if that DaemonSet is ever
+restricted to `platform` nodes — which QA's targeting implies is the intent — **seven of
+prod's ten A records become blackholes**, DNS round-robins, and you get a ~70% failure rate
+on prod with no Alertmanager to report it.
+
+QA is the Prod-standard mirror, so prod is the deviation. **Not a fix, a decision:**
+narrowing prod to three platform nodes cuts its ingress capacity by 70%. Board item.
+
+Our note had recorded this as benign per-cluster variance ("dev 7, QA 3, prod 10 — mirror the
+cluster's own working route"). The counts were right; the framing hid that prod has a pool
+split and ignores it, while QA has the same split and observes it.
+
+## ✅ `--policy=sync` confirmed, so Change A's reap will happen
+
+    --source=istio-gateway  --source=istio-virtualservice
+    --policy=sync  --registry=dynamodb  --dynamodb-region=us-east-2
+    --txt-owner-id=iaac-talos/us-east-2/op-usxpress-dev
+    --domain-filter=usxpress.io
+    --aws-assume-role=arn:aws:iam::155768531003:role/iaac-route53-zone
+
+This mattered: if the policy had been `upsert-only`, removing the two hosts from Istio would
+have left their A records alive pointing at workers with no route for them, and the names
+would have started **404ing instead of disappearing** — worse than the sprawl.
+
+## ⛔ The orphan I reported did not exist — the probe was incomplete
+
+I reported `api.brands.op-dev.usxpress.io` as a record no routing declared, and reasoned from
+it that `--policy=sync` might not be reaping. **It is declared — by a Gateway**,
+`enterprise/brands-api-opdev`, carrying the seven dev worker IPs.
+
+external-dns reads **both** `--source=istio-gateway` and `--source=istio-virtualservice`. My
+hand-rolled cross-reference enumerated only VirtualServices for hosts and printed Gateways as
+names and ports alone, so a Gateway-declared hostname read as unclaimed.
+
+`scripts/lib/onprem-dns-classify.py` reads `spec.servers[].hosts` and does not have this
+defect. **The probe that was tested was replaced, under time pressure, by one that was not**,
+because the file transfer to WSL failed twice. The fallback carried no fixtures and no
+self-test, and it produced a false finding within one step. See
+[[proxy-is-not-the-property]] — this is the measurement being taken against one of two
+sources and reported as a property of the system.
+
+## Open: a second naming scheme, `*.dev.usxpress.io`
+
+Surfaced only by enumerating Gateways. No `op-` segment, and **three of four carry no
+external-dns target**, so they cannot be creating records:
+
+| Gateway | Host | Target |
+|---|---|---|
+| `enterprise/brands-api` | `api.brands.dev.usxpress.io` | 7 dev workers |
+| `attrition/attrition-api` | `api.driver.attrition.dev.usxpress.io` | none |
+| `io-curt/io-notifications-handler` | `io-curt.io-notifications-handler.dev.usxpress.io` | none |
+| `octopus/octopusworker` | `octopusworker-0.dev.usxpress.io` | none |
+
+Also on `shared-http`: `brands.op-dev.usxpress.io` (bare) is a declared server host with no
+record — consistent with the Gateway carrying no target, and with the bare name measuring
+NXDOMAIN earlier. Likely there for TLS SNI completeness rather than as a reachable name,
+but unconfirmed.
+
+Every count above excluded this scheme, because the Route 53 filter was `.op-`. **The
+`op-*` conclusion is sound and this is a separate, unmeasured population** — one sample is
+not a population, and neither is one naming convention.
+
+## Proven, 2026-10-08, both halves, all three clusters
+
+* 24 `op-*` records, 24 declared hosts, **no orphans and no nameless routes**.
+* Every record points only at its own cluster's workers. No wrong-cluster record exists.
+* `tcp-passthrough` (4567, 5432) is bound on **all three** clusters, prod included.
+* `--policy=sync` with the `dynamodb` registry on op-dev.
+* Dev: 3 control planes + 7 workers, all 7 targeted.
+* SOA negative TTL is **86400**, confirmed from the zone, not inferred from `dig`.
+
+## Tested and killed
+
+* **"`api.brands.op-dev` is an orphan record."** A Gateway declares it.
+* **"`--policy=sync` may not be reaping."** It is `sync`; there was nothing to reap.
+* **"Dev gained three untargeted nodes."** They are the three control planes.
+* **"Prod's Grafana has no name."** / **"Prod has no `tcp-passthrough`."** Both closed.
+
+## Traps added tonight
+
+5. **A hostname can be declared by a Gateway, not only a VirtualService**, because
+   external-dns reads both sources. Enumerate `spec.servers[].hosts` as well as `spec.hosts`,
+   or a Gateway-declared name reads as an orphan.
+6. **A tested probe replaced by an untested one is an untested probe.** The fallback was
+   written because a file transfer failed twice, and it produced a false finding immediately.
+   When the instrument cannot be delivered, that is a delivery problem — do not quietly
+   downgrade the instrument to solve it.
+7. **`exit 1` in a command pasted at an interactive prompt closes the shell.** It logged the
+   operator out mid-measurement. Guards belong in an `if/else` **inside** a `( … )` subshell.
+8. **A 1500-character line does not survive the paste path into WSL.** It truncated
+   mid-quote and hung the shell on a continuation prompt. Short lines; many of them.

@@ -94,3 +94,41 @@ The index is what loads into context, so the wrong version is the one that got b
 2026-09-03 it produced a false alarm on a correct 10-target prod route. **When an index line
 and a note body disagree, the body is the note — but fix the index, because the index is what
 is read.** See [[proxy-is-not-the-property]].
+
+## 2026-10-08 — the counts were right, the framing hid a prod deviation
+
+Measured both halves on all three clusters (Route 53 zone read + every VirtualService **and
+Gateway**). `kubectl get nodes` returns control planes too, which is what made the counts
+look inconsistent:
+
+| Cluster | Control planes | Workers | Targeted |
+|---|---|---|---|
+| op-dev | 3 (`.29 .181 .179`) | 7, **no pool split** | all 7 |
+| op-qa | 3 (`.25 .24 .177`) | 10 — app 5 / **platform 3** / sys 2 | **3, platform only** |
+| op-prod | 3 (`.187 .186 .188`) | 10 — app 5 / platform 3 / sys 2 | **all 10** |
+
+⚠️ **QA and prod have identical worker topology and make opposite choices.** Prod targets
+`application-1..5` and `system-1..2` as well as its platform nodes; QA targets platform only.
+Dev has no pool split, so "all workers" is its only option.
+
+It works today because `istio-ingressgateway` is a DaemonSet on every worker. The risk is
+latent: restrict that DaemonSet to `platform` nodes — which QA's targeting implies is the
+intent — and **7 of prod's 10 A records become blackholes**, round-robined, presenting as a
+~70% intermittent failure on prod with no Alertmanager to say so.
+
+"Mirror the cluster's own working route" (above) is still the right instruction, but it read
+as benign variance. It is not: QA is the Prod-standard mirror, so prod is the deviation.
+Narrowing prod costs 70% of its ingress capacity, so this is a decision, not a fix.
+
+**Both sources count.** external-dns runs `--source=istio-gateway` *and*
+`--source=istio-virtualservice`, so a hostname may be declared on a **Gateway's**
+`spec.servers[].hosts` rather than a VirtualService's `spec.hosts`. On 2026-10-08 a
+cross-reference that enumerated only VirtualServices reported `api.brands.op-dev.usxpress.io`
+as an orphan record; it is declared by the Gateway `enterprise/brands-api-opdev`. Enumerate
+both, which `scripts/onprem-dns-finish.sh` does.
+
+**A second naming scheme exists and is NOT covered by the counts above:**
+`*.dev.usxpress.io`, with no `op-` segment — `api.brands.dev`, `api.driver.attrition.dev`,
+`io-curt.io-notifications-handler.dev`, `octopusworker-0.dev`. Three of those four Gateways
+carry **no external-dns target**, so they create no record. Unmeasured as of 2026-10-08.
+Full detail: `wip/rw-dns/DNS-FINISH-2026-10-08.md`.
