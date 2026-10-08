@@ -48,3 +48,33 @@ check.**
 
 Related: [[adjacent-step-green-signals]], [[octopus-green-but-no-apply]],
 [[flux-stale-dependency-cascade]], [[proxy-is-not-the-property]].
+
+## 2026-10-08 — a PARTIAL apply keeps the OLD revision, and the objects stay
+
+Fifth layer, found on `op-usxpress-qa`. `kustomization/risingwave-routes` reported:
+
+    READY=False   APPLIED=op-qa@sha1:7acb311e
+
+while the branch head was `b2b6cb37` and the previous head `fca6d26` — so it had not
+completed an apply for **at least two commits**. Yet the VirtualService added by the newer
+commit **was live and serving** (`risingwave-console.op-qa.usxpress.io` → 200, correct body
+hash).
+
+**Flux sets `lastAppliedRevision` only on a fully successful apply.** When some objects apply
+and one fails, the applied objects stay, the Kustomization goes `Ready=False`, and the
+revision stays pinned to the last complete run. So:
+
+* **A working endpoint does not mean the Kustomization applied.** Half of it may have.
+* **A stale `lastAppliedRevision` does not mean nothing changed.** Objects from newer commits
+  may already be live, unmanaged and un-pruned.
+* Drift between *applied* and *serving* reads clean, because both are the same old commit —
+  exactly the blind spot in `scripts/flux-revision-drift.sh` described above.
+
+**How to apply:** read `READY` **and** `lastAppliedRevision` **and** the condition `message`,
+every time. A green endpoint test beside a `Ready=False` Kustomization is a reason to stop,
+not to proceed — the next change to that directory will merge, report green in GitHub, and
+never land. There is no Alertmanager delivery on-prem to say otherwise
+([[onprem-alerts-not-delivered]]).
+
+Same family as [[server-side-apply-keeps-dropped-fields]], where one rejected field froze a
+whole Kustomization for 4h with every other signal green.

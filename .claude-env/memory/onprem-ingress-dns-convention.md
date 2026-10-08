@@ -132,3 +132,27 @@ both, which `scripts/onprem-dns-finish.sh` does.
 `io-curt.io-notifications-handler.dev`, `octopusworker-0.dev`. Three of those four Gateways
 carry **no external-dns target**, so they create no record. Unmeasured as of 2026-10-08.
 Full detail: `wip/rw-dns/DNS-FINISH-2026-10-08.md`.
+
+## 2026-10-08 — the console-hostname rollout, and two measured rules
+
+**Dev is DONE.** `risingwave-dashboard.op-dev` serves the meta dashboard,
+`risingwave-console.op-dev` serves the console with SSO. **QA step 1 is done**
+(`risingwave-console.op-qa` live, record at its three platform nodes). **Prod untouched.**
+
+**A new hostname on these clusters needs ONE object.** Proven on all three: the
+`*.op-<env>.usxpress.io` 443 server on `shared-http` covers any new host, so no Certificate
+and no Gateway edit. The tell is cheap and can be taken *before* doing the work —
+`curl --resolve <host>:443:<node-ip>` against a hostname with **no route** returns 404 with
+`ssl_verify_result=0`. TLS terminated and the chain validated for a host Istio does not know,
+which is the wildcard answering. The per-host Certificates on dev and QA
+(`certificate-dashboard.yaml`, `certificate-overview.yaml`) are redundant with it.
+
+**Branch names matter here.** `refs/heads/dev`, `qa` and `prod` exist as bare branches
+alongside `op-dev`/`op-qa`/`op-prod`, so a branch called `qa/...` is rejected at push —
+[[platform-repo-branch-refs-collide]].
+
+⚠️ **op-qa's `risingwave-routes` Kustomization is `Ready=False`** with `lastAppliedRevision`
+two commits stale, while the routes it owns serve correctly. Fix before changing anything
+else in that directory — [[gitops-has-four-stale-layers]]. Live detail:
+`wip/rw-dns/QA-PROD-ROLLOUT.md`.
+
