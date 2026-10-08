@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: app-risingwave
+resources:
+  - ../../base
+  - endpoints.yaml
+  - externalsecret.yaml      # complete, not a patch -- see base/kustomization.yaml
+  - image-digest.yaml        # TRACKED, so a promotion creates drift Argo can see
+
+images:
+  - name: etl-pipeline
+    newName: 064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/etl-pipeline
+    # bumped together with image-digest.yaml by promote-to-dev.yml.
+    # ⚠️ PLACEHOLDER. Set to the digest currently running on QA before the first merge --
+    # dev must not be the only consumer of an untested image.
+    digest: sha256:REPLACE_WITH_THE_DIGEST_QA_IS_RUNNING

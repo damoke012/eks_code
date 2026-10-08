@@ -1,0 +1,121 @@
+# Promote a freshly built applier image to op-usxpress-dev.
+#
+# ⚠️ BUILD THIS FROM promote-to-qa.yml ON THE BRANCH, not from this file. This is a
+# derivation written without the QA workflow in front of me; diff the two before merging.
+# Four things change: the overlay path, the ConfigMap, the branch name, and the PR title.
+#
+# Why it merges its own PR: PR #67 opened 2026-09-29 and was still open on 2026-10-07. The
+# automation worked; the gate did not, because nobody was appointed to it. The PR survives
+# as the audit trail and the revert point -- it just no longer waits for someone to notice.
+#
+# Why it bumps TWO files: deploy/base/job.yaml is a Sync hook, so it is not in Argo's
+# tracked resource set. Bumping only the kustomization changes nothing Argo watches and no
+# sync runs. image-digest.yaml is tracked; bumping both is what makes the hook fire.
+name: Promote to dev
+
+on:
+  workflow_run:
+    workflows: ["Build and push applier image"]   # ⚠️ must match the build workflow's
+    types: [completed]                            #    `name:` EXACTLY, or this never runs
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Image digest to promote (sha256:...). Blank = latest on master."
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: promote-to-dev
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: dev            # carries RISINGWAVE_HOST / _PORT; dev has 4 variables set
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: master, fetch-depth: 0 }
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # The POC role (/risingwave/*), not the pipeline role (/risingwave-2/*, dev-only).
+          # One word of this string cost a whole run on 2026-09-01.
+          role-to-assume: arn:aws:iam::700736442855:role/gha-op-usxpress-dev-risingwave-poc-secrets
+          aws-region: us-east-2
+
+      - name: Resolve the digest to promote
+        id: d
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.digest }}" ]; then
+            DIGEST="${{ inputs.digest }}"
+          else
+            DIGEST=$(aws ecr describe-images \
+              --registry-id 064859874041 \
+              --repository-name risingwave/etl-pipeline \
+              --image-ids imageTag=master \
+              --query 'imageDetails[0].imageDigest' --output text)
+          fi
+          case "$DIGEST" in
+            sha256:*) : ;;
+            *) echo "::error::not a digest: $DIGEST"; exit 1 ;;
+          esac
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Bump the overlay and the tracked ConfigMap together
+        id: bump
+        run: |
+          set -euo pipefail
+          D='${{ steps.d.outputs.digest }}'
+          K=deploy/overlays/dev/kustomization.yaml
+          C=deploy/overlays/dev/image-digest.yaml
+          CURRENT=$(grep -oE 'sha256:[0-9a-f]{64}' "$K" | head -1 || true)
+          if [ "$CURRENT" = "$D" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          sed -i -E "s|sha256:[0-9a-f]{64}|$D|g" "$K" "$C"
+          # Both files must now carry it, or the hook will not fire.
+          test "$(grep -c "$D" "$K")" -ge 1
+          test "$(grep -c "$D" "$C")" -ge 1
+          echo "already=false" >> "$GITHUB_OUTPUT"
+
+      - name: Open the PR and merge it
+        if: steps.bump.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          D='${{ steps.d.outputs.digest }}'
+          BR="promote/dev-${D#sha256:}"
+          BR="${BR:0:40}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add deploy/overlays/dev/kustomization.yaml deploy/overlays/dev/image-digest.yaml
+          git commit -m "promote: dev -> ${D}"
+          git push -u origin "$BR"
+          # Prose goes through a FILE, never a --body "..." string: a PR body passed
+          # inline executed its own backticks once and reached `aws iam put-role-policy`.
+          cat > /tmp/pr-body.md <<'BODY'
+Bumps the op-usxpress-dev overlay and its tracked `image-digest.yaml` to the digest
+just built from `master`.
+
+Both files move together deliberately: `deploy/base/job.yaml` is an Argo CD Sync hook
+and is therefore not in the Application's tracked resource set, so bumping the
+kustomization alone changes nothing Argo watches and no sync runs.
+
+Auto-merged. The PR is the audit trail and the revert point.
+BODY
+          gh pr create --base master --head "$BR" \
+            --title "promote: dev -> ${D:0:19}" \
+            --body-file /tmp/pr-body.md
+          gh pr merge --squash --admin

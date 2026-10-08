@@ -1,0 +1,55 @@
+# Per-cluster coordinates and per-environment CHOICES for op-usxpress-dev.
+#
+# Everything here is non-secret and lives in Git. Credentials, and the nine KAFKA__*
+# values, arrive through the ExternalSecret beside this file.
+#
+# The Job runs in app-risingwave and reaches ACROSS to the RisingWave instance the
+# platform runs in the `risingwave` namespace. NOT risingwave-2 -- that namespace is
+# dev-only platform work and is never the ETL target.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: etl-pipeline-endpoints
+data:
+  # ── which pipelines run ──────────────────────────────────────────────────────────
+  PIPELINE_DIR: /pipeline/pipelines
+
+  # Mirrors QA's exclusions, PLUS Brand for the first run only.
+  #
+  # ⚠️ Brand is excluded ONLY because KAFKA_SCHEMA_REGISTRY_MESSAGE below is not yet a
+  # real value. Run 1 proves the delivery path -- image pulled, Job created, secrets
+  # resolved, apply.sh ran. Then read the real subject, set the value, and DELETE
+  # `|/Brand/` from this line. That is a ConfigMap edit: no rebuild, no new digest.
+  EXCLUDE_RE: "/(Template|scripts|900-user-access|employee|secret_manager)/|/Brand/|001-secrets-mongodb|400-sink"
+
+  # ── where it connects ────────────────────────────────────────────────────────────
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"            # 4567 in cluster. Tim's local stack is 4566 -- do not copy.
+  RW_DB:   dev               # the database is NAMED dev in every environment. Verified
+                             # by SQL on QA. Never set this to the environment name.
+  RW_USER: root
+  PG_HOST: pg-postgresql.risingwave.svc.cluster.local
+  PG_PORT: "5432"            # Tim's local stack is 8432 -- do not copy.
+  PG_DB:   risingwave        # POSTGRES_DB on the StatefulSet. Tim's local is `metadata`.
+  # PG_USER comes from the credentials secret, beside its password.
+  APPLIED_BY: argocd-dev
+
+  # ── per-environment choices rendered into the SQL ────────────────────────────────
+  # Dev's own topic. Confirmed twice: Tim's _dev.env, and QA's overlay already reads this
+  # same topic deliberately while QA waits for one of its own.
+  KAFKA_TOPIC_BRAND: dev_brand_management_cdc_brand_avro
+  KAFKA_STARTUP_MODE: earliest
+
+  # ⛔ BLOCKER FOR BRAND. This must be the Avro subject's namespace + record joined, read
+  # from the schema registry for subject `dev_brand_management_cdc_brand_avro-value`.
+  # QA's equivalent resolved to USXpress.Standard.Types.Brand.V1.company_master.
+  # Tim's file has `abc123`; an earlier QA overlay had `message_name`. BOTH pass every
+  # non-empty check in the path and then fail inside RisingWave at decode time -- the same
+  # class as the `unknown` that blocked PR #29. A blank fails loudly; a placeholder does not.
+  KAFKA_SCHEMA_REGISTRY_MESSAGE: ""
+
+  # Dev's OWN consumer group. The doubled `risingwave_risingwave` is the house convention,
+  # not a typo -- QA's is dx__qa_risingwave_risingwave_qa and Tim's local .env carries this
+  # exact string. Sharing a prefix across environments puts both pipelines in one consumer
+  # group and Kafka splits the partitions between them.
+  KAFKA_GROUP_ID_PREFIX: dx__dev_risingwave_risingwave_dev

@@ -1,0 +1,29 @@
+# APPEND to clusters/bm-dev/flux-system/infra.yaml in variant-inc/iaac-talos-flux-cluster
+# (branch master). Read the existing file from the branch first -- this is a fragment, not
+# a replacement.
+#
+# ⚠️ dependsOn differs from QA. op-qa's argocd-apps depends on `argocd-config` +
+# `app-namespaces`. op-dev has NO argocd-config Kustomization -- dev keeps Argo's config
+# inside infrastructure/argocd/ and has not been split the way QA and prod were. So dev
+# depends on `argocd` + `app-namespaces`. Copying QA's dependsOn gives a Kustomization
+# that waits forever on a dependency that does not exist, reported as
+# "dependency ... is not ready" -- which reads as a transient problem and is not.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argocd-apps
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 2m0s
+  timeout: 5m0s
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: infra                      # the PLATFORM repo, branch op-dev
+  path: ./infrastructure/argocd-apps
+  dependsOn:
+    - name: argocd                   # NOT argocd-config -- see above
+    - name: app-namespaces

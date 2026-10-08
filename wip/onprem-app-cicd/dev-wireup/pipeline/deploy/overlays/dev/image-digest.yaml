@@ -1,0 +1,15 @@
+# This ConfigMap exists for ONE reason: to be a resource Argo CD tracks.
+#
+# deploy/base/job.yaml carries `argocd.argoproj.io/hook: Sync`, which keeps the Job OUT of
+# the Application's tracked resource set. Between 2026-09-29 and 2026-10-07 a digest bump
+# therefore changed nothing Argo watched: sync.status stayed Synced, no sync operation ran,
+# and the hook never fired. The promotion PR was merged and green and nothing deployed.
+#
+# Bumping this ConfigMap alongside the kustomization produces real drift -> a sync -> the
+# hook fires. A resource Argo does not track cannot pull itself into a sync.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: etl-pipeline-image
+data:
+  digest: sha256:REPLACE_WITH_THE_DIGEST_QA_IS_RUNNING
