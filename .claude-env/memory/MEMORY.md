@@ -80,6 +80,7 @@
 - [One account, one cluster](one-account-one-cluster-assumption.md) — Terraform IAM is scoped to `<cluster>-*` and apply-bootstrap-perms.sh REPLACES it; a second cluster in an existing account de-authorises the first
 - [Flux version drift, dev is ahead](flux-version-drift-dev-ahead.md) — bm-dev v2.8.8 vs QA/prod v2.7.5; "prove it on dev first" is invalid for anything Flux-behavioural
 - [Octopus config builds the stage, not the play](octopus-config-builds-the-stage-not-the-play.md) — iaac-octopus-config manages environments/pools/lifecycles but NO project variables; a lifecycle phase is what makes an environment deployable
+- [RW on-prem: two delivery paths, zero CI signal](risingwave-onprem-two-delivery-paths.md) — iaac-risingwave-onprem deploys via Flux (main@5m, all clusters) AND Octopus (every branch push → dpl); both CI checks are PERMANENT failures (5/5 and 7/7), so red/green says nothing — verify by the Flux chain
 - [RisingWave on-prem has no promotion gate](risingwave-onprem-has-no-promotion-gate.md) — every cluster tracks `branch: main` at 5m so merging IS deploying to prod; and the CR that lands is patched by a postRenderer in the CLUSTER repo
 - [Octopus [ALL] hides inherited values](octopus-all-scope-hides-inherited-values.md) — a generator copying SCOPED vars leaves inherited ones at the [ALL] default; QA2 planned 13 VMs instead of 4
 - [HelmRelease Ready hides a failed history](helmrelease-ready-hides-failed-history.md) — QA's Grafana stalled 66d while the pod ran 3/3; 5m default timeout + remediateLastFailure false-for-install
