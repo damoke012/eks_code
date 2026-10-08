@@ -48,11 +48,19 @@ not a missing piece.
 
 ## 2026-08-31 — a second prod gap, found while confirming DNS
 
-op-usxpress-prod has the `shared-http` Istio Gateway (80, 443) but **no `tcp-passthrough`**
-(4567, 5432), which op-usxpress-qa has. The prod `istio-ingressgateway` Service already
-exposes both ports, so only the Gateway resource is missing — `rw-sql` and `rw-postgres`
-would resolve, reach a platform node, and route nowhere. Lives in `iaac-talos-flux-platform`,
-`op-prod` branch, under `infrastructure/`. See [[onprem-ingress-dns-convention]].
+~~op-usxpress-prod has the `shared-http` Istio Gateway (80, 443) but **no `tcp-passthrough`**
+(4567, 5432), which op-usxpress-qa has.~~
+
+✅ **CLOSED — `iaac-talos-flux-platform` #143**, merged into `op-prod` and reconciled at
+`7f0d3b7` (`wip/rw-etl-promotion/STATE.md:16`). That PR added `tcp-passthrough`, corrected
+prod's six route files (they were dev copies publishing dev hostnames at dev's workers), and
+added the Velero metastore Schedule. Confirmed 2026-10-08: `rw-sql.op-prod` and
+`rw-postgres.op-prod` resolve to prod's own 10 nodes, not dev's 7.
+
+⚠️ **The DNS half and the listener half are different facts.** These names resolved for
+weeks *before* #143, with nothing bound to 4567. A lookup can never prove a Gateway — query
+`gateways.networking.istio.io -n istio-ingress` as well, which is what
+`scripts/onprem-dns-finish.sh` does. See [[onprem-ingress-dns-convention]].
 
 ## ⛔ CORRECTED 2026-09-15 — prod's manifests path EXISTS and prod reconciles it from `main`
 

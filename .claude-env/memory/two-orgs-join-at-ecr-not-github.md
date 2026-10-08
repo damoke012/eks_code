@@ -98,3 +98,81 @@ policies (403) and repo visibility (422). He owns the delivery path without bein
 in either org hosting it. Raise as its own item.
 
 Note: `wip/onprem-app-cicd/cross-org/FINDINGS-2026-10-07-two-orgs-one-pipeline.md`.
+
+
+## ✅ 2026-10-07 — PROVEN on variant-inc/risingwave-pipeline
+
+A 15-line caller with **no secrets** built and pushed to ECR. Two green runs, two new
+digests (`3e91003f` 17:07, `c3f76243` 17:09, against `b687e6c5` from 29 Sep). Assumed
+`arn:aws:sts::064859874041:assumed-role/gha-risingwave-etl-ecr-push/gha-variant-inc-<run_id>`.
+The reusable workflow lives in **`variant-inc/iaac-risingwave-cicd`** (internal), tag `v1`.
+
+### ⚠️ THE RULE — two conditions, neither sufficient, ONE error message
+
+| | |
+|---|---|
+| Visibility | `internal` or `public`. **Private cannot share**, whatever `access_level` says |
+| `actions/permissions/access` | `organization` or `enterprise`. **Defaults to `none`** on every repo |
+
+`access_level` is **per repository and does not travel.** I set it on the first host, moved
+the workflow to a second host, and never set it there — that one oversight cost more than
+every other dead end. All failure modes, plus a genuinely absent file, emit the identical
+`workflow was not found`.
+
+### Method that worked
+
+- **`gh workflow run` is the diagnostic.** An unresolvable `uses:` returns **422 with the
+  literal parse error** in a second. The same file on push gives a failure with no job, no
+  log, and a generic "workflow file issue". A **404** from the dispatch means only "not
+  indexed yet" — retry; do not read it as blocked.
+- **Bisect with a six-line no-op.** `ping.yml` failing identically retired the entire
+  content hypothesis in one commit.
+- **`actionlint` for schema; a run for reachability.** `yaml.safe_load` proves neither.
+- **`gh run view --log` returns ZERO lines for a reusable-workflow run.** Use
+  `gh api /repos/<o>/<r>/actions/jobs/<job_id>/logs`.
+
+⚠️ **`variant-inc/actions-collection` is PUBLIC and already ships `build-push-image`.**
+Shared actions live in `variant-inc/actions-*` — that is what Tim meant by "actions that
+come out of the variant space". I wrote one from scratch without looking, and created a
+private `usx-cicd-workflows` that is now an orphan to delete. **Look for the existing
+convention before publishing a new one.**
+
+
+## ✅ 2026-10-07 — the build path is DELIVERED, the deploy half is not
+
+**What exists.** `variant-inc/iaac-risingwave-cicd` (INTERNAL, `access_level: enterprise`,
+tag `v1`) publishes three workflows: `app-build-push.yml` (repos with a Dockerfile),
+`sql-pipeline-build-push.yml` (repos with only SQL), and `publish-applier.yml`. ECR
+`risingwave/sql-applier` holds the applier base `sha256:0a13bc0d…`; `risingwave/poc-pipeline`
+is created and empty. Roles `gha-sql-applier-ecr-push` and `gha-risingwave-poc-ecr-push`
+trust `…:main` and `…:master` respectively. `usxpressinc/risingwave-poc#5` is open.
+
+**An app repo with only SQL needs no Dockerfile.** The applier tooling is published once as
+a base image; the reusable workflow generates a two-line image `FROM` it at build time. A
+fix to `apply.sh` then reaches every consumer on their next build instead of a PR per repo.
+The workflow **refuses to build when the SQL dir is empty** — an image that applies nothing
+deploys green.
+
+⛔ **The deploy half is unproven.** `usxpress-app` renders and lints and has **never been
+applied to a cluster**; nothing consumes `risingwave/poc-pipeline`. The chain stops at
+"image in ECR".
+
+⚠️ **The SQL is duplicated and has DRIFTED.** `variant-inc/risingwave-pipeline` has 4 SQL
+files, `usxpressinc/risingwave-poc` has 3 — ours carries `pipelines/Brand/300-transform.sql`.
+**QA runs a transform absent from the source of truth.** Decide which is right before the
+cutover. Named in PR #5.
+
+⚠️ **Three IAM roles are hand-made and untagged** in 064859874041 (plus the pre-existing
+`gha-risingwave-etl-ecr-push`, whose description says `main` while its policy pins `master`).
+`gha-oidc-trust.tf` must IMPORT them — a second declaration of a live role is how a destroy
+removes the real one. See [[two-projects-one-resource]].
+
+**Read the house action before writing your own.** `variant-inc/actions-collection` is public
+and ships `build-push-image`. Two things came from reading it: `TRIVY_DB_REPOSITORY:
+public.ecr.aws/aquasecurity/trivy-db:2` (the default DB is on ghcr.io and gets rate-limited)
+and severity `CRITICAL` (being stricter than every other app invites "why is mine different").
+Not copied: it pins `aquasecurity/trivy-action@master`, a floating third-party ref, in the
+action every app uses.
+
+⚠️ `iaac-risingwave-cicd` has **2 critical Dependabot alerts** and is now load-bearing, and
+its open Renovate branch **deletes `publish-applier.yml`** — rebase, never merge.

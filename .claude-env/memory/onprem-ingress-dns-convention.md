@@ -65,8 +65,14 @@ its own platform node IPs. Nothing to request, nothing to create by hand.
 **The failure mode is silent.** `--policy=sync` deletes records, but ownership is keyed on
 `--txt-owner-id` in the DynamoDB registry, so a cluster skips records another cluster owns —
 no error, no event, no working hostname. A copied VirtualService therefore produces exactly
-nothing, visibly. op-usxpress-prod carries `grafana.op-dev.usxpress.io` today: dev owns that
-record (it resolves to dev's nodes), prod silently skips it, and prod's Grafana has no name.
+nothing, visibly. ~~op-usxpress-prod carries `grafana.op-dev.usxpress.io` today: dev owns that
+record, prod silently skips it, and prod's Grafana has no name.~~
+
+✅ **CORRECTED 2026-10-08 — prod's Grafana has a name.** `grafana.op-prod.usxpress.io`
+resolves to all **10** prod nodes; `grafana.op-qa` to QA's 3; `grafana.op-dev` to dev's 7.
+A sweep of all 25 live on-prem hostnames found **zero** wrong-cluster records and zero
+non-node targets. The silent-skip mechanism above is real and is still the thing to check —
+the example of it is not. Measured in `wip/rw-dns/DNS-FINISH-2026-10-08.md`.
 
 Check both failure modes with `scripts/onprem-dns-claims.sh dev qa prod` — it flags any
 hostname belonging to another environment and any target IP that is not a node of the
