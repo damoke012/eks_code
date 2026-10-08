@@ -1,0 +1,139 @@
+# risingwave-etl on op-usxpress-dev — usxpress-app chart values.
+#
+# Mirrors values-qa.yaml beside this file. The ONLY differences are the cluster,
+# the environment, the Secrets Manager account path, the topic, the consumer
+# group prefix, and Brand's exclusion. Diff the two before merging either.
+clusterName: op-usxpress-dev
+environment: dev
+owner:
+  team: platform
+  contact: "#on-prem-platform"
+
+workload:
+  kind: Job
+
+image:
+  repository: 064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/etl-pipeline
+  # ⚠️ Set this to the digest QA IS ALREADY RUNNING, not a fresh build. Dev must
+  # not be the only consumer of an untested image on its first run.
+  digest: sha256:REPLACE_WITH_THE_DIGEST_QA_IS_RUNNING
+
+service:
+  enabled: false
+
+resources:
+  requests: { cpu: 200m, memory: 512Mi }
+  limits:   { cpu: "1",  memory: 1Gi }
+
+# ─────────────────────────────────────────────── non-secret config ──
+config:
+  # ── which pipelines run ──
+  PIPELINE_DIR: /pipeline/pipelines
+  # Mirrors QA's exclusions PLUS Brand, for run 1 only.
+  #
+  # ⚠️ Brand is excluded ONLY because KAFKA_SCHEMA_REGISTRY_MESSAGE below is not
+  # yet a real value. Run 1 proves the delivery path: image pulled, Job created,
+  # 12 secret keys resolved, apply.sh ran. Then read the real subject, set the
+  # value, and delete `|/Brand/` from this line.
+  EXCLUDE_RE: "/(Template|scripts|900-user-access|employee|secret_manager)/|/Brand/|001-secrets-mongodb|400-sink"
+
+  # ── where it connects ──
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"          # 4567 in cluster. Tim's local stack is 4566.
+  RW_DB:   dev             # the database is NAMED dev in every environment.
+  RW_USER: root
+  PG_HOST: pg-postgresql.risingwave.svc.cluster.local
+  PG_PORT: "5432"          # Tim's local stack is 8432.
+  PG_DB:   risingwave      # POSTGRES_DB on the StatefulSet. Tim's local: metadata.
+  APPLIED_BY: argocd-dev
+
+  # ── per-environment choices rendered into the SQL ──
+  # Dev's own topic. Confirmed twice: Tim's _dev.env, and QA's live ConfigMap,
+  # which reads this same dev topic deliberately while QA waits for its own.
+  KAFKA_TOPIC_BRAND: dev_brand_management_cdc_brand_avro
+  KAFKA_STARTUP_MODE: earliest
+
+  # ⛔ BLOCKER FOR BRAND. The Avro subject's namespace + record, read from the
+  # registry for `dev_brand_management_cdc_brand_avro-value`. QA's resolved to
+  # USXpress.Standard.Types.Brand.V1.company_master. Tim's file has `abc123`;
+  # an older QA overlay had `message_name`. BOTH pass every non-empty check in
+  # the path and then fail inside RisingWave at decode time. A blank fails loudly.
+  KAFKA_SCHEMA_REGISTRY_MESSAGE: ""
+
+  # Dev's OWN consumer group. The doubled `risingwave_risingwave` is the house
+  # convention, not a typo — QA's is dx__qa_risingwave_risingwave_qa. Sharing a
+  # prefix across environments puts both pipelines in ONE consumer group and
+  # Kafka splits the partitions between them: QA would take messages dev never
+  # sees, and dev would go silently, partially blind.
+  KAFKA_GROUP_ID_PREFIX: dx__dev_risingwave_risingwave_dev
+
+# ─────────────────────────────────────────────────────── secrets ──
+externalSecrets:
+  enabled: true
+  # ⚠️ NOT the chart default `cluster-secret-store`. The ClusterSecretStore on
+  # all three on-prem clusters is named `default`.
+  secretStore: default
+  secretStoreKind: ClusterSecretStore
+  refreshInterval: 1h
+  # ⚠️ TWELVE keys. apply.sh consumes the secret wholesale with envFrom, and ESO
+  # writes the keys it COULD resolve — so eleven looks populated and the pod dies
+  # at container creation with RESTARTS 0, invisible to restart alerts. After the
+  # first sync, LIST the keys and count them. Do not read the condition.
+  #
+  # ⚠️ CASING: dev's properties are KAFKA__* (upper). QA's are kafka__* (lower).
+  # Same secret, two spellings, two accounts, and a wrong spelling resolves to
+  # NOTHING with no error.
+  data:
+    - secretKey: RW_PASSWORD
+      remoteKey: op-usxpress-dev/risingwave/root
+      property: password
+    - secretKey: PG_PASSWORD
+      remoteKey: op-usxpress-dev/risingwave/postgres
+      property: password
+    - secretKey: PG_USER
+      remoteKey: op-usxpress-dev/risingwave/postgres
+      property: username
+
+    - secretKey: KAFKA_API_KEY
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__api_key
+    - secretKey: KAFKA_API_SECRET
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__api_secret
+    - secretKey: KAFKA_BOOTSTRAP_SERVER
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__bootstrap_server
+    - secretKey: KAFKA_RESOURCE_ID
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__resource_id
+    - secretKey: KAFKA_REST_ENDPOINT
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__rest_endpoint
+    - secretKey: KAFKA_SERVICE_ACCOUNT
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__service_account
+
+    # Dev's registry three were POPULATED on 2026-09-11 (endpoint 48 chars);
+    # QA's were empty, which is why QA borrowed dev's.
+    - secretKey: KAFKA_SCHEMA_REGISTRY_API_KEY
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__schema_registry_api_key
+    - secretKey: KAFKA_SCHEMA_REGISTRY_API_SECRET
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__schema_registry_api_secret
+    - secretKey: KAFKA_SCHEMA_REGISTRY_ENDPOINT
+      remoteKey: op-usxpress-dev/risingwave/kafka
+      property: KAFKA__schema_registry_endpoint
+
+# ─────────────────────────────────────────────────────────── aws ──
+# ⚠️ CONFIRM THE ROLE NAME AND ACCOUNT. 700736442855 is dev. The QA example in
+# the chart names `risingwave-pipeline-irsa`; that name has not been verified in
+# any account. The pod-identity webhook is failurePolicy: Ignore, so a wrong or
+# absent role produces a pod with NO AWS credentials and no error anywhere — one
+# RisingWave compactor ran 88 days that way.
+#
+# If the Job needs no AWS call of its own, set create: false and drop roleArn
+# entirely rather than annotating a role that does not exist.
+serviceAccount:
+  create: true
+  roleArn: arn:aws:iam::700736442855:role/CONFIRM_THE_DEV_PIPELINE_IRSA_ROLE

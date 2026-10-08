@@ -1,4 +1,4 @@
-{{- if .Values.config }}
+{{- if or .Values.config (eq .Values.workload.kind "Job") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,5 +7,20 @@ metadata:
 data:
   {{- range $k, $v := .Values.config }}
   {{ $k }}: {{ $v | quote }}
+  {{- end }}
+  {{- if eq .Values.workload.kind "Job" }}
+  # The deployed image digest, echoed here ON PURPOSE.
+  #
+  # A Job is rendered as an Argo CD Sync hook, which keeps it OUT of the
+  # Application's tracked resource set. The digest otherwise appears only in the
+  # Job, so a digest-only promotion changes nothing Argo watches:
+  # `sync.status` stays Synced, no sync operation runs, and the hook never
+  # fires. That is exactly what made every promotion between 2026-09-29 and
+  # 2026-10-07 a no-op -- merged, green, and nothing deployed.
+  #
+  # This ConfigMap IS tracked. Echoing the digest here means a promotion
+  # produces real drift -> a sync -> the hook fires. A resource Argo does not
+  # track cannot pull itself into a sync.
+  IMAGE_DIGEST: {{ .Values.image.digest | quote }}
   {{- end }}
 {{- end }}

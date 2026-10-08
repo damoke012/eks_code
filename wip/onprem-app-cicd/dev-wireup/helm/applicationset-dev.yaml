@@ -1,0 +1,82 @@
+# Every on-prem application delivered by Argo CD on op-usxpress-dev.
+#
+# Onboarding is one element below — the chart renders the whole object matrix
+# from the values file, so there is no per-app base, overlay or Kustomization.
+#
+# ⚠️ THE SOURCE SHAPE DEPENDS ON WHERE THE CHART LANDED, which the probe in
+# RUNBOOK-helm.md settles. Two forms:
+#
+#   (a) chart and values in the SAME repo  -> the single `source` below.
+#   (b) chart in its own repo / OCI        -> `sources:` with a `$values` ref:
+#
+#         sources:
+#           - repoURL: <chart repo or oci://...>
+#             chart: usxpress-app
+#             targetRevision: 0.1.0
+#             helm:
+#               valueFiles: [$values/deploy/values-dev.yaml]
+#           - repoURL: ssh://git@github.com/variant-inc/risingwave-pipeline.git
+#             targetRevision: master
+#             ref: values
+#
+# Do not guess between them. (b) with a chart that is actually in-repo fails at
+# render; (a) with an out-of-repo chart fails at `path`.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: onprem-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          # ---- onboard here -------------------------------------------------
+          - name: risingwave-etl
+            namespace: app-risingwave
+            # ssh://, NOT https://. The credential is a deploy key —
+            # secret-type: repository, bound to this EXACT url — so an https://
+            # element matches nothing, gets no credential, and GitHub answers an
+            # unauthenticated request for a private repo with "Repository not
+            # found". PR #100 reverted this line and delivery was down 18h with
+            # sync=Unknown, health=Healthy and a stale Succeeded.
+            repoURL: ssh://git@github.com/variant-inc/risingwave-pipeline.git
+            chartPath: deploy/chart
+            valueFile: deploy/values-dev.yaml
+          # -------------------------------------------------------------------
+  template:
+    metadata:
+      name: '{{.name}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: apps
+      source:
+        repoURL: '{{.repoURL}}'
+        # The repository's ACTUAL default branch. risingwave-pipeline is
+        # `master`. A wrong revision fails BEFORE authentication, which masked a
+        # missing Git credential for a full day (INFRA-1647).
+        targetRevision: master
+        path: '{{.chartPath}}'
+        helm:
+          valueFiles:
+            - '{{.valueFile}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        # INFRA-1653. Argo's default is five retries, and with a Sync hook each
+        # retry recreates the hook Job — destroying the previous attempt's pod
+        # and its logs. On 2026-08-20 that took three attempts to read one
+        # failure, and on final failure the Job was removed entirely.
+        retry:
+          limit: 1
+          backoff:
+            duration: 30s
+            maxDuration: 2m
+        syncOptions:
+          - CreateNamespace=false     # the platform owns app-* namespaces
