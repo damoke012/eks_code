@@ -1,0 +1,47 @@
+# One values file per environment lives beside this chart, not in it.
+# Everything here is a default that an environment must or may override.
+
+# REQUIRED. Used in the Secrets Manager paths and in APPLIED_BY.
+environment: ""          # dev | qa | prod
+
+image:
+  repository: 064859874041.dkr.ecr.us-east-2.amazonaws.com/risingwave/etl-pipeline
+  # REQUIRED and digest-only. 515 of 517 ECR repositories accept org-wide
+  # push, so a tag can be moved under us by anyone in the org.
+  digest: ""             # sha256:...
+
+# Non-secret coordinates and per-environment choices. Rendered into the
+# endpoints ConfigMap and consumed wholesale by apply.sh via envFrom.
+config: {}
+
+# The three credentials apply.sh needs. remoteKey is the Secrets Manager path;
+# nothing here is a value.
+#
+# This replaces the positional-index JSON patch the overlay used
+# (/spec/data/0/remoteRef/key ...), which broke silently once already: prod's
+# overlay patched indices 0 and 1 but not 2, so PG_USER kept PLACEHOLDER, the
+# ExternalSecret could never sync, and the Job could never start.
+externalSecret:
+  refreshInterval: 1h
+  secretStore: default
+  data:
+    - secretKey: RW_PASSWORD
+      path: risingwave/root
+      property: password
+    - secretKey: PG_PASSWORD
+      path: risingwave/postgres
+      property: password
+    - secretKey: PG_USER
+      path: risingwave/postgres
+      property: username
+
+imagePullSecret: ecr-pull-secret
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+
+# readOnlyRootFilesystem with no writable /tmp broke every mktemp and the QA
+# applier could not apply a single file for weeks. The emptyDir below is not
+# optional; it is mounted whenever this is true.
+readOnlyRootFilesystem: true

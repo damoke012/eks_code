@@ -1,0 +1,14 @@
+# Exists only to be a resource Argo CD TRACKS.
+#
+# The Job below is a Sync hook, so it is NOT in the Application's tracked
+# resource set, and the digest otherwise appears only there. A digest-only
+# promotion would then change nothing Argo watches: sync.status stays Synced,
+# no sync operation runs, and the hook never fires. That made every promotion
+# between 2026-09-29 and 2026-10-07 a merged, green no-op.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: etl-pipeline-image
+  labels: {{- include "etl.labels" . | nindent 4 }}
+data:
+  digest: {{ required "image.digest is required" .Values.image.digest | quote }}

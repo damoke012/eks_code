@@ -1,0 +1,19 @@
+apiVersion: v2
+name: risingwave-etl
+description: |
+  The RisingWave SQL pipeline applier, as an Argo CD sync-hook Job.
+
+  Renders exactly the object set the kustomize overlay rendered - Job, the
+  endpoints ConfigMap, the tracked image-digest ConfigMap, and the
+  ExternalSecret - from one values file per environment.
+
+  Why this and not dx-cron: dx-cron renders a CronJob and requires a schedule,
+  so it cannot carry the Argo sync-hook annotation; and the shared
+  library.external-secret.tpl builds its ExternalSecret only from awsSecrets
+  via `dataFrom: extract`, which cannot produce the env var NAMES apply.sh
+  needs. Measured 2026-10-08.
+
+  Sourced from a git path, so it needs no OCI registry credential.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

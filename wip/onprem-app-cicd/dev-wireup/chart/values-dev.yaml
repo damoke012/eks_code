@@ -1,0 +1,33 @@
+# op-usxpress-dev. Diff against values-qa.yaml before changing either.
+environment: dev
+
+image:
+  # The digest QA is running. Dev must not be the only consumer of an untested
+  # image on its first run.
+  digest: sha256:56f83c273d56144cbdec692201d42e2042f068ff54a09e51cb017b85ae859640
+
+config:
+  PIPELINE_DIR: /pipeline/pipelines
+  # ⚠️ /Brand/ is excluded ONLY until KAFKA_SCHEMA_REGISTRY_MESSAGE below holds
+  # the real Avro subject. Removing it is a values edit, no rebuild.
+  EXCLUDE_RE: "/Brand/|/(Template|scripts|900-user-access|employee|secret_manager)/|001-secrets-mongodb|400-sink"
+
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"          # 4567 in cluster; a local docker stack is 4566
+  RW_DB:   dev             # the database is NAMED dev in every environment
+  RW_USER: root
+  PG_HOST: pg-postgresql.risingwave.svc.cluster.local
+  PG_PORT: "5432"
+  PG_DB:   risingwave
+
+  KAFKA_TOPIC_BRAND: dev_brand_management_cdc_brand_avro
+  KAFKA_STARTUP_MODE: earliest
+  # ⛔ BLOCKER for Brand. QA's value is
+  # USXpress.Standard.Types.Brand.V1.company_master. A placeholder here passes
+  # every non-empty check and then fails inside RisingWave at decode time; a
+  # blank fails loudly.
+  KAFKA_SCHEMA_REGISTRY_MESSAGE: ""
+  # Dev's OWN consumer group. The doubled risingwave_risingwave is the house
+  # convention. Sharing a prefix puts both environments in one consumer group
+  # and Kafka splits the partitions between them.
+  KAFKA_GROUP_ID_PREFIX: dx__dev_risingwave_risingwave_dev
