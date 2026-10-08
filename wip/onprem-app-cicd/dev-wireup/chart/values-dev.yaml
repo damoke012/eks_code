@@ -1,33 +1,58 @@
-# op-usxpress-dev. Diff against values-qa.yaml before changing either.
+# op-usxpress-dev — GENERATED FROM LIVE STATE 2026-10-08, not from notes.
+#
+# Source of truth: ConfigMap etl-pipeline-endpoints and ExternalSecret
+# etl-pipeline-credentials in namespace app-risingwave on op-usxpress-dev,
+# read 2026-10-08. An earlier hand-written version of this file drifted from
+# live in five places (a different EXCLUDE_RE, an EMPTY registry message, a
+# KAFKA_GROUP_ID_PREFIX that does not exist live, and four missing POSTGRES_*
+# keys) and would have broken dev on the flip.
+#
+# APPLIED_BY is NOT listed here: the chart emits APPLIED_BY=argocd-<env>.
 environment: dev
 
 image:
-  # The digest QA is running. Dev must not be the only consumer of an untested
-  # image on its first run.
+  # The digest dev is running right now, read from ConfigMap etl-pipeline-image.
   digest: sha256:56f83c273d56144cbdec692201d42e2042f068ff54a09e51cb017b85ae859640
 
 config:
   PIPELINE_DIR: /pipeline/pipelines
-  # ⚠️ /Brand/ is excluded ONLY until KAFKA_SCHEMA_REGISTRY_MESSAGE below holds
-  # the real Avro subject. Removing it is a values edit, no rebuild.
-  EXCLUDE_RE: "/Brand/|/(Template|scripts|900-user-access|employee|secret_manager)/|001-secrets-mongodb|400-sink"
+  # Single-quoted so the \. stays literal; helm's `quote` escapes it correctly
+  # into the ConfigMap. This is dev's LIVE value, character for character.
+  EXCLUDE_RE: '(^|/)(Template|employee|secret_manager|shared)(/|$)|^pipelines/Brand/(300-transform\.sql|400-sink\.rw)$'
 
   RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
-  RW_PORT: "4567"          # 4567 in cluster; a local docker stack is 4566
-  RW_DB:   dev             # the database is NAMED dev in every environment
+  RW_PORT: "4567"
+  RW_DB:   dev
   RW_USER: root
+
   PG_HOST: pg-postgresql.risingwave.svc.cluster.local
   PG_PORT: "5432"
   PG_DB:   risingwave
 
+  # Empty in live. apply.sh validates EVERY runtime value before applying
+  # EXCLUDE_RE, so these must be present-and-empty exactly as they are, not
+  # omitted and not filled in.
+  POSTGRES_SERVER:     ""
+  POSTGRES_ENTITY_DB:  ""
+  POSTGRES_PORT:       "5432"
+
   KAFKA_TOPIC_BRAND: dev_brand_management_cdc_brand_avro
   KAFKA_STARTUP_MODE: earliest
-  # ⛔ BLOCKER for Brand. QA's value is
-  # USXpress.Standard.Types.Brand.V1.company_master. A placeholder here passes
-  # every non-empty check and then fails inside RisingWave at decode time; a
-  # blank fails loudly.
-  KAFKA_SCHEMA_REGISTRY_MESSAGE: ""
-  # Dev's OWN consumer group. The doubled risingwave_risingwave is the house
-  # convention. Sharing a prefix puts both environments in one consumer group
-  # and Kafka splits the partitions between them.
-  KAFKA_GROUP_ID_PREFIX: dx__dev_risingwave_risingwave_dev
+  # The real Avro subject, live since PR #73. Never set this blank.
+  KAFKA_SCHEMA_REGISTRY_MESSAGE: USXpress.Standard.Types.Brand.V1.company_master
+
+# Three entries, matching live exactly. op-usxpress-dev/... is built by
+# etl.prefix from `environment`.
+externalSecret:
+  refreshInterval: 1h
+  secretStore: default
+  data:
+    - secretKey: RW_PASSWORD
+      path: risingwave/root
+      property: password
+    - secretKey: PG_PASSWORD
+      path: risingwave/postgres
+      property: password
+    - secretKey: PG_USER
+      path: risingwave/postgres
+      property: username
