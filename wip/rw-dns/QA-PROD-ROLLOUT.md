@@ -1,6 +1,6 @@
 # Console-hostname rollout — QA and prod
 
-**Dev is complete (2026-10-08). QA is at step 1 of 4 and BLOCKED. Prod is untouched.**
+**Dev is complete (2026-10-08). QA is at step 2 of 6 and NOT blocked. Prod is untouched.**
 
 The defect, in one line: `risingwave-dashboard.op-<env>` serves the **console**, and there is
 no console-named hostname. Identical on all three clusters — body hashes were byte-identical,
@@ -12,14 +12,23 @@ so it is one defect in three places, not three variants.
 | 2. Entra `/dex/callback` URI added | ✅ | ✅ (list now 5) | ☐ |
 | 3. Three config values moved | ✅ **onprem#40** | ☐ | ☐ |
 | 4. Self-registration log + human login | ✅ 16:38 UTC | ☐ | ☐ |
-| 5. Repoint `virtualservice-dashboard.yaml` | ✅ **#168** | ☐ **blocked** | ☐ |
+| 5. Repoint `virtualservice-dashboard.yaml` | ✅ **#168** | ☐ | ☐ |
 | 6. Hash gate + login again | ✅ | ☐ | ☐ |
 
-## ⛔ BLOCKER — op-qa `risingwave-routes` is Ready=False
+## ⛔ NOT A BLOCKER — corrected. It was a reconcile in flight
 
 ```
-READY=False   APPLIED=op-qa@sha1:7acb311e      (branch head b2b6cb37, previous fca6d26)
+first read   READY=False  APPLIED=op-qa@sha1:7acb311e
+second read  READY=True   APPLIED=op-qa@sha1:b2b6cb37   since 2026-10-08T17:48:01Z
 ```
+
+**The first read caught a reconcile in progress and I called it wedged**, wrote it into two
+documents and halted the rollout on it. A `Ready=False` seconds old is a loop running; one
+hours old is stuck, and only `lastTransitionTime` plus a second read tells them apart. My
+probe printed neither. See [[gitops-has-four-stale-layers]].
+
+Everything below this line was written under that wrong reading and is kept for the
+reasoning, not the conclusion:
 
 It has not completed an apply for **at least two commits**, and nothing alerted. The new
 VirtualService from #169 is nevertheless live and serving the console

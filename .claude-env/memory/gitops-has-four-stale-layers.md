@@ -49,9 +49,25 @@ check.**
 Related: [[adjacent-step-green-signals]], [[octopus-green-but-no-apply]],
 [[flux-stale-dependency-cascade]], [[proxy-is-not-the-property]].
 
-## 2026-10-08 — a PARTIAL apply keeps the OLD revision, and the objects stay
+## 2026-10-08 — ⛔ THE INSTANCE BELOW WAS WRONG. A reconcile in flight reads as a stuck one.
 
-Fifth layer, found on `op-usxpress-qa`. `kustomization/risingwave-routes` reported:
+**Corrected the same evening.** `risingwave-routes` on op-qa was re-read and showed
+`Ready=True`, `Applied revision: op-qa@sha1:b2b6cb37` — the merge commit —
+`lastTransitionTime: 2026-10-08T17:48:01Z`. The earlier reading caught it **mid-reconcile**,
+and I called it blocked, wrote it into two documents and stopped a rollout on it.
+
+**The discriminator is time, and my probe did not capture it.** A Kustomization's condition
+is one sample of a loop that runs every few minutes. `Ready=False` with a stale
+`lastAppliedRevision` is what a reconcile *in progress* looks like **and** what a wedged one
+looks like. Print `lastTransitionTime` and the `reason`, and read it twice, before calling
+either. A single sample is not a state — [[proxy-is-not-the-property]].
+
+The mechanism described below is real and worth keeping; **the instance was not**.
+
+## The mechanism — a PARTIAL apply keeps the OLD revision, and the objects stay
+
+Fifth layer. What `kustomization/risingwave-routes` on op-usxpress-qa appeared to show — and
+which turned out to be a reconcile in flight, see the correction above:
 
     READY=False   APPLIED=op-qa@sha1:7acb311e
 
@@ -70,9 +86,10 @@ revision stays pinned to the last complete run. So:
 * Drift between *applied* and *serving* reads clean, because both are the same old commit —
   exactly the blind spot in `scripts/flux-revision-drift.sh` described above.
 
-**How to apply:** read `READY` **and** `lastAppliedRevision` **and** the condition `message`,
-every time. A green endpoint test beside a `Ready=False` Kustomization is a reason to stop,
-not to proceed — the next change to that directory will merge, report green in GitHub, and
+**How to apply:** read `READY`, `lastAppliedRevision`, the condition `reason`, the `message`
+**and `lastTransitionTime`** — then read it again a minute later. A `Ready=False` that is
+seconds old is a reconcile running; one that is hours old is wedged. Only the second is a
+reason to stop — the next change to that directory will merge, report green in GitHub, and
 never land. There is no Alertmanager delivery on-prem to say otherwise
 ([[onprem-alerts-not-delivered]]).
 
