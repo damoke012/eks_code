@@ -124,7 +124,49 @@ Octopus release and no TfApply gate — **the only thing keeping this off QA and
 directory boundary** ([[risingwave-onprem-has-no-promotion-gate]]). The grep above must print
 `scope OK`.
 
-### B4. Restart, then read the self-registration log BEFORE any browser
+### B3b. ⛔ CORRECTED — after merge, prove the Kustomization APPLIED
+
+Two things the earlier draft got wrong.
+
+**1. Do not `rollout restart`.** The diff changes `RCONSOLE_SSO_DEX_ISSUERURL` in the **pod
+template**, so the merge produces a new ReplicaSet on its own. A manual restart races Flux
+and muddies which revision the running pod came from.
+
+**2. A merged PR is not an applied change.** This exact Deployment froze a whole
+Kustomization for **4 hours with no alert** on a server-side-apply conflict —
+`strategy: Recreate` could not apply over a live `rollingUpdate` block (PR #36,
+[[server-side-apply-keeps-dropped-fields]]). "Merged" looked like "applied". And this repo has
+no Alertmanager on-prem to say otherwise.
+
+So walk all four layers, finishing at the pod ([[gitops-has-four-stale-layers]]):
+
+```bash
+K=~/.kube/op-usxpress-dev-fresh.yaml
+C=admin@op-usxpress-dev
+M=$(cd ~/iaac-risingwave-onprem && git rev-parse origin/main | cut -c1-8)
+echo "merge commit: $M"
+kubectl --kubeconfig $K --context $C -n flux-system get gitrepository   iaac-risingwave-onprem -o jsonpath='{.status.artifact.revision}{"\n"}'
+kubectl --kubeconfig $K --context $C -n flux-system get kustomization   risingwave-onprem   -o jsonpath='READY={.status.conditions[?(@.type=="Ready")].status}{"  "}{.status.conditions[?(@.type=="Ready")].message}{"\n"}APPLIED={.status.lastAppliedRevision}{"\n"}'
+```
+
+`READY=True` **and** `lastAppliedRevision` carrying the merge commit. Anything else — a
+`False`, a stale revision, a dry-run error in the message — means it did not apply, and no
+amount of pod-watching will reveal that.
+
+Then prove it reached the live object, not just the revision:
+
+```bash
+K=~/.kube/op-usxpress-dev-fresh.yaml
+C=admin@op-usxpress-dev
+kubectl --kubeconfig $K --context $C -n risingwave get cm   risingwave-console-dex -o jsonpath='{.data.config\.yaml}' | grep -E '^ *issuer:'
+kubectl --kubeconfig $K --context $C -n risingwave get pod   -l app.kubernetes.io/name=risingwave-console   -o custom-columns='NAME:.metadata.name,START:.status.startTime,READY:.status.phase'
+```
+
+The ConfigMap must read `risingwave-console`, and the pod `startTime` must be **after** the
+merge. An old `startTime` with a new ConfigMap means the mounted config changed under a
+process that never re-read it ([[config-can-outrun-the-image]]).
+
+### B4. Read the self-registration log BEFORE any browser
 
 ```bash
 K=~/.kube/op-usxpress-dev-fresh.yaml
