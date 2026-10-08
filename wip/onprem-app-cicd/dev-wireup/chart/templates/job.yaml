@@ -15,6 +15,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: etl-pipeline-apply
+  namespace: {{ .Release.Namespace }}
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded

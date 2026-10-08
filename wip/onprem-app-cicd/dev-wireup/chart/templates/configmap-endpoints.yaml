@@ -5,7 +5,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: etl-pipeline-endpoints
-  labels: {{- include "etl.labels" . | nindent 4 }}
+  namespace: {{ .Release.Namespace }}
 data:
   {{- range $k, $v := .Values.config }}
   {{ $k }}: {{ $v | quote }}
