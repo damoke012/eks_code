@@ -91,6 +91,76 @@ kubectl get events -n <target-ns> --sort-by=.lastTimestamp | tail -30
 
 For source-repo manifests, also verify against the cloned source — does the CR / HR / config the PR patches actually exist with the field paths assumed by the patches?
 
+### Phase 3b — The hostname gate (any PR touching a VirtualService or Gateway)
+
+Three failures live here, all silent, all shipped in the last five weeks. Run this gate
+whenever the diff touches `hosts:`, a `gateways:` reference, an `external-dns.alpha…`
+annotation, or `risingwave-routes/kustomization.yaml`.
+
+**1. A hostname is not one application.** A VirtualService with no `uri` match is a
+catch-all, so repointing the host relocates *every* path under it — including OIDC issuer
+and callback endpoints that clients hardcode. PR #166 moved `/dex` and `/auth` along with
+`/` and 404'd "Sign in with SSO"; #167 reverted it within the hour. The route looked
+correct and `/` returned 200 throughout.
+
+```bash
+# every declared path on the host (no 'uri:' lines means it carries ALL of them)
+kubectl --context admin@op-usxpress-<env> -n <ns> \
+  get virtualservices.networking.istio.io -o yaml | grep -nE 'hosts:|uri:|prefix:|host:'
+
+# the CONSUMERS -- an issuer URL lives in the app's config, not in the routing
+kubectl --context admin@op-usxpress-<env> -n <ns> \
+  get deploy,cm -o yaml | grep -iE 'issuer|redirect|callback|_url'
+```
+
+A repoint is **BLOCKER** until the second grep is empty, or until the issuer, the callback
+and the identity provider's redirect URI move first — and the Entra app registration is
+shared across dev/QA/prod, so that is an *addition*, never a replacement.
+
+**2. Ask the registry, not the resolver.** The `usxpress.io` SOA minimum is **86400**, so a
+negative answer is cached for 24 hours. Resolving a hostname to find out whether its record
+exists is what *makes* it not exist — and checking first is the natural move, so this trap
+fires on the careful reviewer. It minted three of op-dev's five RisingWave hostnames.
+
+Read Route 53, then resolve only confirmed names: `bash scripts/onprem-dns-finish.sh <env>`.
+It is read-only and it cannot commit this error. If you need one name by hand, use
+`dig +short <name> @8.8.8.8` (public, not the corporate recursive) and prove the route with
+`curl --resolve <host>:443:<node-ip>`, which needs no DNS at all.
+
+**3. A deleted route file freezes the whole directory.**
+`infrastructure/risingwave-routes/kustomization.yaml` **enumerates** its resources. Removing
+a file while its line stays fails the kustomize build, so *every* route in the directory
+stops reconciling and holds its last-applied state. The Kustomization reports the error; no
+hostname reports anything.
+
+```bash
+kustomize build infrastructure/risingwave-routes/ \
+  && echo BUILD OK || echo "BLOCKER -- directory will stop applying"
+```
+
+Pair that with a count: `grep -c 'kind: VirtualService'` before and after must differ by
+exactly the number of routes the PR claims to remove, and every keeper must still appear in
+the render.
+
+**4. A resolving name is not a bound listener.** `rw-sql.op-prod` and `rw-postgres.op-prod`
+resolved to prod's nodes for weeks with nothing bound to 4567 — prod had `shared-http` but
+no `tcp-passthrough` until platform #143. A VirtualService naming an absent Gateway serves
+nothing, with no error, no status condition and no event.
+
+```bash
+kubectl --context admin@op-usxpress-<env> -n istio-ingress \
+  get gateways.networking.istio.io \
+  -o custom-columns='NAME:.metadata.name,PORTS:.spec.servers[*].port.number'
+```
+
+Query `gateways.networking.istio.io`, never `gateway` — the bare kind resolves to the
+Gateway API CRD and returns zero rows while Istio Gateways exist.
+
+**Targets are per cluster.** A record must point at **this** cluster's own nodes: dev 7,
+QA 3 (platform only), prod 10. external-dns skips a record another `--txt-owner-id` holds,
+so a copied VirtualService produces exactly nothing, visibly. Mirror the cluster's own
+working route, never another cluster's.
+
 ### Phase 4 — Build the findings table
 
 | # | Item | State | Severity | Notes |
