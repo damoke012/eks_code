@@ -1,6 +1,6 @@
 ---
 name: handing-over-commands
-description: Write a shell command for Doke to paste on WSL — before handing over any runnable block, and when a handed-over command fails for a reason unrelated to the task ("command not found", a truncated paste, a closed shell, "No commits between main and main", a guard that fired on a missing binary). Five measured failure modes, each with the positive form.
+description: Write a shell command for Doke to paste on WSL — before handing over any runnable block, and when a handed-over command fails for a reason unrelated to the task ("command not found", a truncated paste, a shell stranded at a > prompt, a closed shell, "No commits between main and main", a guard that fired on a missing binary or aborted a correct change). Seven measured failure modes, each with the positive form.
 ---
 
 # Handing over commands
