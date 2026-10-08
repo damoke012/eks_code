@@ -259,3 +259,55 @@ not a population, and neither is one naming convention.
    operator out mid-measurement. Guards belong in an `if/else` **inside** a `( … )` subshell.
 8. **A 1500-character line does not survive the paste path into WSL.** It truncated
    mid-quote and hung the shell on a continuation prompt. Short lines; many of them.
+
+---
+
+# QA and prod baseline, 2026-10-08 — the identical defect, measured
+
+Taken after dev was fixed, via each cluster's own platform node
+(`curl --resolve`, so DNS plays no part).
+
+| Host | op-qa (`.23`) | op-prod (`.108`) | op-dev (fixed) |
+|---|---|---|---|
+| `risingwave-dashboard` | `9980ad26…` **Console** | `9980ad26…` **Console** | `cc738d9a…` Dashboard ✅ |
+| `risingwave-overview` | `cc738d9a…` Dashboard | `cc738d9a…` Dashboard | `cc738d9a…` Dashboard |
+| `risingwave-console` | **404** `e3b0c442…` | **404** `e3b0c442…` | `9980ad26…` Console ✅ |
+
+The hashes are **byte-identical to dev's**, so this is one defect in three places, not three
+variants. Same images, same wrong label.
+
+## Two readings worth keeping
+
+**`e3b0c44298fc1c14` is the sha256 of the empty string.** The 404 carries no body — Istio
+rejecting an unmatched host, not an application error page. A hash tells you *which* 404 you
+got.
+
+**`verify=0` on a 404 is the useful signal.** TLS terminated and the chain validated for a
+hostname with **no route at all**, which proves the `*.op-qa` / `*.op-prod` wildcard
+certificate already covers a brand-new console hostname. **QA and prod need a VirtualService
+only — no Certificate and no Gateway edit.** Dev demonstrated this on 2026-10-06 when
+`risingwave-console.op-dev` came up `verify=0` on first contact; it is now confirmed on both
+other clusters, before doing the work rather than after.
+
+## What each of QA and prod needs, in order
+
+Dev had a free ride on step 1 — its console VirtualService already declared three hosts, so
+`/dex/*` was live on the new name before anything moved. **QA and prod do not**, so the
+hostname must exist and serve `/dex` *before* the issuer moves, or there is a real window
+with no working login.
+
+1. `risingwave-console.op-<env>` VirtualService → `risingwave-console:8020`, with this
+   cluster's own platform-node target IPs — `iaac-talos-flux-platform`, branch `op-<env>`.
+   **Confirm it serves the console by hash (`9980ad26…`) before step 2.**
+2. **Add** `https://risingwave-console.op-<env>.usxpress.io/dex/callback` to Entra app reg
+   `e112d6ce`. Additive; the list reaches 6 before the old three come out.
+3. The three config values in `manifests/op-usxpress-<env>/risingwave-console.yaml` —
+   `issuer`, connector `redirectURI`, `RCONSOLE_SSO_DEX_ISSUERURL`. Scope the diff to that
+   directory; a merge to `main` reaches every cluster.
+4. Read the console's startup log for `SSO self-registered OIDC client … redirect_uri` —
+   **before** a browser. Then a human signs in.
+5. Repoint `virtualservice-dashboard.yaml` → `risingwave-meta.risingwave.svc.cluster.local:5691`.
+6. Pass: dashboard hash flips to `cc738d9a…`, console stays `9980ad26…`, human signs in again.
+
+**Promotion order: QA next, prod last** ([[promotion-order-qa2-dev-qa-prod]]). Prod has real
+users on those URLs, and `iaac-risingwave-onprem` has no gate — merging is deploying.
