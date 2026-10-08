@@ -161,6 +161,60 @@ QA 3 (platform only), prod 10. external-dns skips a record another `--txt-owner-
 so a copied VirtualService produces exactly nothing, visibly. Mirror the cluster's own
 working route, never another cluster's.
 
+### Phase 3c — The secrets gate (any PR touching an ExternalSecret, `000-secrets.rw`, or a credential path)
+
+Four failures live here. Every one reported green or absent, and three of them cost weeks.
+
+**1. ESO writes a PARTIAL Secret.** A missing property does not block the others.
+`SecretSyncedError` is set, the Secret looks populated, and the pod dies at **container
+creation** with `RESTARTS 0` — invisible to restart alerts. QA sat wedged seven days this
+way on `entity-postgres`, which had never been created at all.
+
+```bash
+# COUNT the keys. The condition is not the check.
+kubectl --context admin@op-usxpress-<env> -n <ns> get secret <name> \
+  -o jsonpath='{range $k,$v := .data}{$k}{"\n"}{end}' | sort | nl
+# how many did the manifest ask for?
+grep -c 'secretKey:' <path>/externalsecret.yaml
+```
+
+The two numbers must match. A mismatch is a **BLOCKER**, whatever the condition says.
+
+**2. An empty string reads as configured.** QA's three `schema_registry_*` properties
+existed and were empty for weeks; `CREATE SECRET` made empty secrets and the failure
+surfaced at Avro decode time, nowhere near the cause. Check lengths, never values:
+
+```bash
+aws secretsmanager get-secret-value --profile <env-profile> \
+  --secret-id op-usxpress-<env>/risingwave/kafka --query SecretString --output text \
+  | python3 -c 'import json,sys; [print(f"{k:42} {len(v)}") for k,v in sorted(json.load(sys.stdin).items())]'
+```
+
+Any `0` is a BLOCKER. This prints lengths only — never the value.
+
+**3. A placeholder that satisfies the validator is worse than a blank.**
+`KAFKA_SCHEMA_REGISTRY_MESSAGE: unknown` passes `apply.sh`'s non-empty check and then fails
+inside RisingWave; `console_license_key` held `PLACEHOLDER_INJECT_REAL_LICENSE` while its
+ExternalSecret reported `SecretSynced=True` in four minutes. Grep the diff for
+`unknown`, `PLACEHOLDER`, `TBD`, `changeme`, `xxx` — and assert the *shape* the consumer
+needs (a licence is a compact JWT: three dot-separated parts, `eyJ` prefix).
+
+**4. Property casing differs between environments.** Dev's keys are `KAFKA__…`, QA's are
+`kafka__…`. Code that reads one casing gets **nothing** from the other, silently. Any PR that
+copies a credential path to a new environment must be checked against that account's actual
+key names, not against the sibling's.
+
+**Two more that are not about the diff:**
+
+- **`secret_store_private_key` is load-bearing.** It decrypts every `backend='meta'` secret.
+  If a Terraform run regenerates it, all twelve `kafka_*` secrets become unreadable and the
+  symptom presents as bad Kafka credentials. Confirm `ignore_changes` before approving
+  anything that touches `secrets.tf`.
+- **A value change does not reach a running pod.** `secretKeyRef` resolves at pod creation, so
+  the pod must be **deleted**, not restarted. For flow-C secrets, re-run the workflow and
+  re-list: `SELECT name FROM rw_catalog.rw_secrets;` — 12 rows, listed, not inferred from an
+  exit code.
+
 ### Phase 4 — Build the findings table
 
 | # | Item | State | Severity | Notes |

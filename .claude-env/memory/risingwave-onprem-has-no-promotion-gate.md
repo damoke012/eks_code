@@ -41,3 +41,19 @@ the database.
 too. To fix the gate, pin each cluster to `ref: { tag: ... }` (the repo already tags v0.5.6/v0.5/v0)
 and promote by moving the tag per environment; dev can stay on `branch: main`. That is one line
 per cluster in `iaac-talos-flux-cluster` and needs no restructuring.
+
+## 2026-10-08 — "master is the source of truth" is TRUE for one repo and FALSE for this one
+
+Said on a call, unqualified, to the application owner: *"Master is the source of truth. You
+push to master, then you create a promotion from master to QA."*
+
+That describes **`risingwave-pipeline`**, which really does promote by digest per environment.
+It is wrong about **`iaac-risingwave-onprem`**, where all three clusters track `branch: main`
+at 5m and a merge reaches prod unreviewed in about five minutes.
+
+**How to apply:** never state a branch model without naming the repo. The two sit one sentence
+apart in the same conversation, and the person acting on it owns the pipeline, not the
+platform — so the version they remember is the permissive one. Same shape as the Octopus/GitHub
+pair in that call: RisingWave's Terraform still deploys through Octopus with the `TfApply` gate
+while the pipeline deploys through GitHub, and "just replace Octopus with GitHub" reads as
+universal.
