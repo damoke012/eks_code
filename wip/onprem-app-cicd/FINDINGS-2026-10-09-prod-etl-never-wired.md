@@ -31,6 +31,30 @@ for dev and QA — while being wrong in six ways. **Matching a broken source is 
 test.** The equivalence check is only as good as the thing it compares against, which is why
 dev's values were generated from the live cluster and not from its overlay.
 
+## ⛔ FINDING 5 RESOLVED 2026-10-09 — it is DRIFT, not a different install
+
+Read prod directly. `kubectl -n risingwave get svc` returns **`pg-postgresql`** and no
+`postgres-postgresql` at all; the StatefulSet is `pg-postgresql` too. So prod's overlay points
+`PG_HOST` at a service that does not exist, and `PG_DB=postgres` is equally unverified.
+
+**Consequence:** prod's overlay cannot ever have run successfully. It is not evidence of a
+different topology — it is a copy that was never corrected, and it would have failed at the
+first connection. Prod's values must use `pg-postgresql` and `PG_DB=risingwave`, same as dev
+and QA.
+
+Also measured, with counts rather than presence so zero is distinguishable from unreadable:
+
+    ns/argocd           EXISTS      Applications: 0    ApplicationSets: 0
+    ns/app-risingwave   EXISTS      objects: 0
+
+and prod's RisingWave is fully healthy — pg-postgresql, risingwave-meta-default,
+risingwave-compute-default, risingwave-compactor-default, risingwave-frontend-default,
+risingwave-console, risingwave-operator, ghostunnel-rw-postgres, ghostunnel-rw-sql.
+
+**So the platform is complete and only the application was never delivered.** One of the two
+decisions this document asked for is now answered by measurement. The other — smoke payload
+or real pipelines for prod's first run — still needs a human.
+
 ## What prod actually needs, in order
 
 1. Confirm prod's Postgres: release name, database, and whether the ETL is meant to reach it
