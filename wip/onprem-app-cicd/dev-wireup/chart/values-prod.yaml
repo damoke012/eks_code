@@ -1,0 +1,81 @@
+# op-usxpress-prod - RUN 1 IS A SMOKE RUN. Not the Brand pipeline.
+#
+# Prod's ETL has never been delivered: 0 Applications, 0 ApplicationSets and 0
+# objects in app-risingwave, measured 2026-10-09, while RisingWave itself is
+# fully healthy. So this is a first wire-up, not a conversion, and run 1 proves
+# the path the way dev's did - image pull, Kyverno admission, ESO secrets, a
+# writable /tmp, and in-cluster reach to RisingWave and Postgres.
+#
+# The old deploy/overlays/prod is NOT the basis for this file. It pointed
+# PG_HOST at postgres-postgresql, a service that does not exist on prod
+# (`kubectl -n risingwave get svc` returns pg-postgresql only), carried a
+# 64-zero placeholder digest, and had no image-digest ConfigMap at all. It
+# cannot ever have run.
+environment: prod
+
+image:
+  # The digest QA IS RUNNING. Prod must never be the first consumer of an
+  # untested image. Re-check this against QA before merging - promote-to-qa
+  # moves it every 10 minutes.
+  digest: sha256:287818cc203a101de9532260eeafcc73ec6a7e5771ab32a111c50059b7cdde7d
+
+config:
+  # ── RUN 1: smoke only ──
+  PIPELINE_DIR: /pipeline/smoke
+
+  EXCLUDE_RE: '(^|/)(Template|employee|secret_manager|shared)(/|$)|^pipelines/Brand/(300-transform\.sql|400-sink\.rw)$'
+
+  RW_HOST: risingwave-frontend.risingwave.svc.cluster.local
+  RW_PORT: "4567"
+  RW_DB:   dev
+  RW_USER: root
+
+  # CORRECTED from the old overlay, which named postgres-postgresql. The
+  # service on prod is pg-postgresql, same as dev and QA.
+  PG_HOST: pg-postgresql.risingwave.svc.cluster.local
+  PG_PORT: "5432"
+  # dev and QA both use `risingwave`; prod's old overlay said `postgres`, which
+  # is unverified and sat beside a hostname that does not exist. Set to the
+  # evidenced convention. A wrong database name fails LOUDLY at connect time,
+  # which is exactly what a smoke run is for.
+  PG_DB:   risingwave
+
+  POSTGRES_SERVER:     ""
+  POSTGRES_ENTITY_DB:  ""
+  POSTGRES_PORT:       "5432"
+
+  KAFKA_STARTUP_MODE: earliest
+
+  # ⛔ DELIBERATELY NOT REAL VALUES.
+  #
+  # apply.sh validates EVERY runtime value before applying EXCLUDE_RE, so these
+  # keys must be present and non-blank even though a smoke run never reads
+  # Kafka. They are NOT guesses dressed as answers:
+  #
+  #   topics/brand_management.yml renders as <prefix>brand_management_cdc_brand_avro
+  #   and `confluent_prefix` is a Terraform variable set per deployment, not in
+  #   the repo. dev is `dev_`, QA is `qa_`, prod's is set in Octopus and unknown
+  #   here. A plausible-looking wrong topic passes every check in the path and
+  #   then fails inside RisingWave at decode time - that is how `abc123` and
+  #   `message_name` survived into QA.
+  #
+  # The chart REFUSES to render if PIPELINE_DIR stops pointing at smoke while
+  # any UNVERIFIED_ marker remains, so this cannot be forgotten.
+  KAFKA_TOPIC_BRAND: UNVERIFIED_SET_BEFORE_RUN_2
+  KAFKA_SCHEMA_REGISTRY_MESSAGE: UNVERIFIED_SET_BEFORE_RUN_2
+
+# op-usxpress-prod/... is built by etl.prefix from `environment`, so these
+# paths cannot be copied wrong between environments.
+externalSecret:
+  refreshInterval: 1h
+  secretStore: default
+  data:
+    - secretKey: RW_PASSWORD
+      path: risingwave/root
+      property: password
+    - secretKey: PG_PASSWORD
+      path: risingwave/postgres
+      property: password
+    - secretKey: PG_USER
+      path: risingwave/postgres
+      property: username
