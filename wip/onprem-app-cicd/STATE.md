@@ -325,3 +325,76 @@ now a tidy-up rather than a blocker — but until it merges, a PVC rebuild loses
 | Mongo sinks (`400-sink.rw`, `999-downstream_sinks.rw`) | dev holds `mongodb+srv://…mongodb.net/` with **no port**; his SQL builds `mongodb://user:pass@host:port`. A change in HIS repo, not config |
 | All six drift rows above | Terraform, with `import` where the object already exists |
 | QA and prod | untouched and still on `etl-pipeline`; nothing here was promoted |
+
+## 2026-10-09 night — the promotion chain exists and is verified inert
+
+`promote.yml` + `apps.json` merged as **PR #89**. One digest moves ECR -> dev -> QA -> prod
+and nothing is rebuilt between environments.
+
+| Environment | Source | Merge |
+|---|---|---|
+| dev | newest digest in the app's ECR repository | automatic |
+| qa | the digest `values-dev.yaml` already runs | automatic |
+| prod | the digest `values-qa.yaml` already runs | **human** |
+
+Each environment's source is the one before it, so **QA can only receive something dev has
+actually run**. The old `promote-to-qa.yml` went straight from ECR to QA with dev never
+seeing the image; it is left in place and untouched, because retiring it while dev points at
+`poc-pipeline` would stop QA receiving `etl-pipeline` images. That retirement waits for a
+real dev -> QA promotion through the new path.
+
+### Verified by dispatch, run 37991163723
+```
+risingwave-etl/dev:  already on sha256:ac2b1e958e9b (from ECR risingwave/poc-pipeline)
+risingwave-etl/qa:   not in the promote list, skipping
+risingwave-etl/prod: not in the promote list, skipping
+```
+The dev line proves the role reads `poc-pipeline`, `apps.json` parses, the values file
+resolves and the repository guard passes. The qa and prod lines prove the **safety gate**:
+`apps.json`'s `promote` list is `["dev"]`, so merging this could not touch QA or prod.
+
+⚠️ **The sed-and-PR half is still untested.** Dev is already on the newest digest, so the
+workflow has only ever taken the no-op path. Its first real exercise is Tim's next push, and
+that is the right first test rather than a synthetic one.
+
+### Guards in the workflow, and why each exists
+| Guard | Failure it prevents |
+|---|---|
+| target values file must already `repository:` the app's own ECR repo | a digest from one repo written into a file pointing at another — the pod then cannot pull something that genuinely does not exist |
+| `grep` the digest back after the `sed` | a silent sed miss reporting success and changing nothing |
+| `promote` list in `apps.json`, not in the workflow | a new environment going live on a merge nobody read as a deploy |
+| job-level `if` on `workflow_run.conclusion` | a failed build promoting anything |
+| prod opens a PR and does not merge | production moving without a person |
+
+### No new identity
+Reuses `gha-risingwave-etl-ecr-push`, whose trust already covers this repo on `master`. Its
+inline `ecr-push` policy was extended to list `risingwave/poc-pipeline` beside
+`risingwave/etl-pipeline` — **drift, same list as the ECR repository policy.**
+
+### ⚠️ Found while testing
+Merging #89 triggered a **`deploy`** run, because `apps.json` and `.github/workflows/**` are
+not in `deploy.yml`'s `paths-ignore`. Every workflow edit therefore rebuilds the
+`etl-pipeline` image and then fires `promote` through `workflow_run`. Harmless but wasteful;
+two lines fix it, to be folded in with the stale `POSTGRES_SERVER` comment.
+
+## 2026-10-09 night — the Mongo question is answered
+
+**`mongodb+srv` works.** `CREATE SINK` with the Atlas SRV string succeeded on dev
+(RisingWave 2.8.2), the sink appeared, `rw_ddl_progress` stayed empty and the compute log
+logged nothing. The documentation never mentions SRV, so this had to be measured.
+
+⚠️ `getent hosts <cluster>.mongodb.net` returning nothing is **expected** — an SRV-only name
+has no A record and `getent` cannot query SRV. That is not a DNS failure.
+
+**So the Mongo fix is one line in HIS repo**, in `400-sink.rw` and `999-downstream_sinks.rw`:
+
+    mongodb.url = '%MONGODB_CONNECTION_STRING%'
+
+replacing `mongodb://%MONGODB_USERNAME%:%MONGODB_PASSWORD%@%MONGODB_HOST%:%MONGODB_PORT%/`,
+because an SRV string has no port to supply. Our side is then one `externalSecret.data`
+entry for `MONGODB_CONNECTION_STRING` and dropping the two files from `EXCLUDE_RE`.
+
+Also learned: a sink from any MV with `type='append-only'` fails until
+`force_append_only='true'` is set, because an MV is a retract stream — and that option drops
+DELETEs and converts UPDATEs to INSERTs, so it is a data decision, not a syntax fix.
+Detail in [[risingwave-mongodb-sink-facts]].
