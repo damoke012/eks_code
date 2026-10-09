@@ -71,9 +71,19 @@ build tags by commit SHA, dispatching the same ref fails at the push step with `
 assume and the ECR login have all passed, so it reads like a permissions regression and is not
 one. The consequence that bites: **moving a base image's tag can never reach an unchanged
 source commit.** Publishing a fixed `…/sql-applier:latest` changes nothing for a consumer whose
-`FROM` resolves it at build time, because there is no new build to run. Finish that rollout with
-a commit in the consuming repo — `git commit --allow-empty` is enough — and treat
-"merge, republish the base" as two thirds of a rollout ([[immutable-tag-blocks-base-image-rebuild]]).
+`FROM` resolves it at build time, because there is no new build to run. Treat
+"merge, republish the base" as two thirds of a rollout; the third part is a new commit in the
+consuming repo, and **both halves are needed**:
+
+```
+git commit --allow-empty -m "chore: rebuild on <the fixed base>" && git push origin master
+gh workflow run <build workflow> --repo <org>/<repo> --ref master
+```
+
+The commit frees the immutable tag; the dispatch is what actually builds, because a build
+filtered on `paths:` ignores a commit that changes no files and creates **no run at all** —
+indistinguishable from a build that has not started. Check that a run exists for the new SHA
+before concluding anything about it ([[immutable-tag-blocks-base-image-rebuild]]).
 
 ### 4. Can the cluster pull it?
 
