@@ -87,7 +87,49 @@ drifted from live in five places).
 2026-10-08 note records QA's live ConfigMap deliberately reading **dev's** topic. If live
 disagrees, live wins and the topic change is a separate decision with Tim.
 
-## Prod — not a conversion
+## Prod — THREE PRs RAISED, NONE MERGED (2026-10-09)
+
+Prod was never wired. Measured: 0 Applications, 0 ApplicationSets, 0 objects in
+`app-risingwave`, while RisingWave itself is fully healthy and the Argo repo credential
+already exists and syncs. So this is a first wire-up, not a conversion.
+
+**Merge in this order. The third one turns prod on.**
+
+| # | PR | What | Inert? |
+|---|---|---|---|
+| 1 | risingwave-pipeline **#84** | `values-prod.yaml` + the `UNVERIFIED_` render guard | yes |
+| 2 | iaac-talos-flux-platform **#175** | `argocd-apps` ApplicationSet on `op-prod` | yes |
+| 3 | iaac-talos-flux-cluster **#42** | `argocd-apps` Flux Kustomization | **NO — this is the live one** |
+
+When #42 reconciles, prod gets its first Argo Application, four objects appear in
+`app-risingwave`, and a Sync hook runs `apply.sh` against production RisingWave.
+
+**Run 1 is a SMOKE run** (`PIPELINE_DIR=/pipeline/smoke`), decided deliberately. It proves
+image pull, Kyverno admission, ESO secrets, a writable `/tmp` and in-cluster reach — without
+executing Brand DDL, which opens with `DROP SOURCE IF EXISTS kafka_brand CASCADE`.
+
+### Two things prod's values do differently, both deliberate
+
+**`PG_HOST` corrected to `pg-postgresql`.** The old overlay named `postgres-postgresql`,
+which does not exist on prod — so that overlay can never have run. Finding 5 was drift, not
+a second install.
+
+**Two Kafka keys are `UNVERIFIED_SET_BEFORE_RUN_2` markers.** `apply.sh` validates every
+runtime value before applying `EXCLUDE_RE`, so the keys must be non-blank even for smoke.
+Prod's real topic is genuinely unknown: topics render as
+`<prefix>brand_management_cdc_brand_avro` and `confluent_prefix` is a per-deployment
+Terraform variable absent from the repo (dev `dev_`, QA `qa_`, prod set in Octopus). A
+plausible-looking wrong topic passes every check and fails at Avro decode —
+[[validator-checks-every-value-not-the-selected-ones]]. **The chart now refuses to render if
+`PIPELINE_DIR` leaves smoke while any marker remains**, four-way tested and output-neutral
+for dev and QA.
+
+### Before merging #84
+
+Re-check the digest against what QA runs. There is **no promote-to-prod automation**;
+prod's digest is pinned by hand, and `promote-to-qa` moves QA's every 10 minutes.
+
+## Prod — earlier findings
 
 Never wired. Six findings in `FINDINGS-2026-10-09-prod-etl-never-wired.md`: no `argocd-apps`
 on `op-prod`, 3 objects not 4, a 64-zero placeholder digest, `PIPELINE_DIR=/pipeline/smoke`,
