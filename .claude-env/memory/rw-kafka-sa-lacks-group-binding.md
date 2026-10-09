@@ -25,3 +25,29 @@ empty topic. It is an authorization gap, not a bad credential — do not rotate 
 onto the managed account — that account holds `CloudClusterAdmin`, so an ETL consumer would
 gain the right to delete topics. Least privilege beats tidiness here.
 Related: [[ccloud-registry-master-per-account]], [[rw-database-is-named-dev-everywhere]].
+
+## ✅ RESOLVED 2026-10-09 — the grant landed and mv_brand is building
+
+`ix-kafka-topics-users` **#303 merged** (approvals: jenni-ray, jshaw-usx). Jeff Shaw deployed
+it to dev **before** merging, because that deploy is a required check on the PR
+([[octopus-deploy-can-gate-the-pr]]).
+
+Measured on op-dev at 16:40Z, through a port-forward to risingwave-frontend:
+
+    sources:   2
+    mviews:    7
+    mv_brand:  9
+
+And the applier that used to die on `CREATE MATERIALIZED VIEW mv_brand` now exits clean:
+
+    Job/etl-pipeline-apply  hookType=Sync  hookPhase=Succeeded
+    phase=Succeeded  start=16:36:10Z  end=16:36:24Z
+
+**The whole diagnosis held.** The service account could read the topics and not join a
+consumer group; the empty MV was authorisation, never a bad key, never the SQL. What cost the
+time was not the diagnosis but reading the grant: the YAML says `prefix: risingwave` and the
+module renders `dx__<env>_risingwave`, so I called the fix broken twice before reading the
+Terraform ([[declared-grant-is-not-the-literal-acl]]).
+
+**QA is NOT fixed.** Separate deployment of the same module, separate service account. QA's
+grant does not exist until someone deploys that repo to QA — nothing gated it, so nobody did.

@@ -10,7 +10,24 @@
 | risingwave-pipeline | **#78** | `values-qa.yaml` (inert) | 🟡 open |
 | ix-kafka-topics-users | **#303** | consumer-group grant | ✅ merged 2026-10-09 (jenni-ray + jshaw-usx); **dev deployed, QA NOT** |
 
-## Dev — done
+## Dev — DONE AND PROVEN END TO END (2026-10-09 16:36Z)
+
+A real change travelled the Helm path and the pipeline produces rows:
+
+| layer | evidence |
+|---|---|
+| chart change -> Argo | synced to `503a1997`, 16:36:10 -> 16:36:24 |
+| hook Job from the CHART's template | `Job/etl-pipeline-apply hookType=Sync hookPhase=Succeeded` |
+| change reached the cluster | ExternalSecret `refreshInterval: 55m` |
+| `apply.sh` | clean exit |
+| **Kafka** | **`mv_brand` = 9 rows** |
+
+The trigger was a deliberate one-line `refreshInterval` nudge in `values-dev.yaml`. It also
+exposed that `deploy.yml`'s `paths-ignore` lists `deploy/overlays/**` but not
+`deploy/chart/**`, so a values-only change rebuilds the image and cascades into a
+`promote-to-qa` run. One-line fix, outstanding.
+
+## Dev — earlier notes
 
 `risingwave-etl` on op-dev sources `deploy/chart` with `values-dev.yaml`. Verified at every
 layer: GitRepository `797a56c5` → Kustomization applied `797a56c5` → ApplicationSet carries
