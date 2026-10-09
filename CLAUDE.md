@@ -58,6 +58,7 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
 | `entra-authz-claims` | an Entra login succeeds and the user has **no permissions** — empty Argo UI, "SSO is broken" |
 | `azure-oidc-federation` | `AADSTS700213`, a workflow failing `azure/login` on a new branch |
 | `dx-apply-triage` | a DX-Apply step fails, `no space left on device`, a deploy that stopped partway |
+| `onprem-app-wireup` | an app's image must reach an on-prem Argo CD env, or one that "deployed" shows no data — 403 on an ECR manifest HEAD, a green hook with empty tables |
 
 ## The learning loop
 
