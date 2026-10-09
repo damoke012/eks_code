@@ -1,0 +1,175 @@
+{{- if .Values.bootstrap.enabled }}
+# Creates the application database this pipeline's SQL expects to find.
+#
+# Dev's `entities` database, the `rw_entity_app` role, the `employee` schema and
+# the `rw_employee_pub` publication were created BY HAND on 2026-10-09 to unblock
+# Tim. This template is that work expressed as code, so the next environment does
+# not need a human with a psql prompt.
+#
+# OFF by default. Only an environment whose values file sets bootstrap.enabled
+# gets it -- see values.yaml. A new behaviour that defaults ON is how a working
+# environment gets broken by a merge in a repo where every environment shares one
+# branch.
+#
+# Why a Sync hook at wave 0 and not PreSync: PreSync runs BEFORE the Sync phase,
+# so etl-pipeline-credentials (written by ESO) and etl-pipeline-endpoints do not
+# exist yet on a FIRST install -- exactly the case this template is for. Argo
+# orders ConfigMaps and Secrets ahead of workloads within a wave, so wave 0 gets
+# the credential; etl-pipeline-apply moves to wave 1 so it cannot start until this
+# has succeeded.
+#
+# Coordinates come from .Values, NOT from envFrom the endpoints ConfigMap, so this
+# Job has no dependency on another resource in the same sync.
+#
+# Every statement is idempotent and the whole thing is a no-op on an environment
+# that already has the objects. It NEVER drops anything: a bootstrap that can
+# delete is a bootstrap that will.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-pipeline-bootstrap-db
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  # 3, not 1: on a brand-new environment ESO may take a few seconds to write
+  # etl-pipeline-credentials, and a retry is cheaper than a failed sync.
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: etl-pipeline-bootstrap-db
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: bootstrap
+          # The applier image, deliberately. It already carries psql, it is in an
+          # approved registry and it is digest-pinned -- Kyverno on these clusters
+          # refuses an unapproved registry AND an unpinned tag at admission, so
+          # postgres:16-alpine from Docker Hub would not be admitted here. The
+          # rw-bootstrap-* Jobs get away with it only because they live in the
+          # risingwave namespace, under different policy.
+          image: {{ .Values.image.repository }}@{{ required "image.digest is required" .Values.image.digest }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: {{ .Values.readOnlyRootFilesystem }}
+            capabilities: { drop: ["ALL"] }
+          {{- if .Values.readOnlyRootFilesystem }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: PGHOST
+              value: {{ required "bootstrap needs config.POSTGRES_HOST_NAME" .Values.config.POSTGRES_HOST_NAME | quote }}
+            - name: PGPORT
+              value: {{ .Values.config.POSTGRES_INTERNAL_PORT | default "5432" | quote }}
+            - name: BOOTSTRAP_DB
+              value: {{ required "bootstrap.database is required" .Values.bootstrap.database | quote }}
+            - name: BOOTSTRAP_ROLE
+              value: {{ required "bootstrap.role is required" .Values.bootstrap.role | quote }}
+            - name: BOOTSTRAP_SCHEMAS
+              value: {{ join " " .Values.bootstrap.schemas | quote }}
+            - name: BOOTSTRAP_PUBLICATION
+              value: {{ .Values.bootstrap.publication | default "" | quote }}
+            # Creating a database, a REPLICATION role and a publication FOR ALL
+            # TABLES each need superuser, so these are the admin credentials, not
+            # the application's.
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: etl-pipeline-credentials
+                  key: {{ .Values.bootstrap.adminUserKey }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: etl-pipeline-credentials
+                  key: {{ .Values.bootstrap.adminPasswordKey }}
+            # The password the owning role is created WITH. It must also appear in
+            # externalSecret.data, or this key will not exist in the Secret.
+            - name: ROLE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: etl-pipeline-credentials
+                  key: {{ .Values.bootstrap.passwordKey }}
+            {{- if .Values.readOnlyRootFilesystem }}
+            - name: TMPDIR
+              value: /tmp
+            {{- end }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+
+              # Every statement arrives on STDIN, never as `psql -c`. Two reasons:
+              # psql does not interpolate :'var' from -c (it is a literal), and an
+              # argv never carries the password into the process table.
+              psql_db() { psql -v ON_ERROR_STOP=1 -q -d "$1"; }
+              exists()  { psql -v ON_ERROR_STOP=1 -t -A -d "$1" -c "$2"; }
+
+              echo "bootstrap: host=${PGHOST} db=${BOOTSTRAP_DB} role=${BOOTSTRAP_ROLE}"
+
+              # ---- the owning role -------------------------------------------
+              if [ "$(exists postgres "select 1 from pg_roles where rolname = '${BOOTSTRAP_ROLE}'")" = "1" ]; then
+                echo "  role ${BOOTSTRAP_ROLE} exists, leaving its password alone"
+              else
+                echo "  creating role ${BOOTSTRAP_ROLE}"
+                printf "CREATE ROLE %s LOGIN REPLICATION PASSWORD '%s';\n" \
+                  "$BOOTSTRAP_ROLE" "$ROLE_PASSWORD" | psql_db postgres
+              fi
+
+              # ---- the database ----------------------------------------------
+              # CREATE DATABASE cannot run inside a transaction or a DO block, so
+              # it is guarded by a lookup rather than IF NOT EXISTS.
+              if [ "$(exists postgres "select 1 from pg_database where datname = '${BOOTSTRAP_DB}'")" = "1" ]; then
+                echo "  database ${BOOTSTRAP_DB} exists"
+              else
+                echo "  creating database ${BOOTSTRAP_DB}"
+                printf "CREATE DATABASE %s OWNER %s;\n" \
+                  "$BOOTSTRAP_DB" "$BOOTSTRAP_ROLE" | psql_db postgres
+              fi
+
+              # ---- schemas ---------------------------------------------------
+              # PostgreSQL 15 stopped granting CREATE on public, so the pipeline's
+              # own schemas are granted explicitly. public is left as it is.
+              for S in $BOOTSTRAP_SCHEMAS; do
+                echo "  schema ${S}"
+                printf "CREATE SCHEMA IF NOT EXISTS %s AUTHORIZATION %s;\nGRANT USAGE, CREATE ON SCHEMA %s TO %s;\n" \
+                  "$S" "$BOOTSTRAP_ROLE" "$S" "$BOOTSTRAP_ROLE" | psql_db "$BOOTSTRAP_DB"
+              done
+
+              # ---- the CDC publication ---------------------------------------
+              if [ -n "$BOOTSTRAP_PUBLICATION" ]; then
+                if [ "$(exists "$BOOTSTRAP_DB" "select 1 from pg_publication where pubname = '${BOOTSTRAP_PUBLICATION}'")" = "1" ]; then
+                  echo "  publication ${BOOTSTRAP_PUBLICATION} exists"
+                else
+                  echo "  creating publication ${BOOTSTRAP_PUBLICATION}"
+                  printf "CREATE PUBLICATION %s FOR ALL TABLES;\n" \
+                    "$BOOTSTRAP_PUBLICATION" | psql_db "$BOOTSTRAP_DB"
+                fi
+              fi
+
+              # ---- what the next reader actually wants to know ---------------
+              # wal_level is NOT set here. It is a server setting that needs a
+              # restart, so it belongs to the Postgres chart --
+              # iaac-risingwave-onprem's postgres-helmrelease.yaml carries it.
+              # Printed because a logical-less server makes the CDC source fail
+              # LATER, somewhere that looks unrelated.
+              echo "bootstrap: done"
+              printf "show wal_level;\n" | psql -v ON_ERROR_STOP=1 -t -A -d "$BOOTSTRAP_DB"
+      {{- if .Values.readOnlyRootFilesystem }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- end }}
+{{- end }}
