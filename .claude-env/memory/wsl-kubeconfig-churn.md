@@ -132,3 +132,39 @@ The context names are not the cluster names:
 `scripts/onprem-prod-kubeconfig.sh ops-controller` rebuilt prod cleanly — 13 nodes,
 3 control plane + 10 workers. Set `KUBECONFIG` to the single file and pass `--context`;
 do not rely on a merged `~/.kube/config`.
+
+## 2026-10-09 — WSL resolves corp names it cannot reach, and that reads as "cluster down"
+
+Both on-prem control planes timed out all morning while AWS SSO and `gh` worked perfectly.
+Diagnosed as a cluster or QA problem twice before measuring properly. It was neither.
+
+    ip route    -> default via 172.27.240.1 dev eth0   (NAT, no tunnel interface)
+    ip -brief addr -> eth0 172.27.248.61/20 only
+    /etc/resolv.conf -> nameserver 10.255.255.254, search usxpress.com
+    getent hosts argocd.op-dev.usxpress.io -> 10.10.82.28     RESOLVES
+    nc -z 10.10.82.50 6443                 -> no route        UNREACHABLE
+
+**WSL2 in default NAT mode has its own network namespace and does not inherit the Windows
+VPN adapter's routes.** DNS still works, because WSL forwards queries to the Windows
+resolver — so corp hostnames resolve to private addresses that WSL then cannot reach. The
+split between a working name and a dead packet is the whole tell.
+
+**Why it looks like the cluster:** every internet-facing tool keeps working (`gh`,
+`aws sso`, `aws sts`), so the session feels healthy and only the clusters appear dead. On
+2026-10-08 op-dev was reachable at 23:20Z and unreachable at 09:00Z the next morning with
+nothing changed on the cluster — the VPN had reconnected after WSL was already running.
+
+**Discriminate in one line before blaming anything:** `nc -z -w 4 <cp-ip> 6443` against a
+cluster KNOWN to be healthy. Both dev and QA failing together is a route problem; one
+failing alone is a cluster problem. [[transport-failure-not-a-verdict]].
+
+**Fix, least disruptive first (run in PowerShell, not WSL):**
+
+1. `wsl --shutdown`, reopen the terminal. WSL re-reads the host's routes at boot, which is
+   usually enough when the VPN connected after WSL started.
+2. If not, `%USERPROFILE%\.wslconfig` with `[wsl2]` / `networkingMode=mirrored`, then
+   `wsl --shutdown`. WSL shares the Windows network stack and VPN routes apply directly.
+   Windows 11 22H2+.
+
+**Do not** re-run the same kubectl and hope; and do not report `i/o timeout` to a cluster IP
+as a finding about that cluster.
