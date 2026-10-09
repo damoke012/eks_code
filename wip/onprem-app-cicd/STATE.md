@@ -162,3 +162,81 @@ merge, so nothing has been measured at the cluster.
 QA produces Brand rows regardless of how they are delivered. `CREATE SOURCE` works,
 `SELECT … LIMIT 1` works (batch scans use no consumer group), `CREATE MATERIALIZED VIEW`
 fails.
+
+## 2026-10-09 evening — Tim's own repo deploys to op-dev, PROVEN
+
+**The cross-org path asked for on 2026-10-07 is delivered.** Tim pushes to `master` in
+`usxpressinc/risingwave-poc`; the published reusable workflow
+`variant-inc/iaac-risingwave-cicd@v1` builds and pushes `risingwave/poc-pipeline`; op-dev's
+chart pulls that digest and Argo's sync hook applies his SQL. No secrets in his repo, no
+access to ours, no cross-org token.
+
+| Step | Evidence |
+|---|---|
+| his build | run 37979835910, `build-sql-image`, all 11 steps success |
+| image in ECR | `poc-pipeline@sha256:ac2b1e95…`, pushed 15:23:29, 6,650,344 bytes |
+| dev pulls it | ConfigMap `etl-pipeline-image` = `ac2b1e95…` |
+| secret complete | `etl-pipeline-credentials` has **10** keys, no partial write |
+| scope applied | ConfigMap `PIPELINE_DIR=/pipeline/pipelines/100-Brand` |
+| hook ran | `Job/etl-pipeline-apply Sync Succeeded` on revision `ffcca48c` |
+| **his SQL is live** | `brand_source_kafka`, `brand_mv_flat/raw/state` in dev's catalog |
+| data | `brand_mv_state` = 3 rows |
+
+### PRs merged tonight
+| # | What |
+|---|---|
+| **85** | dev's `image.repository` → `risingwave/poc-pipeline`, digest `ac2b1e95` |
+| **86** | 7 Kafka properties into dev's ExternalSecret, 2 constants, `PIPELINE_DIR` scoped |
+
+### The four blockers, in the order they fired
+1. **403 on the manifest HEAD** — `poc-pipeline` had no ECR repository policy;
+   `etl-pipeline` carries `OnPremClustersPullOnly`. Granted dev's account only.
+2. **27 missing runtime values** — `apply.sh` validates every variable in every discovered
+   file *before* applying `EXCLUDE_RE`. Narrowing `PIPELINE_DIR` was the lever; widening
+   `EXCLUDE_RE` could not have worked.
+3. **No Kafka credentials in dev at all** — the ConfigMap had the topic and the Avro subject
+   but no bootstrap server, SASL or schema-registry values. All seven live in
+   `op-usxpress-dev/risingwave/kafka`.
+4. **A wedged failed hook** — the Application sat on `8dc20f6` reporting
+   `phase=Failed` with the previous run's message. A `refresh=hard` annotation moved it.
+
+### Proven
+- Tim's repo → ECR → op-dev, end to end, verified by a RENAMED object and not by a row count.
+- `apply.sh` can create a Kafka-connected source. **This had never been shown.** Dev's older
+  Brand sources came from the `pipeline.yaml` psql path, which takes its environment from
+  GitHub secrets — the chart path had only ever run the smoke payload.
+- The chart generating the Job's env from `externalSecret.data` held up: seven keys added in
+  one place, no second list to drift.
+
+### Tested and killed
+- *"The pull secret is seven weeks stale and every prior pull was a cache hit."* False —
+  `cronjob/ecr-credentials-sync` runs `0 */6 * * *`. A Secret's `creationTimestamp` is not
+  the age of its data.
+- *"`EXCLUDE_RE` blocks `employee`, so Tim's tree is filtered out."* False — his directory is
+  `300-Employee`, capital E; the lowercase pattern never matched it.
+- *"`mv_brand` = 9 proves the apply worked."* It proves nothing: 9 and 3 were already
+  recorded on 2026-08-28 and his drop-and-recreate rebuilds to the same numbers.
+
+### Traps
+- **`kubectl --context "$C"` with `$C` empty silently uses the CURRENT context.** A
+  `grep -i dev` over `get-contexts` matched nothing, and four queries intended for op-dev ran
+  against **qa-one** EKS, reporting `namespaces "app-risingwave" not found` as if about dev.
+  op-dev is not in the default kubeconfig at all — it is
+  `~/.kube/op-usxpress-dev-fresh.yaml`, endpoint `10.10.82.50:6443`.
+- **`rw_catalog.rw_relations` has no timestamp column** (id, name, relation_type, schema_id,
+  owner, acl, definition). `created_at` errors. Provenance comes from `definition` or from a
+  name only the new code uses.
+- **`select … from rw_catalog.rw_relations order by id desc` returned zero output twice**,
+  no error, while `show sources` / `show materialized views` worked. Unexplained; prefer the
+  `show` forms.
+- **Argo deletes the hook Job on success as well as failure**, so `kubectl logs job/...`
+  returns NotFound either way. `.status.operationState.syncResult.resources` is the record.
+
+### Open, each with a known shape
+| Item | What it needs |
+|---|---|
+| Employee pipeline | the real `KAFKA_TOPIC_EMPLOYEE` — only Tim can name it |
+| Mongo sinks | `MONGODB_HOST`/`MONGODB_PORT`; the dev secret holds `MONGODB_CONNECTION_STRING` |
+| Postgres CDC | `wal_level=logical` (iaac-risingwave-onprem#41) + a real entity DB; `POSTGRES_SERVER` and `POSTGRES_ENTITY_DB` are empty strings |
+| ECR policy drift | set by CLI tonight; import into Terraform beside the 3 hand-made untagged roles |
+| SQL duplication | his repo has 3 SQL trees, ours has more; QA runs a transform absent from his. Undecided |

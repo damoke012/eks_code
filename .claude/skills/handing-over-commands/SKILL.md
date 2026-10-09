@@ -9,7 +9,7 @@ Doke runs the commands; this session cannot reach the clusters, the corp repos o
 Every command is therefore a **handover**, and a handover fails in ways the command itself
 never would.
 
-Five modes, all measured on 2026-10-08 in one session, all in work whose own notes warn
+Nine modes, measured on 2026-10-08 and 2026-10-09, all in work whose own notes warn
 about them.
 
 ## 1. The shell is interactive — `exit` closes it
@@ -174,6 +174,49 @@ Set-Content -Path "$env:USERPROFILE\.wslconfig" -Value "[wsl2]`nnetworkingMode=m
 Get-Content "$env:USERPROFILE\.wslconfig"
 wsl --shutdown
 ```
+
+## 9. An empty variable in a flag silently selects the default target
+
+```bash
+C=$(kubectl config get-contexts -o name | grep -i 'dev' | head -1)
+kubectl --context "$C" -n app-risingwave get cm etl-pipeline-image    # C is EMPTY
+```
+
+`grep` matched nothing, so `--context ""` fell through to the **current** context and four
+queries meant for on-prem dev ran against **qa-one EKS**. The output,
+`namespaces "app-risingwave" not found`, reads as a finding about dev. Measured 2026-10-09,
+inside a block whose own purpose was to pin the environment — CLAUDE.md rule 2.
+
+An empty string is not an error to `--context`, `--profile`, `--namespace` or `-var`. It
+silently selects the default target, which on this box is whichever cluster was last used.
+
+**Derive, then assert, then use — and let the discovery pick nothing rather than guess:**
+
+```bash
+( K=$HOME/.kube/op-usxpress-dev-fresh.yaml
+  if [ ! -f "$K" ]; then
+    echo "NOT MEASURED - $K is missing on this box"
+  else
+    S=$(kubectl --kubeconfig="$K" config view -o jsonpath='{.clusters[*].cluster.server}')
+    N=$(echo "$S" | wc -w)
+    echo "servers in file: $N -> $S"
+    if [ "$N" != "1" ] || ! echo "$S" | grep -q '10.10.82.50:6443'; then
+      echo "ABORT - not a single-cluster op-dev file, nothing queried"
+    else
+      echo "CONFIRMED op-dev"
+      # ... the real work, only here
+    fi
+  fi )
+```
+
+Prefer `--kubeconfig <file>` over `--context <name>` for the on-prem clusters: **op-dev and
+op-qa are not in the default kubeconfig at all**, so a context name cannot be right. And
+never `export KUBECONFIG` in a handover — a failed export leaves the previous value and the
+next command runs against the old cluster ([[wsl-kubeconfig-churn]]).
+
+The general form: **a flag's value must be asserted before the flag is used**, and the
+assertion names what it expected. One `grep` that matches nothing is otherwise indistinguishable
+from a correct answer.
 
 ## Before sending any block
 
