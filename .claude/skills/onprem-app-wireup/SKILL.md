@@ -59,9 +59,21 @@ aws ecr describe-images --profile <p> --region <r> --repository-name <repo> \
   --image-ids imageDigest=<digest> --query 'imageDetails[0].imagePushedAt'
 ```
 
-`gh run view --log` returns **zero lines for a reusable-workflow run** — use
-`gh api /repos/<o>/<r>/actions/jobs/<job_id>/logs`. The digest appears as
+`gh run view --log` **sometimes returns zero lines and zero stderr** — seen on a
+reusable-workflow run, and again on a plain `workflow_dispatch` run (2026-10-09). `--log-failed`
+printed nothing for the same run while the job held 1079 lines. An empty log is NOT MEASURED,
+never evidence; use `gh api /repos/<o>/<r>/actions/jobs/<job_id>/logs`. The digest appears as
 `"containerimage.digest"`; the concatenated `repo@sha256:…` form is often never printed.
+
+**A re-run cannot rebuild an unchanged commit.** Where the repository is tag-immutable and the
+build tags by commit SHA, dispatching the same ref fails at the push step with `tag invalid:
+… cannot be overwritten because the tag is immutable` — after the build, the scan, the OIDC
+assume and the ECR login have all passed, so it reads like a permissions regression and is not
+one. The consequence that bites: **moving a base image's tag can never reach an unchanged
+source commit.** Publishing a fixed `…/sql-applier:latest` changes nothing for a consumer whose
+`FROM` resolves it at build time, because there is no new build to run. Finish that rollout with
+a commit in the consuming repo — `git commit --allow-empty` is enough — and treat
+"merge, republish the base" as two thirds of a rollout ([[immutable-tag-blocks-base-image-rebuild]]).
 
 ### 4. Can the cluster pull it?
 
