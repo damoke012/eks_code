@@ -47,14 +47,15 @@ from a check that reported FAIL against an expired SSO session.
    svc-reporting. Needed only if QA runs the Employee/Mongo pipeline — but needed
    BEFORE, not during.
 
-6. **QA's `wal_level`.** Dev's is in the Helm chart (`#45`); QA and prod use StatefulSet
-   args, a DIFFERENT mechanism, so dev proving it validates nothing for QA. Changing it
-   restarts Postgres, which is RisingWave's meta store.
+6. **QA's `wal_level` is `replica`** — measured 2026-10-09. CDC cannot start in QA until
+   it is `logical`. Dev's is in the Helm chart (`#45`); QA and prod use StatefulSet args, a
+   DIFFERENT mechanism, so dev proving it validates nothing here. The QA/prod half is
+   already written in PR **#41**'s diff (we merged only the dev half as #45). Changing it
+   restarts Postgres, which is RisingWave's meta store, so RisingWave blips — on dev the
+   slot came back `active` on its own and compute did not restart.
 
-7. **QA's Postgres admin is not `postgres`.** A connection as `postgres` fails with
-   `role "postgres" does not exist`. The bootstrap hook needs an admin that can CREATE
-   DATABASE, create a REPLICATION role, and CREATE PUBLICATION FOR ALL TABLES — the last
-   is superuser-only. NOT MEASURED whether QA's admin qualifies.
+   QA has no `entities` database either: `metadata`, `postgres`, `risingwave`, template0,
+   template1.
 
 8. **Kafka consumer-group grant does not exist in QA.** `ix-kafka-topics-users` was
    deployed to dev only, because the dev deploy gates that PR and nothing gated QA.
@@ -86,6 +87,13 @@ The ECR policy now admits all three cluster accounts. The dead-regex guard exist
 applier copies.
 **Tested and killed:** that QA runs the kustomize overlay (it does not); that
 `values-qa.yaml`'s two empty keys were load-bearing (they are inert).
-**Not verified:** QA's `wal_level`; whether QA's Postgres admin is superuser; whether
-Tim's repo carries a QA Brand pipeline; any document in any Mongo collection, in any
-environment.
+**Also proven 2026-10-09:** QA's admin role `risingwave` IS superuser — `rolsuper t`,
+`rolcreatedb t`, `rolcreaterole t`, `rolreplication t` — so the chart's bootstrap hook can
+create the database, the REPLICATION role and a publication FOR ALL TABLES on QA with no
+change. Note QA has the DATABASE `postgres` but no ROLE `postgres`: connecting as
+`postgres` fails with `role "postgres" does not exist`, which reads like a dead server and
+is not one. The admin is `risingwave`, and `pg-credentials` carries `password`,
+`postgres-password` and `username`.
+
+**Not verified:** whether Tim's repo carries a QA Brand pipeline; any document in any Mongo
+collection, in any environment.
