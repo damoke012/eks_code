@@ -8,7 +8,7 @@
 | risingwave-pipeline | **#76** | the `risingwave-etl` Helm chart | ✅ merged |
 | iaac-talos-flux-platform `op-dev` | **#173** | dev Application → `deploy/chart` + `values-dev.yaml` | ✅ merged, verified live |
 | risingwave-pipeline | **#78** | `values-qa.yaml` (inert) | 🟡 open |
-| ix-kafka-topics-users | **#303** | consumer-group grant | 🔴 open, needs `engineering-leadership` approval |
+| ix-kafka-topics-users | **#303** | consumer-group grant | ✅ merged 2026-10-09 (jenni-ray + jshaw-usx); **dev deployed, QA NOT** |
 
 ## Dev — done
 
@@ -62,6 +62,16 @@ stay on the smoke payload.
 - `MESSAGE-tim-dev-live-2026-10-08.md` — dev is live, how to deploy, how secrets work
 - `MESSAGE-tim-kafka-pr-2026-10-09.md` — what closes #303 and why
 - `MESSAGE-confluent-credential-rotation-2026-10-08.md` — needs a recipient list
+
+## #303 — merged, dev deployed, QA outstanding
+
+Jeff Shaw approved and **deployed to dev before the merge** — that deploy is a required
+check on the PR, so the order is deploy-then-merge here, not merge-then-deploy
+([[octopus-deploy-can-gate-the-pr]]). Merged 2026-10-09.
+
+**QA still needs its own Octopus deploy.** Separate deployment, separate service account.
+Unverified whether dev's ACL is actually live — op-dev has been unreachable (VPN) since the
+merge, so nothing has been measured at the cluster.
 
 ## The one thing blocking data
 
