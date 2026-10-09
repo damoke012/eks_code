@@ -177,6 +177,26 @@ else's approval ([[a-declared-grant-is-not-the-literal-acl]],
 [[octopus-deploy-can-gate-the-pr]]). A zero row count has at least four indistinguishable
 causes; `scripts/rw-diagnose-empty-mv.sh` names which.
 
+## Prove the credential before judging anything
+
+An open port is not an authenticated session, and `2>/dev/null` turns an auth failure into
+an empty string that reads exactly like absence. On 2026-10-09 the companion check reported
+`FAIL digest` and `FAIL secret` for QA while both objects were present and healthy — the
+kubeconfig's `aws-iam-authenticator` profile had an expired SSO session. Two gates' worth of
+invented findings sent the investigation down a conclusion ("QA is still on the kustomize
+overlay") that was flatly wrong; QA had been on the chart all along.
+
+The kubeconfig pins its own profile in the exec env, so logging into a *different* profile for
+the same account changes nothing:
+
+```
+grep -A12 'exec:' <kubeconfig> | grep -E 'command|AWS_PROFILE|value:'
+aws sso login --profile <that exact profile>
+kubectl --kubeconfig=<kubeconfig> get --raw /version
+```
+
+Until that last command succeeds, every finding is NOT MEASURED, including the reassuring ones.
+
 ## Done means rows at the destination
 
 Not a green sync, not a succeeded hook, not an `ExternalSecret` reporting `SecretSynced`.

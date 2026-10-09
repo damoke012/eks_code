@@ -55,7 +55,23 @@ else
   if [ "$N" != "1" ] || ! echo "$S" | grep -q "$ENDPOINT"; then
     bad "cluster: $KC holds $N server(s) and not solely $ENDPOINT — nothing queried"
   else
-    ok "cluster: $KC resolves to $ENDPOINT only"; CLUSTER_OK=1
+    # An open port is not an authenticated session. On 2026-10-09 this script
+    # reported "FAIL digest" and "FAIL secret" for QA against a cluster whose
+    # objects were both present and healthy: the SSO session behind the
+    # kubeconfig's aws-iam-authenticator had expired, every kubectl returned
+    # empty through 2>/dev/null, and empty read as absent. A check that invents
+    # findings is worse than no check -- it is the exact defect this script was
+    # written to prevent ([[transport-failure-not-a-verdict]]).
+    #
+    # So prove the credential with one cheap API call before judging anything.
+    if ! kubectl --kubeconfig="$KC" get --raw /version >/dev/null 2>&1; then
+      skip "cluster: ${ENDPOINT} answers but the credential does not work"
+      skip "         refresh it (aws sso login --profile <the kubeconfig's AWS_PROFILE>)"
+      skip "         NOTHING below was measured; these are not findings"
+    else
+      ok "cluster: $KC resolves to $ENDPOINT only, and the credential works"
+      CLUSTER_OK=1
+    fi
   fi
 fi
 
