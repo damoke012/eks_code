@@ -1,6 +1,6 @@
 ---
 name: handing-over-commands
-description: Write a shell command for Doke to paste on WSL — before handing over any runnable block, and when a handed-over command fails for a reason unrelated to the task ("command not found", a truncated paste, a shell stranded at a > prompt, a closed shell, "No commits between main and main", a guard that fired on a missing binary or aborted a correct change). Seven measured failure modes, each with the positive form.
+description: Write a shell command for Doke to paste on WSL — before handing over any runnable block, and when a handed-over command fails for a reason unrelated to the task ("command not found", a truncated paste, a shell stranded at a > prompt, a closed shell, "No commits between main and main", a guard that fired on a missing binary or aborted a correct change). Eight measured failure modes, each with the positive form.
 ---
 
 # Handing over commands
@@ -145,6 +145,36 @@ Each line is independently short, a truncated paste loses only the tail, and the
 is a cheap check that the whole thing arrived. Then `gh pr create --body-file "$B"` in a
 separate block, guarded on `[ -s "$B" ]`.
 
+## 8. Two shells are in play, and a block will be pasted into the wrong one
+
+Fixing WSL networking means some commands run in **PowerShell on Windows** and some in
+**bash inside WSL**. A bash block sent immediately after a PowerShell instruction was pasted
+into PowerShell, which parsed `( F=/mnt/...` as an expression, threw six parser errors, ran
+one stray `echo "ABORT - ..."` out of context, and then sat at an `InputObject:` prompt
+waiting for input — the same stranded-shell state as mode 7, from a different cause.
+
+Worse, the stray line that *did* execute printed an ABORT message, so the transcript contains
+a confident failure report that no check produced.
+
+**Say the shell in the sentence before every block, every time** — not once at the top of the
+message. And prefer blocks that are *syntactically invalid* in the other shell, so a
+misdirected paste fails loudly instead of half-running:
+
+* bash → wrap in `( … )`, which PowerShell rejects immediately.
+* PowerShell → use a `Cmdlet-Verb` first token, which bash reports as `command not found`.
+
+Never interleave them. Give all the PowerShell, let it finish, then give the bash.
+
+**`wsl --shutdown` cannot run inside the WSL it is shutting down** — it is a Windows binary.
+Writing `%USERPROFILE%\.wslconfig` is doable from either side (`/mnt/c/Users/<user>/.wslconfig`
+from bash), but when the operator is already at a PowerShell prompt, keep everything there:
+
+```
+Set-Content -Path "$env:USERPROFILE\.wslconfig" -Value "[wsl2]`nnetworkingMode=mirrored"
+Get-Content "$env:USERPROFILE\.wslconfig"
+wsl --shutdown
+```
+
 ## Before sending any block
 
 - [ ] Every line under ~120 characters.
@@ -160,6 +190,8 @@ separate block, guarded on `[ -s "$B" ]`.
       from a broken guard without another round trip.
 - [ ] No handed-over heredoc body exceeds ~20 lines; longer prose is built with appends in a
       block of its own and passed with `--body-file`.
+- [ ] Every block names its shell in the preceding sentence, and is syntactically invalid in
+      the other shell so a misdirected paste fails instead of half-running.
 
 ## Why this exists
 
