@@ -20,7 +20,7 @@ image:
   digest: sha256:287818cc203a101de9532260eeafcc73ec6a7e5771ab32a111c50059b7cdde7d
 
 config:
-  # ── RUN 1: smoke only ──
+  # -- RUN 1: smoke only --
   PIPELINE_DIR: /pipeline/smoke
 
   EXCLUDE_RE: '(^|/)(Template|employee|secret_manager|shared)(/|$)|^pipelines/Brand/(300-transform\.sql|400-sink\.rw)$'
@@ -46,7 +46,7 @@ config:
 
   KAFKA_STARTUP_MODE: earliest
 
-  # ⛔ DELIBERATELY NOT REAL VALUES.
+  # DELIBERATELY NOT REAL VALUES.
   #
   # apply.sh validates EVERY runtime value before applying EXCLUDE_RE, so these
   # keys must be present and non-blank even though a smoke run never reads
