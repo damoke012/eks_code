@@ -16,6 +16,29 @@ locals {
       github_repo    = "variant-inc/risingwave-pipeline"
       github_branch  = "master"  # risingwave-pipeline's actual default branch
     }
+    # Tim's own repo, in the OTHER GitHub org. It builds its SQL image itself and
+    # the platform promotes the digest; see two-orgs-join-at-ecr-not-github.
+    # Created by hand 2026-10-09, and its repository policy added the same night
+    # after an on-prem pull 403'd on the manifest HEAD.
+    "risingwave-poc" = {
+      ecr_repository = "risingwave/poc-pipeline"
+      github_repo    = "usxpressinc/risingwave-poc"
+      github_branch  = "master"
+    }
+    # The applier base every SQL image is built FROM. It is published by
+    # iaac-risingwave-cicd, not by an app, and nothing on-prem pulls it -- so it
+    # gets a push role and NO cross-account pull policy.
+    "sql-applier" = {
+      ecr_repository = "risingwave/sql-applier"
+      github_repo    = "variant-inc/iaac-risingwave-cicd"
+      github_branch  = "main"
+      pull_from_onprem = false
+      # MUTABLE, unlike every other repository here. publish-applier pushes the
+      # `latest` tag on every run, and an immutable repository refuses to move a
+      # tag -- the push fails AFTER the build and the scan, with a message that
+      # reads like a permissions problem. Measured on poc-pipeline 2026-10-09.
+      tag_mutability = "MUTABLE"
+    }
   }
   # -----------------------------------------------------------------------------
 }
@@ -24,7 +47,11 @@ resource "aws_ecr_repository" "onprem_app" {
   for_each = local.onprem_apps
 
   name                 = each.value.ecr_repository
-  image_tag_mutability = "IMMUTABLE" # a tag cannot be moved once pushed
+  # IMMUTABLE everywhere a digest is what gets deployed. The consequence is worth
+  # knowing: because these builds tag by commit SHA, re-running a build on an
+  # unchanged ref can never succeed, and a changed BASE image can never be
+  # rebuilt onto an unchanged commit. That is the correct trade, not a defect.
+  image_tag_mutability = lookup(each.value, "tag_mutability", "IMMUTABLE")
 
   image_scanning_configuration {
     scan_on_push = true
@@ -53,7 +80,10 @@ resource "aws_ecr_repository" "onprem_app" {
 # org o-yza5l1xhrc — so anything in the org can publish into it (INFRA-1643).
 # This grants the three read actions, to three named accounts, and no write.
 resource "aws_ecr_repository_policy" "onprem_app_pull" {
-  for_each = local.onprem_apps
+  # Only repositories an on-prem cluster actually pulls. The applier is built
+  # FROM inside GitHub Actions, which is in the same account as the registry,
+  # so granting three cluster accounts read on it would be scope for nothing.
+  for_each = { for k, v in local.onprem_apps : k => v if lookup(v, "pull_from_onprem", true) }
 
   repository = aws_ecr_repository.onprem_app[each.key].name
   policy = jsonencode({
