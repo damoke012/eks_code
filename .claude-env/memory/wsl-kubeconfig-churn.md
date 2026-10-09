@@ -168,3 +168,38 @@ failing alone is a cluster problem. [[transport-failure-not-a-verdict]].
 
 **Do not** re-run the same kubectl and hope; and do not report `i/o timeout` to a cluster IP
 as a finding about that cluster.
+
+### ⛔ CORRECTION, same day: NAT mode was NOT the cause
+
+Switched WSL to `networkingMode=mirrored` and the interfaces duly changed (`eth0` DOWN,
+Windows adapters appeared as `eth1`/`eth2`) — **and the route still did not exist.** Then
+measured the host instead of the guest:
+
+    powershell.exe -c "(Test-NetConnection 10.10.82.50 -Port 6443).TcpTestSucceeded"
+      -> False
+    powershell.exe -c "Get-NetRoute -DestinationPrefix 10.10.*"
+      -> nothing at all
+    adapters up: Wi-Fi, vEthernet (FSE HostVnic), vEthernet (WSL), auraclient
+
+**Windows had no route to 10.10.0.0/16 either.** No corporate VPN adapter was present — the
+only overlay was `auraclient` (Aurascape, a ZTNA agent; `aurascape.local` was already in
+`/etc/resolv.conf`'s search list and `eth1` held a `100.64/10` CGNAT address).
+
+ZTNA brokers named applications rather than routing subnets, so it answers DNS for corp names
+while a raw `IP:6443` falls outside policy — which produces exactly the resolve-but-no-route
+signature that the section above attributes to WSL NAT. **The signature is shared by two
+different causes, and I diagnosed the wrong one.**
+
+**Discriminate at the HOST before touching the guest:**
+
+    powershell.exe -NoProfile -Command \
+      "(Test-NetConnection <cp-ip> -Port 6443 -WarningAction SilentlyContinue).TcpTestSucceeded"
+
+`False` means stop — nothing inside WSL can fix it. `True` while WSL fails is the NAT problem
+the section above describes. One command, and it separates them.
+
+The mirrored-networking change is worth keeping regardless: it removes WSL-vs-Windows
+divergence as a variable permanently. It just was not the fix today.
+
+**Same family as [[proxy-is-not-the-property]]:** I measured the guest and reported it as a
+fact about the network. The guest was downstream of the real answer the whole time.
