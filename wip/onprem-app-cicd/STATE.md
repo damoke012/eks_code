@@ -398,3 +398,62 @@ Also learned: a sink from any MV with `type='append-only'` fails until
 `force_append_only='true'` is set, because an MV is a retract stream — and that option drops
 DELETEs and converts UPDATEs to INSERTs, so it is a data decision, not a syntax fix.
 Detail in [[risingwave-mongodb-sink-facts]].
+
+## 2026-10-09 night — DEV COMPLETE, and the chain promotes unprompted
+
+Nothing is excluded on dev except `Template` and `shared`, which are templates and helper
+scripts. Four sinks live: `pg_employees`, `pg_employee_contacts`, `brand_sink_mongo`,
+`employees_sink_mongo`. Compute log carries INFO only.
+
+### The loop ran itself, start to finish
+| Step | Evidence |
+|---|---|
+| Tim's repo merged poc#11 | `build-sql-image` green in 59s |
+| new image in ECR | `sha256:40cc5bfb` |
+| **promotion opened AND merged itself** | PR **#92** `promote: dev to sha256:40cc5bfbe656` |
+| Argo synced, hook ran | digest moved `78eddfa4` -> `40cc5bfb`, `hookPhase=Succeeded` |
+| secret complete | 13 keys, `MONGODB_CONNECTION_STRING` resolved |
+
+PR #90 was the same thing an hour earlier for `78eddfa4`. So the write path has now run
+twice and needed no hand-editing of a values file either time. ⚠️ Both times a human
+*dispatched* it; the `*/10` cron has never been the thing that noticed. GitHub schedules run
+late routinely, so the latency is real even though the mechanism works.
+
+### PRs
+| # | Repo | What |
+|---|---|---|
+| **11** | `usxpressinc/risingwave-poc` | both Mongo sinks take `%MONGODB_CONNECTION_STRING%` |
+| **91** | `variant-inc/risingwave-pipeline` | Mongo secret + collection names, `deploy.yml` paths-ignore, stale comment corrected |
+| **93** | `variant-inc/risingwave-pipeline` | the two sinks dropped from `EXCLUDE_RE` |
+
+Mongo naming on dev is deliberately scoped: database `rw_dev`, collections `brands` and
+`employees`, on a **shared** Atlas cluster.
+
+### ⚠️ Not verified
+The sinks started and nothing failed, but **no one has read the Atlas collections**. A clean
+log is good evidence (a rejected Mongo write logs loudly) and it is not a row count. One
+check against Atlas closes it.
+
+### Tested and killed
+- *"The promote workflow created a PR and failed to merge it, racing the Wiz and GitGuardian
+  checks."* **FALSE** — no PR existed at all. The new image simply post-dated the last
+  promote run. I predicted a merge race and the evidence showed a timing gap; `--auto` was
+  never needed.
+
+### Also corrected tonight
+`apply.sh` **does** respect `EXCLUDE_RE` before validating. The 27-missing-value error came
+from an `EXCLUDE_RE` that matched **nothing** — it named `Brand/` and lowercase `employee`
+while the tree is `100-Brand/` and `300-Employee/`. Narrowing `PIPELINE_DIR` worked but was
+never necessary. Memory corrected in place; the earlier section in this file is wrong about
+the mechanism and right about the outcome.
+
+### Drift still open
+| Thing | Status |
+|---|---|
+| `wal_level=logical` | `ALTER SYSTEM` only. PR #41 was **CLOSED** (it touched all three envs). A dev-only `primary.extendedConfiguration` in `manifests/op-usxpress-dev/postgres-helmrelease.yaml` is written and ready — costs one more Postgres restart |
+| `entities` DB, `rw_entity_app`, schema, publication | created by psql. Bitnami `initdb.scripts` only runs on an EMPTY volume, so it would be inert today and only correct a rebuild — and a rebuild also wipes `risingwave_meta`, so the honest answer is a documented bootstrap step, not initdb |
+| `op-usxpress-dev/risingwave/entity` | belongs in `deploy/terraform/secrets.tf` beside `postgres`/`root`, same `random_password` + `ignore_changes` shape. ⚠️ Needs a one-time `terraform import` first or apply ROTATES the live password and dev's ETL fails authentication |
+| ECR repo policy on `poc-pipeline` + the `ecr-push` IAM policy | no Terraform owns 064859874041 in this repo. Owner unresolved — guessing it is how [[two-projects-one-resource]] deletes a live role |
+
+⚠️ **INFRA-1501 is STALE** — dev's Postgres IS in source, at
+`manifests/op-usxpress-dev/postgres-helmrelease.yaml`.
