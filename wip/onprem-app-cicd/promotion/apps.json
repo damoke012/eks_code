@@ -1,0 +1,12 @@
+[
+  {
+    "key": "risingwave-etl",
+    "ecr": "risingwave/poc-pipeline",
+    "promote": ["dev"],
+    "values": {
+      "dev":  "deploy/chart/values-dev.yaml",
+      "qa":   "deploy/chart/values-qa.yaml",
+      "prod": "deploy/chart/values-prod.yaml"
+    }
+  }
+]

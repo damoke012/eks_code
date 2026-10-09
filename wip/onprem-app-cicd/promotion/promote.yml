@@ -1,0 +1,199 @@
+# One promotion chain: ECR -> dev -> QA -> prod, the SAME digest all the way.
+#
+# Nothing is rebuilt between environments. The app repo (which may live in a
+# different GitHub org) only ever pushes an image to ECR; every values file that
+# Argo CD reads is edited HERE, so the app team needs no credential in this repo.
+#
+# Each environment's SOURCE is the environment before it:
+#   dev  <- the newest digest in the app's ECR repository
+#   qa   <- the digest values-dev.yaml is already running
+#   prod <- the digest values-qa.yaml is already running
+# So QA can only ever receive something dev has actually run, which makes dev a
+# real gate rather than a label. The previous promote-to-qa.yml went straight from
+# ECR to QA and dev never saw the image at all.
+#
+# dev and QA merge themselves. PR #67 sat open for four weeks while QA ran a
+# three-week-old image: a pull request nobody is watching is a drawer, not a gate.
+# PROD DOES NOT self-merge. It opens a PR and waits for a person, deliberately.
+#
+# Which environments are live is apps.json's `promote` list, NOT this file. A new
+# environment is opt-in, so merging this changes nothing until that list grows.
+name: promote
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Limit to one environment (dev|qa|prod), blank = all'
+        required: false
+        type: string
+  workflow_run:
+    workflows: [deploy]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-2
+  # Reused deliberately: this role already holds ecr:DescribeImages and this
+  # repo's sub is already in its trust policy, so promotion needs no new identity.
+  READ_ROLE: arn:aws:iam::064859874041:role/gha-risingwave-etl-ecr-push
+
+jobs:
+  promote:
+    # A failed build must never promote anything.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1          # dev must land before qa reads it
+      fail-fast: false
+      matrix:
+        env: [dev, qa, prod]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Skip when a single environment was requested
+        id: gate
+        run: |
+          ONLY='${{ inputs.only }}'
+          if [ -n "$ONLY" ] && [ "$ONLY" != "${{ matrix.env }}" ]; then
+            echo "run=0" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.env }} skipped: only=$ONLY"
+          else
+            echo "run=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.gate.outputs.run == '1' && matrix.env == 'dev'
+        with:
+          role-to-assume: ${{ env.READ_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: promote-${{ matrix.env }}-${{ github.run_id }}
+
+      - name: Work out what this environment should be running
+        id: scan
+        if: steps.gate.outputs.run == '1'
+        env:
+          TARGET: ${{ matrix.env }}
+        run: |
+          set -euo pipefail
+          [ -f apps.json ] || { echo "::error::apps.json missing"; exit 1; }
+          CH=/tmp/changed; : > "$CH"
+          N=$(jq length apps.json)
+          for i in $(seq 0 $((N - 1))); do
+            KEY=$(jq -r ".[$i].key" apps.json)
+            ECR=$(jq -r ".[$i].ecr" apps.json)
+            ENABLED=$(jq -r ".[$i].promote | index(\"$TARGET\") // empty" apps.json)
+            VF=$(jq -r ".[$i].values[\"$TARGET\"] // empty" apps.json)
+            if [ -z "$ENABLED" ]; then
+              echo "$KEY/$TARGET: not in the promote list, skipping"; continue
+            fi
+            if [ -z "$VF" ] || [ ! -f "$VF" ]; then
+              echo "::warning::$KEY/$TARGET: values file missing ($VF)"; continue
+            fi
+            # The target must already point at THIS repository. Without this a
+            # digest from one ECR repo lands in a file pointing at another, and
+            # the pod then fails to pull something that genuinely does not exist.
+            if ! grep -qE "repository:[[:space:]]*.*/${ECR}\$" "$VF"; then
+              echo "::error::$KEY/$TARGET: $VF does not point at $ECR"; exit 1
+            fi
+            case "$TARGET" in
+              dev)
+                WANT=$(aws ecr describe-images --repository-name "$ECR" \
+                         --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageDigest' \
+                         --output text 2>/dev/null || true)
+                SRC="ECR $ECR" ;;
+              qa)
+                PREV=$(jq -r ".[$i].values[\"dev\"] // empty" apps.json)
+                WANT=$(grep -oE 'sha256:[0-9a-f]{64}' "$PREV" | head -1 || true)
+                SRC="$PREV" ;;
+              prod)
+                PREV=$(jq -r ".[$i].values[\"qa\"] // empty" apps.json)
+                WANT=$(grep -oE 'sha256:[0-9a-f]{64}' "$PREV" | head -1 || true)
+                SRC="$PREV" ;;
+            esac
+            case "$WANT" in
+              sha256:*) : ;;
+              *) echo "::warning::$KEY/$TARGET: no digest from $SRC (got '${WANT:-empty}')"
+                 continue ;;
+            esac
+            HAVE=$(grep -oE 'sha256:[0-9a-f]{64}' "$VF" | head -1 || true)
+            if [ "$WANT" = "$HAVE" ]; then
+              echo "$KEY/$TARGET: already on ${WANT:0:19} (from $SRC)"; continue
+            fi
+            echo "$KEY/$TARGET: ${HAVE:-none} -> ${WANT:0:19} (from $SRC)"
+            sed -i -E "s|^([[:space:]]*digest:[[:space:]]*)sha256:[0-9a-f]{64}|\1${WANT}|" "$VF"
+            # Prove the edit landed. A silent sed miss is how a promotion reports
+            # success and changes nothing.
+            if ! grep -q "$WANT" "$VF"; then
+              echo "::error::$VF does not contain $WANT after the edit"; exit 1
+            fi
+            echo "$KEY $WANT" >> "$CH"
+          done
+          if [ -s "$CH" ]; then
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+            echo "digest=$(awk '{print $2}' "$CH" | head -1)" >> "$GITHUB_OUTPUT"
+            git --no-pager diff --stat
+          else
+            echo "changed=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the promotion PR
+        id: pr
+        if: steps.scan.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.env }}
+          DIGEST: ${{ steps.scan.outputs.digest }}
+        run: |
+          set -euo pipefail
+          BR="promote/${TARGET}-${DIGEST#sha256:}"
+          BR="${BR:0:44}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git commit -qam "promote: ${TARGET} to ${DIGEST}"
+          git push -q origin "$BR"
+          {
+            echo "Opened automatically by the promote workflow."
+            echo
+            echo "Environment: **${TARGET}**"
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            echo "The same digest moves ECR -> dev -> QA -> prod. Nothing is rebuilt"
+            echo "between environments, and each environment can only receive what the"
+            echo "one before it is already running."
+            echo
+            echo "Merging makes Argo CD apply it on op-usxpress-${TARGET}. The applier"
+            echo "runs as a sync hook, so its log appears in the Argo UI - and Argo"
+            echo "deletes that Job on success as well as failure, so the durable record"
+            echo "is the Application's operationState.syncResult."
+          } > /tmp/pr-body.md
+          gh pr create --base master --head "$BR" \
+            --title "promote: ${TARGET} to ${DIGEST:0:19}" \
+            --body-file /tmp/pr-body.md
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+
+      - name: Merge it, for dev and QA only
+        if: steps.scan.outputs.changed == '1' && matrix.env != 'prod'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr merge "${{ steps.pr.outputs.branch }}" --squash --delete-branch
+
+      - name: Leave prod for a person
+        if: steps.scan.outputs.changed == '1' && matrix.env == 'prod'
+        run: |
+          echo "::notice::prod PR opened and NOT merged. A human merges production."
+
+      - name: Say plainly when nothing happened
+        if: steps.gate.outputs.run == '1' && steps.scan.outputs.changed != '1'
+        run: |
+          echo "No promotion for ${{ matrix.env }}."
+          echo "Green here means the check ran, not that anything deployed."
