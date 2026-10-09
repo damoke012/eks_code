@@ -22,7 +22,7 @@ environment: qa
 image:
   # QA's own digest, from deploy/overlays/qa. Differs from dev's - do not
   # assume the two environments run the same image.
-  digest: sha256:461772e87492526637865b2834717e7590a443fb2440b46c3749456c08e2e2fe
+  digest: sha256:287818cc203a101de9532260eeafcc73ec6a7e5771ab32a111c50059b7cdde7d
 
 config:
   PIPELINE_DIR: /pipeline/pipelines

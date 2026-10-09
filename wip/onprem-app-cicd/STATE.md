@@ -49,7 +49,31 @@ And the Application's **last sync operation is `Failed`** (21:47:53Z, the
 instantly replaying the old failure, so when the ACL lands this will likely need an explicit
 retry rather than a fresh sync.
 
-## QA — ready except for the live check
+## QA — FLIPPED TO HELM 2026-10-09 17:50Z
+
+| layer | evidence |
+|---|---|
+| GitRepository `infra` | `op-qa@sha1:625b1cc9` |
+| Kustomization `argocd-apps` | applied `625b1cc9` |
+| ApplicationSet | `path=deploy/chart`, `valueFile=values-qa.yaml`, helm block present |
+| Application | `path=deploy/chart`, Synced/Healthy |
+| all four objects | **resourceVersion unchanged** |
+
+The gate was a render diff with the image digest **normalised out** — 81 fields each side,
+identical. The digest had to be excluded because `promote-to-qa` moves it every 10 minutes
+on a cron and auto-merges its own PR; a hand-pinned digest in `values-qa.yaml` would have
+rolled QA back. risingwave-pipeline#82 makes that workflow write `values-qa.yaml` alongside
+the overlay, so both sources carry the same digest and the flip could not regress the image.
+
+**QA's end-to-end proof arrives on its own:** the next promotion writes a new digest into
+`values-qa.yaml`, Argo sees tracked drift, and the hook Job fires.
+
+**STILL MISSING ON QA: the Kafka consumer-group grant.** #303 merged and was deployed to
+dev only, because the dev deploy gates the PR and nothing gated QA. Until someone deploys
+`ix-kafka-topics-users` to the QA environment in Octopus, QA's `mv_brand` keeps failing with
+`GroupAuthorizationFailed`.
+
+## QA — earlier notes
 
 `values-qa.yaml` renders byte-identical to `deploy/overlays/qa` (81 fields, sha
 `3278343208d37c68`). Three lines differ from dev's: `environment`, `digest`, topic.
