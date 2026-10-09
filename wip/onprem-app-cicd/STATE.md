@@ -240,3 +240,88 @@ access to ours, no cross-org token.
 | Postgres CDC | `wal_level=logical` (iaac-risingwave-onprem#41) + a real entity DB; `POSTGRES_SERVER` and `POSTGRES_ENTITY_DB` are empty strings |
 | ECR policy drift | set by CLI tonight; import into Terraform beside the 3 hand-made untagged roles |
 | SQL duplication | his repo has 3 SQL trees, ours has more; QA runs a transform absent from his. Undecided |
+
+## 2026-10-09 late — dev runs Tim's FULL Employee pipeline, end to end
+
+Kafka -> RisingWave -> materialized view -> sink -> relational tables, from
+`usxpressinc/risingwave-poc`'s own image. Counts agree at every stage:
+
+| Stage | Count |
+|---|---|
+| `rw_employees1` / `rw_employee_contacts1` (RW tables from Kafka) | 2 / 1 |
+| `employees_master_mv_flat` / `employees_home_master_mv_flat` | 2 / 1 |
+| `employee.employees` / `employee.employee_contacts` in Postgres `entities` | 2 / 1 |
+| `brand_mv_state` | 3 |
+
+Live objects: sources `employees_source_kafka` + `pg_employees_source`, sinks
+`pg_employees` + `pg_employee_contacts`, and replication slot `rw_employee_slot`
+(`pgoutput`, database `entities`, **active = t**). The active slot is the only direct
+evidence that CDC runs; no status field shows it.
+
+Topic: **`dev_timmyp_cdc_employee_json`** — JSON, not Avro, which is why his Employee
+source needs no schema-registry variables. Read from the Confluent REST API, not guessed.
+
+### PRs merged
+| # | What |
+|---|---|
+| **87** | `PIPELINE_DIR` widened to `pipelines/`, the employee topic, Postgres entity + CDC values, 2 secret entries |
+| **88** | `POSTGRES_ENTITY_DB` = `entities`, not `rw_entity` |
+
+### ⚠️ DRIFT created out of band on op-dev — all of this needs codifying
+| Thing | Where it lives now | Should be |
+|---|---|---|
+| database `entities`, owner `rw_entity_app` | created by psql | his `000-init-db-entities.sh`, or Terraform |
+| role `rw_entity_app` WITH `REPLICATION` | created by psql | Terraform |
+| schema `employee`, publication `rw_employee_pub FOR ALL TABLES` | created by psql | as above |
+| `wal_level=logical` | `ALTER SYSTEM` -> `postgresql.auto.conf` on the PVC | iaac-risingwave-onprem#41 |
+| `op-usxpress-dev/risingwave/entity` | `aws secretsmanager create-secret` | Terraform |
+| ECR policy on `risingwave/poc-pipeline` | `aws ecr set-repository-policy` | `gha-oidc-trust.tf`, with `import` |
+
+`ALTER SYSTEM` survives a pod restart because it writes to the data volume, so #41 is
+now a tidy-up rather than a blocker — but until it merges, a PVC rebuild loses CDC.
+
+### Proven
+- Tim's repo -> ECR -> op-dev -> RisingWave -> Postgres, with his Employee SQL.
+- `apply.sh`'s app-database guard works: `.sql` goes to `POSTGRES_ENTITY_*`, and it refuses
+  outright when the app database equals the RW meta store (same host is fine, same database
+  is not). His tables could not have landed in `risingwave_meta` by accident.
+- A Postgres restart of `postgres-postgresql` cost RisingWave one meta restart and one
+  operator restart; everything came back Ready with no crash loop.
+
+### Tested and killed
+- *"A failed file is marked applied — `applied 0, skipped 10` proves a ledger defect."*
+  **FALSE.** The ledger (`pipeline_applied`, keyed on path + sha256) is written only after a
+  successful apply. Argo's own sync hook had applied everything between my two debug runs,
+  once the stuck DDL job cleared. **A `skip` is not evidence that a file failed** — check
+  whether another runner did the work before calling it a defect.
+- *"`risingwave` can do the setup."* It has `createdb` only. `ALTER SYSTEM`, the
+  `REPLICATION` attribute and `CREATE PUBLICATION FOR ALL TABLES` all need superuser.
+
+### Traps
+- **`psql -c` does NOT interpolate `:'var'`.** Variable substitution happens only for input
+  read from a file or stdin, so `-c "... PASSWORD :'ep'"` is a syntax error at the colon.
+  Pipe the statement in instead: `printf "... PASSWORD '%s';\n" "$P" | psql ...` — which also
+  keeps the credential out of argv.
+- **A `\c <db>` inside an applied `.sql` overrides the configured database.**
+  `001-create_rdms_tables.sql:21` is a literal `\c entities`, so `POSTGRES_ENTITY_DB` is
+  decorative for that file and the database name is fixed in his SQL. The failure reads
+  `database "entities" does not exist` and looks like a config error.
+- **`ALTER SYSTEM` leaves `pending_restart = false` until the config is re-read.** Run
+  `select pg_reload_conf();` before believing `pg_settings`, or a landed change looks absent.
+- **The Bitnami objects disagree on name:** Helm release `postgres`, StatefulSet
+  `postgres-postgresql`, Service `pg-postgresql`. The superuser password is
+  `pg-credentials/password` — the SAME key the app user uses, since
+  `POSTGRES_PASSWORD` and `POSTGRES_POSTGRES_PASSWORD` both reference it.
+- **PostgreSQL 15+ stopped granting `CREATE` on `public`**, so a new owner needs
+  `ALTER SCHEMA public OWNER TO <role>` or his `CREATE TABLE` fails on a server that looks
+  configured correctly.
+- **A stuck `creating` streaming job blocks an unrelated `DROP`** with
+  `can not drop 1 creating streaming job`. It cleared on its own here; `rw_ddl_progress`
+  was empty by the time we looked, and `CANCEL JOBS` was never needed.
+
+### Still open
+| Item | What it needs |
+|---|---|
+| Mongo sinks (`400-sink.rw`, `999-downstream_sinks.rw`) | dev holds `mongodb+srv://…mongodb.net/` with **no port**; his SQL builds `mongodb://user:pass@host:port`. A change in HIS repo, not config |
+| All six drift rows above | Terraform, with `import` where the object already exists |
+| QA and prod | untouched and still on `etl-pipeline`; nothing here was promoted |
