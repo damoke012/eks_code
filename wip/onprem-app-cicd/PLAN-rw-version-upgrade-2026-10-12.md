@@ -116,6 +116,52 @@ GitRepository tracks `main` at 5m), the version is declared **per environment**:
 and `op-usxpress-prod`. So a one-environment bump is a one-file change, and QA2 → dev → QA
 → prod is achievable here.
 
+## ✅ PROD DONE 2026-10-12 — and the promotion model we did not know about
+
+Prod is on **operator v0.18.0 + RisingWave v3.0.5**, verified by `select version()`.
+
+The route, which nobody had written down:
+
+| env | GitRepository ref | how it changes |
+|---|---|---|
+| dev | `branch: main`, 5m | a merge deploys immediately |
+| QA | exact `tag:` | tag + pin |
+| prod | exact `tag:` | tag + pin |
+
+A prod release is **three acts**: merge to `main`, a tag appears at that commit (automatic,
+~60s, minor bump plus a floating `vX.Y`), then move the pin with
+`scripts/pin-risingwave-tag.py --clusters op-usxpress-prod --apply` in
+**iaac-talos-flux-cluster**. PR #46 looked merged-and-done for 40 minutes while prod sat on
+`v0.5.6`, because a merge alone reaches nothing but dev.
+
+Two gotchas found doing it:
+
+* The pin script **could not move an existing tag** — it only converted `branch:` to `tag:`,
+  and returned "already pinned, nothing to do" with exit 0 for the operation we needed. Fixed
+  in `iaac-talos-flux-cluster#43`.
+* Its `DEFAULT_CLUSTERS` is QA **and** prod, so `--clusters op-usxpress-prod` is mandatory
+  unless you mean to move both.
+
+### Target, corrected
+
+**v3.0.5, not v3.1.0.** The operator tracks the 3.0 line: its CI bumps the image tags to
+v3.0.0, then v3.0.2, then v3.0.3 in v0.18.0, and no operator release mentions 3.1. 3.0.x with
+v0.18.0 is the pairing the vendor tests together. v3.0 loses support when v3.2 ships, so expect
+another bump in 1-2 months.
+
+### What prod proved, and what it did not
+
+**Proved:** the operator jump, the 1381-line CRD replace via `CreateReplace`, the image
+rollout, and that the frontend port stays 4567.
+**Did NOT prove:** the meta-store migration. Prod was empty — the meta log says
+`no streaming jobs for scaling, maybe an empty cluster`. dev is the only environment that will
+actually exercise it.
+
+### Gate 1 is closed
+
+Operator v0.18.0 runs RisingWave 3.0.5. The README's compatibility table gives only minimums
+and never named 3.x; this is now measured rather than inferred.
+
 ## Recommendation
 
 **Not this week.** Reasons, in order:
