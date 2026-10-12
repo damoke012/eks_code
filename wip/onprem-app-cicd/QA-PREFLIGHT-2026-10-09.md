@@ -97,3 +97,22 @@ is not one. The admin is `risingwave`, and `pg-credentials` carries `password`,
 
 **Not verified:** whether Tim's repo carries a QA Brand pipeline; any document in any Mongo
 collection, in any environment.
+
+---
+
+## ⚠️ CORRECTED 2026-10-12 — QA has no Brand pipeline
+
+Measured before the RisingWave upgrade: QA's RisingWave holds **0 sources, 0 sinks**, and the
+only materialized views are `canary_promotion_mv` and `ddl_probe_mv` — platform probes.
+
+So item 1's premise above ("QA runs Brand/Avro") is **wrong**, and so is the repeated claim in
+this file that QA runs a partial Brand pipeline. Its ETL sync hook reports Succeeded over an
+empty cluster. That also means the missing Kafka consumer-group grant was never the only thing
+standing between QA and a working pipeline — the pipeline objects do not exist at all.
+
+Consequence for the image decision in item 1: switching QA to Tim's `poc-pipeline` image no
+longer trades away a working Brand pipeline, because there isn't one. The decision gets easier,
+not harder.
+
+See `green-hook-over-an-empty-cluster` in memory. RisingWave on QA is now v3.0.5 with operator
+v0.18.0, so the versions in the table above are stale.

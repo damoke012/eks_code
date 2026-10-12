@@ -116,6 +116,27 @@ GitRepository tracks `main` at 5m), the version is declared **per environment**:
 and `op-usxpress-prod`. So a one-environment bump is a one-file change, and QA2 → dev → QA
 → prod is achievable here.
 
+## ✅ ALL THREE DONE 2026-10-12 — operator v0.18.0 + RisingWave v3.0.5
+
+| env | ref | operator | RisingWave | evidence |
+|---|---|---|---|---|
+| prod | `tag: v0.7.0` | v0.18.0 | v3.0.5 | `select version()` |
+| dev | `branch: main` | **v0.16.0 — not bumped** | v3.0.5 | `select version()`, slot `active`, LSN advanced |
+| QA | `tag: v0.10.0` | v0.18.0 | v3.0.5 | `select version()`, probe MVs intact |
+
+Order: prod (empty, proved the mechanism), dev (first migration over real state), QA (last).
+Operator and image went as **two separate tags and pins** in each environment, so any port or
+CRD surprise would be attributable. Rollout 4–8 minutes each, dominated by the 2.49 GB pull.
+
+**Open: dev's operator is still v0.16.0.** Its `operator-helmrelease.yaml` sits directly under
+`manifests/op-usxpress-dev/` rather than in an `operator/` subdirectory like QA and prod, and
+was never bumped. dev runs 3.0.5 under v0.16.0 — functional, but not the tested pairing.
+
+**Open, and more interesting: QA has never run a Brand pipeline.** 0 sources, 0 sinks, only the
+two platform probe MVs — while its ETL sync hook reports Succeeded. Likely the
+`pipeline_applied` ledger skipping files whose objects no longer exist. Unproven; see
+`green-hook-over-an-empty-cluster` in memory for the verification.
+
 ## ✅ PROD DONE 2026-10-12 — and the promotion model we did not know about
 
 Prod is on **operator v0.18.0 + RisingWave v3.0.5**, verified by `select version()`.
