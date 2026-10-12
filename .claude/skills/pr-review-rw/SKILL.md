@@ -215,6 +215,42 @@ key names, not against the sibling's.
   re-list: `SELECT name FROM rw_catalog.rw_secrets;` — 12 rows, listed, not inferred from an
   exit code.
 
+### Phase 3d — Ask the admission webhook, for anything it validates
+
+A PR can be correct in every respect you checked and still be **rejected by an admission
+webhook**, and a rejected dry-run fails the WHOLE Kustomization — freezing every other
+resource in that directory while the PR shows merged and green.
+
+`iaac-talos-flux-platform#158` (2026-10-12) added a PrometheusRule whose expressions do not
+parse. It froze dev's `prometheus` Kustomization and, through `dependsOn`, `grafana`. Six CI
+checks passed. I had verified the `ruleSelector` label matched, the Argo controller's kind and
+name, that all five suppressed alertnames existed, and the route ordering — and never asked
+whether the PromQL was valid. The reviewer's checklist item about dry-run failures freezing a
+Kustomization was already in this skill; I did not run it.
+
+**One command settles it**, and it is the same for PrometheusRules, ValidatingWebhook-guarded
+CRs, Istio resources, Kyverno-gated workloads and anything else with a webhook:
+
+```
+gh repo clone <org>/<repo> /tmp/pr --depth 1 --branch <base>
+kubectl --kubeconfig=<kc> apply --dry-run=server -f /tmp/pr/<changed file>
+```
+
+Server-side, not client-side: `--dry-run=client` never reaches the webhook. A connection
+timeout (`dial tcp …: i/o timeout`) is NOT MEASURED, not a pass.
+
+**The PromQL trap specifically:** a parenthesised expression immediately after `group_left` is
+parsed as its **label list**, so
+
+```
+a{...} * on (ns, pod) group_left
+(b{...} == 1)
+```
+
+fails with `unexpected "{" in grouping opts`. It needs `group_left()`. Note the same keyword
+followed by `max by (...)` parses fine — only a leading `(` collides. So fix the occurrence the
+webhook names, not every occurrence of the keyword.
+
 ### Phase 4 — Build the findings table
 
 | # | Item | State | Severity | Notes |
