@@ -71,6 +71,43 @@ Three things, all of which touch exactly what dev now runs:
    recreate affected materialized views**. Dev's pipeline is materialized views feeding
    sinks, so this needs auditing against his SQL before, not during.
 
+## What actually changes, 2.8 -> 3.x
+
+No labelled breaking-changes section exists in the v3.0 or v3.1 notes. Everything below came
+from the changelog body and the launch post, which is itself the warning: read the full notes,
+do not trust a summary.
+
+* **DataFusion becomes the default analytical engine.** An internal query-engine swap — the
+  single change most likely to alter plan behaviour or performance on existing materialized
+  views.
+* Apache Iceberg V3, native pgvector ingestion, WebSocket and HTTP connectors, exactly-once
+  delivery.
+* A `VARIANT` type, periodically refreshed materialized views, partitioned gap filling, more
+  control over backfill and sink operations.
+* Secrets inside UDFs, and dependency tracking for secrets.
+* Richer system catalogs, better connector metrics, configurable join cache eviction,
+  adaptive parallelism changes.
+
+## Ports — and why ours say 4567
+
+RisingWave's own documented frontend port is **4566**; that is what their local playground
+prints. The **operator** defines `FrontendPort = 4567` as a constant in its API package, and we
+deploy via `risingwave-operator`. So 4567 is the operator's default, not a local
+customisation of ours, and it disagrees with the product docs. Same package: meta 5690, meta
+dashboard 5691, compute 5688, compactor 6660.
+
+That splits the port risk cleanly:
+
+| Change | Port risk |
+|---|---|
+| RisingWave image `v2.8.2` -> `v3.1.x` | **none** — ports are operator constants, not image behaviour |
+| `risingwave-operator` `v0.16.0` -> newer | **real** — this is where 4567 could move |
+
+So the version bump is port-neutral. If Gate 1 forces an operator upgrade, 4567 reaches
+further than the CR: both ghostunnels, the `tcp-passthrough` Gateway (4567/5432), the
+VirtualServices, `RW_PORT` in all three values files, and anything hardcoded in Tim's SQL.
+The meta store's 5432 is Bitnami Postgres and is unaffected either way.
+
 ## Staging — and it IS stageable
 
 Despite `iaac-risingwave-onprem` having no branch-based promotion gate (every cluster's Flux
@@ -109,7 +146,8 @@ v3.2 ships.
 prod are the same version.
 **Not verified:** QA's version (SSO expired at measurement time); whether operator v0.16.0
 supports RisingWave 3.x; whether Tim's SQL uses `SOME`/`ALL`/`ANY`; the exact latest v3.1
-patch.
+patch; and our live frontend/ghostunnel/Gateway ports as opposed to the operator's declared
+constants — the table above is read from their source, not from our cluster.
 
 Sources: RisingWave releases and release-support-policy pages, and the risingwave-operator
 README compatibility table — all read 2026-10-12.
