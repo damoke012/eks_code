@@ -1,0 +1,18 @@
+# --- append to deploy/chart/values-dev.yaml -------------------------------------
+# Secrets the application team owns, read with their OWN identity from their own
+# AWS path. OFF by default in every environment: turning it on is a per-cluster
+# decision, and dev proves it first.
+#
+# No key list on purpose -- see templates/externalsecret-app.yaml. Whatever keys
+# exist in op-usxpress-dev/risingwave/app reach the pipeline as environment
+# variables. They cannot shadow anything in `config:` or `externalSecret:`,
+# because those arrive as explicit env entries and Kubernetes resolves those
+# over envFrom.
+appSecret:
+  enabled: false
+  refreshInterval: 1h
+  secretStore: rw-app
+  region: us-east-2
+  path: risingwave/app
+  # IAM role scoped to op-usxpress-dev/risingwave/app* ONLY.
+  roleArn: ""

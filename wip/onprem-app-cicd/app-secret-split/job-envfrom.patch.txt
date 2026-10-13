@@ -1,0 +1,12 @@
+--- replace the envFrom block in deploy/chart/templates/job.yaml -----------------
+
+          envFrom:
+            {{- if .Values.appSecret.enabled }}
+            # The application team's own keys. FIRST, so the platform ConfigMap
+            # below wins any name collision. Platform credentials are explicit
+            # `env:` entries further down and outrank every envFrom regardless.
+            - secretRef:
+                name: etl-app-credentials
+            {{- end }}
+            - configMapRef:
+                name: etl-pipeline-endpoints    # per-cluster coordinates
