@@ -393,6 +393,15 @@ Two scripts live under `scripts/` to speed up Phase 3:
       before approving:
       `kubectl --context <ctx> -n <ns> get <kind> <name> -o jsonpath='{.spec.strategy}{"\n"}'`
       and after the merge confirm the **pod** moved, not that the Kustomization says Ready.
+- [ ] **For a version bump: what ELSE records this version?** A version declared in two
+      places goes stale in one of them, silently. The RisingWave 3.0.5 upgrade moved the CR
+      and the operator and left the **console** reporting v2.8.2 to every user in all three
+      environments for five days — it keeps its own copy in `cluster_connection_info`, written
+      only when the row is **absent**, so correcting the ConfigMap merges, reconciles, reports
+      Ready and changes nothing. Grep the whole repo for the OLD version string before calling
+      an upgrade done, and prefer making the second place *read* from the first (an idempotent
+      init container) over remembering to update it. See
+      [[a-version-declared-twice-will-drift]].
 - [ ] **Do the container's listen flags agree with the Service's `targetPort`?** A numeric
       `targetPort` needs no matching `containerPort`, so Kubernetes will not complain about a
       Service that points at a port nothing binds.
