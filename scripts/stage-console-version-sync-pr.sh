@@ -102,9 +102,12 @@ s = s.replace(marker, block + marker)
 open(f, "w").write(s)
 
 t = open(r).read()
-oldr = "risingwavelabs/risingwave-console:v0.7.4"
+# Match the closing backtick and full stop too, so the version annotation lands
+# OUTSIDE the code span. Inside it, the line reads as a copy-pasteable image
+# reference that is not valid -- a document that misleads is worse than a stale one.
+oldr = "`risingwavelabs/risingwave-console:v0.7.4`."
 once(t, oldr, "console image reference in the runbook")
-t = t.replace(oldr, f"risingwavelabs/risingwave-console@{digest} (v0.7.9)")
+t = t.replace(oldr, f"`risingwavelabs/risingwave-console@{digest}` (v0.7.9).")
 open(r, "w").write(t)
 print("all four edits applied, each asserted unique")
 PY
