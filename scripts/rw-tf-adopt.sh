@@ -118,7 +118,23 @@ add "aws_s3_bucket_versioning.risingwave"                        "$BUCKET_PREFIX
 add "aws_s3_bucket_server_side_encryption_configuration.risingwave" "$BUCKET_PREFIX"
 add "aws_s3_bucket_public_access_block.risingwave"               "$BUCKET_PREFIX"
 add "aws_iam_role.risingwave_irsa"                               "$ROLE"
-add "aws_iam_role_policy.risingwave_s3"                          "$ROLE:risingwave-s3-access"
+# The S3 policy is an ATTACHED MANAGED policy on every environment built so
+# far, not an inline one. aws_iam_role_policy.risingwave_s3 cannot be imported
+# because no inline policy exists. Requires fix/match-live-dev-estate merged.
+if grep -q 'resource "aws_iam_policy" "risingwave_s3"' main.tf 2>/dev/null; then
+  POL_Q="AttachedPolicies[?PolicyName=='$CLUSTER-risingwave-s3'].PolicyArn"
+  POL_ARN=$(aws iam list-attached-role-policies --role-name "$ROLE" --query "$POL_Q" --output text 2>/dev/null) || true
+  if [ -n "$POL_ARN" ] && [ "$POL_ARN" != "None" ]; then
+    add "aws_iam_policy.risingwave_s3"                 "$POL_ARN"
+    add "aws_iam_role_policy_attachment.risingwave_s3" "$ROLE/$POL_ARN"
+  else
+    warn "no attached policy $CLUSTER-risingwave-s3 on $ROLE; those two not imported"
+  fi
+else
+  warn "main.tf still declares an INLINE aws_iam_role_policy. Merge the PR from"
+  warn "  rw-tf-match-live.sh first, or the plan will create an inline policy"
+  warn "  alongside the attached one. Skipping the S3 policy imports."
+fi
 
 # resource name -> SECRET name. svc_reporting is svc-reporting: underscore in
 # the Terraform address, HYPHEN in the AWS secret. Getting this wrong imports
