@@ -204,21 +204,62 @@ ONPREM_REPO=variant-inc/iaac-risingwave-onprem
 CICD_REPO=variant-inc/iaac-risingwave-cicd
 POC_REPO=usxpressinc/risingwave-poc
 KAFKA_REPO=variant-inc/ix-kafka-topics-users
+DEV_PROFILE="${DEV_PROFILE:-}"
+QA_PROFILE="${QA_PROFILE:-}"
 QA_KUBE="$HOME/.kube/op-usxpress-qa-sso.yaml"
 DEV_KUBE="$HOME/.kube/op-usxpress-dev-fresh.yaml"
 
 # have CMD -- true when a binary exists. A missing tool is NOT a failing system.
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# acct PROFILE WANT -- prints OK only when the live session is that account.
+# acct PROFILE WANT -- discriminates the three failures that look alike.
+#
+# Measured 2026-10-15: a MISSING profile was reported as an expired session, so
+# the advice was "aws sso login --profile "$DEV_PROFILE"" for a profile that does not
+# exist. A login can never fix that. Name the actual fault.
 acct() {
-  local got
-  got=$(aws sts get-caller-identity --profile "$1" --query Account --output text 2>&1 | head -1) || true
+  local p="$1" want="$2" got
+  if ! aws configure list-profiles 2>/dev/null | grep -qxF "$p"; then
+    warn "$p -> NOT CONFIGURED on this box. aws sso login cannot fix this."
+    return 0
+  fi
+  got=$(aws sts get-caller-identity --profile "$p" --query Account --output text 2>&1 | head -1) || true
   case "$got" in
-    "$2") say "  $1 -> $got  OK" ;;
-    [0-9]*) warn "$1 -> $got  (wanted $2)" ;;
-    *)      warn "$1 -> no valid session. Run: aws sso login --profile $1" ;;
+    "$want") say "  $p -> $got  OK" ;;
+    [0-9]*)  warn "$p -> $got, wanted $want. Wrong profile for this step." ;;
+    *)       warn "$p -> session invalid. Run: aws sso login --profile $p" ;;
   esac
+}
+
+# require_profile VAR_VALUE ACCOUNT -- true only when the profile is non-empty
+# AND its live session is that account.
+#
+# An empty string is NOT an error to --profile: it selects the DEFAULT profile,
+# which on this box is whichever account was last used. Assert before use.
+require_profile() {
+  local prof="$1" want="$2" got
+  if [ -z "$prof" ]; then
+    warn "no AWS profile resolved for account $want - nothing will be queried"
+    return 1
+  fi
+  got=$(aws sts get-caller-identity --profile "$prof" --query Account --output text 2>/dev/null) || true
+  if [ "$got" != "$want" ]; then
+    warn "profile '$prof' is account ${got:-none}, wanted $want - refusing to continue"
+    return 1
+  fi
+  return 0
+}
+
+# profile_for ACCOUNT -- prints the first configured profile whose LIVE session
+# is that account, or nothing. Never guesses from the profile's name: op-dev,
+# usx-dev and a dozen others are all plausible and only one is real.
+profile_for() {
+  local want="$1" p got
+  for p in $(aws configure list-profiles 2>/dev/null); do
+    got=$(aws sts get-caller-identity --profile "$p" --query Account --output text 2>/dev/null) || true
+    if [ "$got" = "$want" ]; then printf '%s' "$p"; return 0; fi
+  done
+  return 0
 }
 
 banner "RisingWave: application secrets into IaC, then the QA cutover"
@@ -231,8 +272,28 @@ for t in gh aws kubectl jq terraform python3; do
 done
 say ""
 say "AWS sessions (expire often, hence this check first):"
-acct op-dev 700736442855
-acct op-qa  527101283767
+acct "${DEV_PROFILE:-op-dev}" 700736442855
+acct "${QA_PROFILE:-op-qa}"   527101283767
+say ""
+say "Resolving profile names by ACCOUNT, not by name. This calls STS once per"
+say "configured profile, so it takes a moment."
+DEV_PROFILE=$(profile_for 700736442855)
+QA_PROFILE=$(profile_for 527101283767)
+if [ -n "$DEV_PROFILE" ]; then
+  say "  dev account 700736442855 -> profile '$DEV_PROFILE'"
+  write_env DEV_PROFILE "$DEV_PROFILE"
+else
+  warn "no configured profile has a live session for dev 700736442855."
+  warn "Log in to the right one, then re-run. Stages 4-5 need it."
+  SKIPPED+=("an AWS profile with a live session for dev 700736442855")
+fi
+if [ -n "$QA_PROFILE" ]; then
+  say "  QA account  527101283767 -> profile '$QA_PROFILE'"
+  write_env QA_PROFILE "$QA_PROFILE"
+else
+  warn "no configured profile has a live session for QA 527101283767."
+  SKIPPED+=("an AWS profile with a live session for QA 527101283767")
+fi
 say ""
 if [ -f "$QA_KUBE" ]; then say "  QA kubeconfig present"; else warn "QA kubeconfig missing: $QA_KUBE"; fi
 if [ -f "$DEV_KUBE" ]; then say "  dev kubeconfig present"; else warn "dev kubeconfig missing: $DEV_KUBE"; fi
@@ -348,19 +409,21 @@ warn "overwrites the live credential with a placeholder."
 say ""
 if ! have terraform; then
   warn "terraform absent, nothing to do here"
+elif ! require_profile "$DEV_PROFILE" 700736442855; then
+  SKIPPED+=("stage 5: dev imports, no verified dev profile")
 else
   PREFIX=op-usxpress-dev/risingwave
   for r in entity grafana kafka mongodb dex_entra_client_secret; do
     N="$PREFIX/$r"
     say "--- $r ---"
-    if ! aws secretsmanager describe-secret --profile op-dev --secret-id "$N" \
+    if ! aws secretsmanager describe-secret --profile "$DEV_PROFILE" --secret-id "$N" \
          --query Name --output text >/dev/null 2>&1; then
       say "  not present in AWS, or no permission to describe it. Apply will create it."
       continue
     fi
-    A=$(aws secretsmanager describe-secret --profile op-dev --secret-id "$N" \
+    A=$(aws secretsmanager describe-secret --profile "$DEV_PROFILE" --secret-id "$N" \
           --query ARN --output text 2>/dev/null) || true
-    V=$(aws secretsmanager describe-secret --profile op-dev --secret-id "$N" \
+    V=$(aws secretsmanager describe-secret --profile "$DEV_PROFILE" --secret-id "$N" \
           --query VersionIdsToStages --output json 2>/dev/null \
           | jq -r 'to_entries[] | select(.value[] == "AWSCURRENT") | .key' | head -1) || true
     say "  ARN     $A"
@@ -414,7 +477,9 @@ say "mongodb: dev uses np_risingwave_service@mongodb.bjpgt.mongodb.net - an"
 say "np (non-prod) user with no database in the URI, so QA can take the SAME"
 say "string. The database name comes from config, not the URI."
 say ""
-if confirm "Copy dev's MONGODB_CONNECTION_STRING into QA's secret?"; then
+if ! require_profile "$QA_PROFILE" 527101283767; then
+  SKIPPED+=("stage 7: QA secret values, no verified QA profile")
+elif confirm "Copy dev's MONGODB_CONNECTION_STRING into QA's secret?"; then
   U=$(kubectl --kubeconfig="$DEV_KUBE" -n app-risingwave get secret \
         etl-pipeline-credentials -o jsonpath='{.data.MONGODB_CONNECTION_STRING}' 2>/dev/null \
         | base64 -d) || true
@@ -424,7 +489,7 @@ if confirm "Copy dev's MONGODB_CONNECTION_STRING into QA's secret?"; then
   else
     say "read dev's URI (${#U} chars, not printed)"
     printf '{"MONGODB_CONNECTION_STRING":"%s"}' "$U" > /tmp/rw-mongo.json
-    if aws secretsmanager put-secret-value --profile op-qa \
+    if aws secretsmanager put-secret-value --profile "$QA_PROFILE" \
          --secret-id op-usxpress-qa/risingwave/mongodb \
          --secret-string "file:///tmp/rw-mongo.json" >/dev/null 2>&1; then
       say "  QA mongodb secret set"
