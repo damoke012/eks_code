@@ -483,3 +483,41 @@ ConfigMap **precedence** (`if [ -z "${!_key:-}" ]`), so `values-<env>.yaml` wins
    claiming to measure op-dev. Only the following syntax error stopped it.
 3. Both generator scripts push on every run, so a re-paste always produces a non-fast-forward
    rejection. Harmless, but add an "already pushed" check.
+
+## 2026-10-15 close — QA staged and VERIFIED
+
+PR #123 merged. Live on op-qa at 21:41:01Z:
+
+- `etl-pipeline-credentials`: `SecretSynced True`, **13 keys, none empty** — including the
+  three new ones (`MONGODB_CONNECTION_STRING`, `POSTGRES_ENTITY_USER`, `_PASSWORD`).
+- `risingwave-etl`: `Synced Succeeded`.
+
+Checked for **emptiness**, not just `Ready` — an empty value behind a green ExternalSecret
+kills the next hook pod at container creation with `RESTARTS 0`, which no restart alert sees.
+
+**The question this answers:** *can Tim promote dev → QA without breaking it?* Yes.
+
+| What he does | QA |
+|---|---|
+| Edits an applied file | **Re-applies.** Before #123, `apply.sh` line 191 `exit 1`'d and failed the whole Job. This was the real breakage |
+| Adds a file under an excluded path | ignored |
+| Adds a file under `100-Brand/` or `200-ActiveResource/` | applied; if it needs a value QA lacks, the Job fails **before applying anything** |
+| Changes nothing | `already on <digest>, nothing to promote` |
+
+The third row is the only remaining way QA goes red. **Deliberately not fixed with an
+allowlist** — I proposed one and withdrew it. An allowlist means a new file is *silently
+ignored*, a green sync over code nobody is running, which is the failure family that has cost
+this system the most. Loud red beats silent skip.
+
+Not re-verified, but reasoned from the validator's own behaviour: the eight applied files
+should have been **skipped, not re-applied**, because none of them references the new
+variables, so their rendered content and hashes are unchanged. Any file referencing
+`POSTGRES_*` is excluded — which the 2026-10-14 error proves, since those values were only
+demanded when 15 files were selected rather than 8.
+
+⚠️ **Guard that measured the wrong thing (again).** The verification block checked
+`kubectl config view` for the right server and called it a session check. That only reads the
+file. On-prem kubeconfigs shell out to `aws-iam-authenticator`, so a correct address proves
+nothing about auth — the block then produced four walls of credential errors that could have
+read as a cluster fault. A liveness guard must make a real API call:
+`kubectl get ns default -o name >/dev/null 2>&1 || echo "NOT MEASURED"`.
