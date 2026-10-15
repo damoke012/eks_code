@@ -37,11 +37,17 @@
 set -euo pipefail
 
 D=$(mktemp -d)
-gh repo clone variant-inc/iaac-risingwave-onprem "$D/repo" -- --depth 1 -q
+# --depth 50, NOT 1: the commit to revert is not the tip (#57 merged after
+# it), and a depth-1 clone has exactly one commit to search.
+gh repo clone variant-inc/iaac-risingwave-onprem "$D/repo" -- --depth 50 -q
 cd "$D/repo"
 
 SUBJ="fix(terraform): describe the live dev estate"
-SHA=$(git log --format='%H %s' -40 | grep -F "$SUBJ" | head -1 | cut -d' ' -f1)
+# || true is load-bearing: under `set -e` with pipefail, a grep that matches
+# nothing fails the ASSIGNMENT and the script exits before reaching the guard
+# below -- silently, with no output at all. The guard must be reachable.
+SHA=$(git log --format='%H %s' -50 | grep -F "$SUBJ" | head -1 | cut -d' ' -f1) || true
+echo "commits available to search: $(git log --oneline | wc -l)"
 if [ -z "$SHA" ]; then
   echo "ABORT - could not find the #56 commit in the last 40 on main"
   git log --oneline -10
