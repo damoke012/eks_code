@@ -172,3 +172,70 @@ happened, that alternative matches nothing.
 ⚠️ But `EXCLUDE_STRICT: "true"` is set on QA and QA is green, which constrains this: whatever
 `EXCLUDE_STRICT` asserts, it is **not** "every alternative matches ≥1 path", or QA would
 already be red. Read what it actually enforces before writing fix 5 — part of it may exist.
+
+---
+
+## 2026-10-15 — the shipped applier has a DIFFERENT ARCHITECTURE from the draft
+
+There is **no `render()` function** in `iaac-risingwave-cicd/build/apply.sh`. Every reference
+to "render" is a temp file and an inline substitution:
+
+    171: rendered=$(mktemp)
+    172: trap 'rm -f "$rendered"' EXIT
+    178:   rendered_content=$(<"$f")
+    181:   rendered_content="${rendered_content//"$token"/${!var}}"
+    183:   printf '%s\n' "$rendered_content" > "$rendered"
+    184:   sha=$(sha256sum "$rendered" | cut -d' ' -f1)
+
+So the draft's `render()` — the `missing=()` array, the named `UNRESOLVED` block, `return 1` —
+**is not what runs.** Everything this note said about the refusal path was read from the wrong
+architecture, not merely the wrong copy. [[edited-copy-is-not-the-shipped-copy]] one level
+deeper: the two files do not just differ in content, they differ in shape, so a line number or
+a function name from one says nothing about the other.
+
+What survives unchanged: `set -euo pipefail` (line 12), the `**` + `sort` discovery (60/62),
+the hash is of the **rendered** content (184), and `ON_ERROR_STOP` aborts on a SQL error.
+Rows 1-4, 7, 9-14 of the action table stand on those.
+
+⛔ **Still unread, and now the only open question: what an unresolved placeholder does.**
+`${!var}` at line 181 under `set -u` aborts with `line 181: var: unbound variable` — no file
+name, no key name — *unless* lines 179-180 guard it. The findings record that the applier
+"rejects a missing OR empty value", so a guard exists somewhere; its form decides whether
+rows 5, 6 and 8 fail the file or the environment. Read 160-220.
+
+⚠️ The rendered content is written **to disk** (line 171), so the applier needs a writable
+`/tmp` — [[readonly-rootfs-needs-a-tmp-volume]], which already cost QA weeks. The temp file
+holds credentials in plaintext; the `EXIT` trap is the only thing removing it.
+
+## ✅ Fix 5 already exists, and is ON for QA
+
+    91:  if [ "${EXCLUDE_STRICT:-false}" = "true" ]; then
+    92:    echo "ERROR: EXCLUDE_STRICT=true, refusing to continue on a dead pattern."
+    93:    exit 1
+
+Plus a second guard: `EXCLUDE_RE excluded all ${discovered_count} pipeline files` also exits 1.
+`values-qa.yaml` sets `EXCLUDE_STRICT: "true"`, so the regex-that-matched-nothing class is
+**already closed on QA**. Drop fix 5 from the plan.
+
+This also settles two suspicions by inference — QA is green *with the strict check on*, so
+every alternative in its `EXCLUDE_RE` must match a real path:
+
+| Suspicion | Measured | Verdict |
+|---|---|---|
+| QA dropped `scripts`, so `100-helpers.sql` applies and fails on sync 2 | **no `scripts` directory exists** in `risingwave-poc/pipelines` | ⛔ WRONG — and dropping it was *required*, since a dead pattern now exits 1 |
+| `shared` cannot match `000-shared/` | the directory is **`shared`** | ⛔ WRONG — the rename never happened here |
+
+`risingwave-poc/pipelines` is exactly: `100-Brand`, `200-ActiveResource`, `300-Employee`,
+`Template`, `config`, `shared`, `README.md`. Note `config` is **not excluded** and does not
+need to be — it holds `.env` files, and discovery globs only `*.sql` and `*.rw`.
+
+### Revised plan
+1. **PR-time dry run** — still the answer for rows 5/6/8, but its *urgency* depends on the
+   unread guard. If the guard already skips per-file, this is useful, not critical.
+2. **Idempotency lint** (`IF NOT EXISTS` / `OR REPLACE`) — unchanged, and now the top item:
+   it closes rows 7 and 9, which nothing in the shipped applier addresses.
+3. Hash normalisation — unchanged.
+4. Double-declared key — unchanged.
+5. ~~Exclusion self-test~~ — **already shipped as `EXCLUDE_STRICT`.**
+6. `syncPolicy.retry` — unchanged.
+7. CODEOWNERS on the applier pin — unchanged.
