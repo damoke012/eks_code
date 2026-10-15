@@ -124,3 +124,51 @@ things to confirm:
   `startedAt` with the failed run before believing a retry.
 - Fixing a value and un-excluding a path in one PR fails the whole hook: `apply.sh` rejects a
   **missing OR empty** value, so the value must be non-empty *before* the exclusion is dropped.
+
+---
+
+## Measured on master 2026-10-15 — 3 of 4 confirmed, 1 NOT MEASURED
+
+| # | Claim | Measured | Verdict |
+|---|---|---|---|
+| 2 | `set -euo pipefail` in the shipped applier | line 12 | ✅ |
+| 3 | discovery is `**` + plain `sort` | `globstar` line 60, `sort <<<` line 62 | ✅ |
+| 4 | `values-qa.yaml` repo == `apps.json` `ecr` | both `risingwave/poc-pipeline` | ✅ |
+| 2b | **the `render` call site aborts the run** | **no grep hit** | ⛔ **NOT MEASURED** |
+
+The shipped copy is now **9343 bytes** — the port (`iaac-risingwave-cicd#5`) landed, one byte
+off the pipeline copy's 9342. So the features are shipped; only the call site's *form* is
+unread.
+
+⛔ **The load-bearing claim is unproven.** My pattern was the literal `rendered=$(render`. It
+missed, which has two very different causes and I cannot tell them apart from here:
+
+- `rendered="$(render "$f")"` — quoted. `set -e` still aborts the whole run. Rows 5-9 stand.
+- `if ! rendered=$(render "$f"); then … continue` — **`if !` suppresses `set -e`.** The applier
+  already skips the bad file and keeps going, and rows 5, 6 and 8 are *already* per-file.
+
+In the second case the premise of this whole note — "a per-file problem fails the
+environment" — is wrong, and fixes 1 and 2 drop from critical to merely useful. Read the line
+before building anything. [[proxy-is-not-the-property]]: I grepped for a spelling and treated
+the miss as a fact about behaviour.
+
+## ⚠️ New finding — QA's exclusions dropped `scripts`
+
+QA (`values-qa.yaml` line 34):
+
+    (^|/)(Template|shared|300-Employee)(/|$)|^pipelines/100-Brand/400-sink\.rw$|^pipelines/100-Brand/001-prescript\.sql$
+
+Against the applier's own default `/(Template|scripts)/`, QA's override **keeps `Template` and
+drops `scripts`**. The applier's comment says `scripts/100-helpers.sql` uses `CREATE FUNCTION`
+with no `OR REPLACE`, "so a second run fails". If `pipelines/scripts/` exists in
+`risingwave-poc`, QA applies it and the *second* sync fails — a red that arrives one sync after
+the change that caused it. Needs the directory listing to settle.
+
+Second suspicion in the same line: the alternative is `shared`, but the applier's comment
+refers to renaming `shared/` → `000-shared/`. `(^|/)shared(/|$)` cannot match
+`pipelines/000-shared/` — the character before `shared` is `-`, not `/`. If the rename
+happened, that alternative matches nothing.
+
+⚠️ But `EXCLUDE_STRICT: "true"` is set on QA and QA is green, which constrains this: whatever
+`EXCLUDE_STRICT` asserts, it is **not** "every alternative matches ≥1 path", or QA would
+already be red. Read what it actually enforces before writing fix 5 — part of it may exist.
