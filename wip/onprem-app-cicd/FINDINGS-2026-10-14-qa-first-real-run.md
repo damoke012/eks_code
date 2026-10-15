@@ -541,3 +541,43 @@ SQL, false of the permissions.
 itself CREATE, or detect non-ownership and skip. Failing at wave 0 is never proportionate.
 
 See [[off-by-default-defeated-in-its-own-pr]].
+
+## 2026-10-15 23:00 — Employee has no real source topic
+
+Dev's `KAFKA_TOPIC_EMPLOYEE` is **`dev_timmyp_cdc_employee_json`** — a personal scratch topic,
+with a matching ad-hoc `timmyp` prefix ACL in `ix-kafka-topics-users/users/risingwave.yml`
+sitting beside `example`, `example_topic`, `example_brand` and `example_employee`.
+
+`topics/` declares only `active_resource.yml` and `brand_management.yml`. **There is no
+Employee topic anywhere**, in any environment.
+
+So Employee was never promotable, and not for any of the reasons on my list. It is not
+blocked on the `entities` database, or `wal_level`, or a QA topic that needs creating — it is
+blocked because **nobody has decided what the Employee source topic is**. Dev reads one
+person's scratch topic.
+
+**Do not invent a name for it.** That question goes to Tim.
+
+⚠️ Generalises: before planning to "create the QA equivalent" of something, check that the dev
+original is a real managed object and not a scratch one. A value in a live ConfigMap looks
+identical either way — `dev_timmyp_cdc_employee_json` only gives itself away by carrying a
+person's name. Related: [[declared-grant-is-not-the-literal-acl]].
+
+## Where 2026-10-15 ended
+
+| | |
+|---|---|
+| QA | Ready for Tim, verified. 13 keys set, sync Succeeded, REAPPLY_CHANGED on |
+| Dev | Broken by me at 22:34, recovered 22:36:05 |
+| #125 | Bootstrap hook now skips a database it does not own instead of failing at wave 0 |
+| Terraform | #55 and #57 merged, #56 reverted by #58, QA state untouched |
+
+**Unproven and worth naming:** the hook's new skip path has never executed. Its success path is
+what dev already ran. Re-enabling it on dev would exercise it — and now that it can only skip
+rather than fail, that test is safe.
+
+**Blocked on other people:** the Employee source topic (Tim), and Atlas write access to `rw_qa`
+for `np_risingwave_service` (whoever owns Atlas).
+
+**Scheduled, not forgotten:** `wal_level=logical` on QA needs a restart of `pg-postgresql`,
+which is also RisingWave's meta store — a deliberate slot, not an end-of-session action.
