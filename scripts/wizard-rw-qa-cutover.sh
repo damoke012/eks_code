@@ -342,111 +342,50 @@ note "These are coordinates, not credentials. Safe in $ENV_FILE."
 pause "Next"
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
-stage "Prepare a local terraform workspace (dev)"
-say "Import only writes STATE, so it is safe to run here. Apply is NOT: this"
-say "module's variables live in Octopus, so applies go through Octopus."
-TFDIR=/tmp/rw-tf
-rm -rf "$TFDIR"
-gh repo clone "$ONPREM_REPO" "$TFDIR" -- --depth 1 -q || warn "clone failed"
-if ! cd "$TFDIR/deploy/terraform" 2>/dev/null; then
-  warn "no deploy/terraform in the clone - skipping this stage"
-  SKIPPED+=("stage 4: terraform workspace")
-else
+stage "Adopt dev's existing estate into Terraform state"
+say "Verified 2026-10-15: this module has NO state anywhere in the dev account."
+say "Every bucket was searched. So the S3 bucket, the IRSA role, the role"
+say "policy, the five platform secrets and the five app secrets all exist and"
+say "are managed by nothing. A first apply would 409 on all 26."
 say ""
-say "Variables with no default, which terraform demands even for an import:"
-python3 - <<'PY'
-import re, pathlib
-s = pathlib.Path("variables.tf").read_text()
-blocks = re.findall(r'variable\s+"([^"]+)"\s*\{(.*?)\n\}', s, re.S)
-# A variable whose DESCRIPTION contains the word "default" must not be
-# mistaken for one that has a default. Match the argument, not the word.
-need = [n for n, b in blocks if not re.search(r"^\s*default\s*=", b, re.M)]
-print("  " + ("\n  ".join(need) if need else "(none)"))
-pathlib.Path("/tmp/rw-need-vars.txt").write_text("\n".join(need) + ("\n" if need else ""))
-PY
+say "The import is also the proof: a plan with no changes to any aws_ resource"
+say "shows the module matches a real environment, without applying anything."
 say ""
-say "Read each from the Octopus Dev scope. Blank skips it (terraform will say"
-say "if it really needed it)."
-: > /tmp/rw-dev.auto.tfvars
-while read -r v; do
-  [ -z "$v" ] && continue
-  sv="TFV_$(printf '%s' "$v" | tr -c '[:alnum:]_' _)"
-  ask "$sv" "  $v ="
-  eval "val=\${$sv:-}"
-  [ -n "$val" ] && printf '%s = "%s"\n' "$v" "$val" >> /tmp/rw-dev.auto.tfvars
-done < /tmp/rw-need-vars.txt
-cp /tmp/rw-dev.auto.tfvars ./dev.auto.tfvars 2>/dev/null || true
+warn "This is 26 imports, not 5. Earlier guidance in this wizard said five; that"
+warn "was the wrong size of problem and has been replaced."
 say ""
-say "vars captured: $(wc -l < ./dev.auto.tfvars 2>/dev/null || echo 0)"
-note "dev.auto.tfvars is in a throwaway clone under /tmp and is never committed."
-if have terraform; then
-  say "Initialising against dev state..."
-  terraform init -reconfigure -input=false \
-    -backend-config="bucket=$DEV_S3_BUCKET" \
-    -backend-config="key=$DEV_TF_STATE_KEY" \
-    -backend-config="region=$TF_REGION" \
-    -backend-config="encrypt=true" || warn "init failed - check the coordinates from stage 3"
-  say "Backing up state BEFORE touching it:"
-  terraform state pull > "$HOME/rw-dev-state-$(date +%Y%m%d-%H%M%S).json" \
-    && say "  backup written to your home directory"
-  say "Secrets already in dev state:"
-  terraform state list 2>/dev/null | grep secretsmanager || say "  (none)"
-else
-  SKIPPED+=("stages 4-5: terraform is not installed on this box")
-  warn "terraform absent - skipping the import stages"
-fi
-fi
+say "Dry run first - it prints the address -> identifier table and writes nothing:"
+note "  bash $(dirname "$0")/rw-tf-adopt.sh dev"
+say ""
+say "Then, once the table looks right:"
+note "  bash $(dirname "$0")/rw-tf-adopt.sh dev --import"
+say ""
+say "It resolves the AWS profile by account number, refuses an empty backend"
+say "value, backs state up to your home directory, imports each secret as a"
+say "PAIR, and never applies."
+say ""
+warn "PASS = no changes to any aws_ resource. The six random_password/random_id"
+warn "creates are EXPECTED and inert - they feed secret_string, which"
+warn "ignore_changes protects. Reading '6 to add' as a failure wastes an hour."
+warn "STOP if the plan wants to touch an aws_secretsmanager_secret_version:"
+warn "that is a live credential."
 pause "Next"
 
 # ── 5 ─────────────────────────────────────────────────────────────────────
-stage "Dev: import the five secrets into state"
-say "All five exist in the dev account and are absent from state. Without the"
-say "import, the first apply with the flag on fails ResourceExistsException."
+stage "Adopt QA the same way"
+say "QA is the same procedure with the QA coordinates. The script resolves the"
+say "profile by account 527101283767 on its own."
+note "  bash $(dirname "$0")/rw-tf-adopt.sh qa"
+note "  bash $(dirname "$0")/rw-tf-adopt.sh qa --import"
 say ""
-warn "Importing the VERSION matters as much as the secret. ignore_changes stops"
-warn "an UPDATE, not a CREATE: an un-imported version would be created, which"
-warn "overwrites the live credential with a placeholder."
+say "Expect a shorter table: QA has postgres, root and kafka, so the secrets"
+say "that do not exist there are listed as 'nothing to import' and an apply"
+say "would create them. That listing IS the gap report for QA."
 say ""
-if ! have terraform; then
-  warn "terraform absent, nothing to do here"
-elif ! require_profile "$DEV_PROFILE" 700736442855; then
-  SKIPPED+=("stage 5: dev imports, no verified dev profile")
-else
-  PREFIX=op-usxpress-dev/risingwave
-  for r in entity grafana kafka mongodb dex_entra_client_secret; do
-    N="$PREFIX/$r"
-    say "--- $r ---"
-    if ! aws secretsmanager describe-secret --profile "$DEV_PROFILE" --secret-id "$N" \
-         --query Name --output text >/dev/null 2>&1; then
-      say "  not present in AWS, or no permission to describe it. Apply will create it."
-      continue
-    fi
-    A=$(aws secretsmanager describe-secret --profile "$DEV_PROFILE" --secret-id "$N" \
-          --query ARN --output text 2>/dev/null) || true
-    V=$(aws secretsmanager describe-secret --profile "$DEV_PROFILE" --secret-id "$N" \
-          --query VersionIdsToStages --output json 2>/dev/null \
-          | jq -r 'to_entries[] | select(.value[] == "AWSCURRENT") | .key' | head -1) || true
-    say "  ARN     $A"
-    say "  version $V"
-    if [ -z "$A" ] || [ -z "$V" ]; then
-      warn "  could not resolve both - skipping, do not guess"
-      SKIPPED+=("import dev $r")
-      continue
-    fi
-    if confirm "  import $r (secret + version)?"; then
-      terraform import -input=false -var="manage_app_secrets=true" \
-        "aws_secretsmanager_secret.$r[0]" "$A" || warn "  secret import failed"
-      terraform import -input=false -var="manage_app_secrets=true" \
-        "aws_secretsmanager_secret_version.$r[0]" "$A|$V" || warn "  version import failed"
-    fi
-  done
-  say ""
-  say "Now the plan. What you want to see is NO changes to these five:"
-  terraform plan -input=false -var="manage_app_secrets=true" -no-color \
-    | tail -25 || warn "plan failed"
-  warn "If the plan wants to REPLACE or UPDATE a secret_string, STOP. Restore"
-  warn "from the backup in your home directory and tell me what it said."
-fi
+warn "prod is REFUSED by the script, deliberately. Prod has none of these"
+warn "secrets, so it needs no import at all - the flag on, applied via Octopus"
+warn "once dev and QA both plan clean. Applying an unproven module to prod"
+warn "first would invert the promotion order."
 pause "Next"
 
 # ── 6 ─────────────────────────────────────────────────────────────────────
