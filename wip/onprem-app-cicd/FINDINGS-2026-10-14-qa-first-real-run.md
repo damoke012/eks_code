@@ -521,3 +521,23 @@ file. On-prem kubeconfigs shell out to `aws-iam-authenticator`, so a correct add
 nothing about auth — the block then produced four walls of credential errors that could have
 read as a cluster fault. A liveness guard must make a real API call:
 `kubectl get ns default -o name >/dev/null 2>&1 || echo "NOT MEASURED"`.
+
+## 2026-10-15 22:30 — I broke dev, and what it taught
+
+PR #97 (bootstrap hook) merged with `bootstrap.enabled: true` on dev. The hook failed with
+`permission denied for database entities` — dev's admin can connect but cannot CREATE in a
+database it does not own, created by hand on 2026-10-09.
+
+It is a Sync hook at wave 0 and `etl-pipeline-apply` is wave 1, so **dev stopped applying
+anything**. PR #124 set it false; a forced sync (`.operation` patch) recovered dev at
+22:36:05Z, started 22:35:55Z — later than the 22:34:42Z failure, which is the proof it re-ran
+rather than replayed.
+
+**My error:** I enabled it on dev in the same PR that introduced it, against that PR's own
+stated design, on the reasoning that the objects existed so it would be a no-op. True of the
+SQL, false of the permissions.
+
+**Before this is enabled anywhere**, the hook must handle a database it does not own — grant
+itself CREATE, or detect non-ownership and skip. Failing at wave 0 is never proportionate.
+
+See [[off-by-default-defeated-in-its-own-pr]].
