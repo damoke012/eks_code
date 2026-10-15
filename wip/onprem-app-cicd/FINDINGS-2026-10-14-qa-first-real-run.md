@@ -402,3 +402,84 @@ makes it inert either way ([[risingwave-onprem-has-no-promotion-gate]]).
   gate a payload on a hash, and chunk it so a resend is cheap.
 - `terraform fmt -check` exit 3 named a file I never touched. An exit code is about the run,
   not about the change — read *which* file it printed ([[a-guard-can-measure-the-wrong-thing]]).
+
+---
+
+# Addendum 2026-10-15 (4) — QA staged, and the last manual step removed
+
+## PRs today
+
+| PR | Repo | State |
+|---|---|---|
+| #121, #122 | risingwave-pipeline | merged — QA/prod promote on explicit dispatch only |
+| #55 | iaac-risingwave-onprem | merged — five app secrets declared, flag off |
+| #56 | iaac-risingwave-onprem | merged — module now describes the live dev estate |
+| **#57** | iaac-risingwave-onprem | **open** — third-party values from Octopus |
+| #97 | risingwave-pipeline | open, **CONFLICTING** — needs a rebase, not a decision |
+| #115 | risingwave-pipeline | open, contradicts the direction below — close it |
+
+## QA's secrets now exist
+
+Created by hand, deliberately, as pre-staging for the Terraform adoption:
+
+- `op-usxpress-qa/risingwave/mongodb` — **copied** from dev, because dev and QA share ONE
+  non-prod Atlas user (`np_risingwave_service@mongodb.bjpgt.mongodb.net`) and the URI names no
+  database.
+- `op-usxpress-qa/risingwave/entity` — **generated**, 32 chars, because this is a
+  per-environment Postgres role that does not exist yet. Username `rw_entity_app`, matching dev.
+
+QA now holds all five: postgres, root, kafka, mongodb, entity.
+
+⚠️ **Order rule, and it would have broken QA.** ESO writes a **partial** secret when a key
+cannot resolve — `SecretSyncedError` while still writing what it could, and the pod then dies
+at container creation with `RESTARTS 0` ([[eso-writes-partial-secrets]]). So the AWS secret
+must exist **before** the `values-qa.yaml` ExternalSecret entry, never the reverse.
+
+## The design decision: third-party values come from Octopus (PR #57)
+
+Doke's call, and it is the right one. `deploy.ps1` already exports every Octopus variable
+named `TF_*` as an environment variable — *"so Terraform picks up TF_VAR_* automatically"* —
+so three **sensitive** Octopus variables reach Terraform with **no script change**:
+
+```
+TF_VAR_kafka_values     TF_VAR_mongodb_values     TF_VAR_dex_values
+```
+
+One `map(string)` per secret, not one variable per key, so adding a key later is a data change
+in Octopus rather than code here. `secret_string = jsonencode(merge(local.X_defaults,
+var.X_values))`.
+
+**Why it is safe:** absent the variables, `merge()` leaves the `UNVERIFIED_` sentinels and
+nothing changes. Supplied, the **first** apply writes the real credential, and
+`ignore_changes = [secret_string]` stops every later apply touching it. **It can only ever act
+once per environment.**
+
+Net effect on prod: set three Octopus variables, flip the flag, and the first apply creates all
+ten secrets with real values. No `aws secretsmanager create-secret` by hand, ever again.
+
+## Two things reading dev corrected
+
+- **`mongodb` carries THREE keys** — `MONGODB_CONNECTION_STRING`, `_USERNAME`, `_PASSWORD` —
+  while the module declared one. The ETL consumes only the connection string, but a new
+  environment would have come up missing two. Fixed in #57.
+- **grafana admin username is `admin`**, so `secrets-app.tf`'s default was right. Verified
+  rather than assumed.
+
+## Config ownership: values-<env>.yaml, not the image
+
+Baking `pipelines/config/<env>.env` into the image means one digest behaves differently per
+environment, which contradicts the same-digest promotion chain. `apply.sh` already gives the
+ConfigMap **precedence** (`if [ -z "${!_key:-}" ]`), so `values-<env>.yaml` wins today and the
+`.env` is only a fallback. Direction: move the keys into the values files and drop
+`pipelines/config/`. **PR #115 does the opposite and should be closed.**
+
+## Traps
+
+1. A fenced code block of **any** language gets pasted into the shell, not just ```bash. Indent
+   non-runnable code instead.
+2. A long block genuinely truncates — and the tell is the **shell** reporting `syntax error`,
+   not the echo looking scrambled. In one truncation the `K=` assignment was lost and
+   `kubectl config view` fell through to the DEFAULT kubeconfig, reporting **qa-one EKS** while
+   claiming to measure op-dev. Only the following syntax error stopped it.
+3. Both generator scripts push on every run, so a re-paste always produces a non-fast-forward
+   rejection. Harmless, but add an "already pushed" check.
