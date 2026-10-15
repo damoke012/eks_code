@@ -218,6 +218,42 @@ The general form: **a flag's value must be asserted before the flag is used**, a
 assertion names what it expected. One `grep` that matches nothing is otherwise indistinguishable
 from a correct answer.
 
+**And a check must name WHICH fault it found.** Measured 2026-10-15: a block
+reported `NOT MEASURED - no valid session for op-dev`, so the advice was
+`aws sso login --profile op-dev`. The profile did not exist on that box, and a
+login can never create one. Three faults had been collapsed into one message:
+
+| Fault | Fix |
+|---|---|
+| profile not configured | add it to `~/.aws/config`; a login cannot help |
+| session expired | `aws sso login --profile <p>` |
+| profile resolves to the wrong account | use a different profile |
+
+A `case` with one catch-all arm turns all three into the middle one. Test for
+the profile's existence separately:
+
+```bash
+if ! aws configure list-profiles 2>/dev/null | grep -qxF "$p"; then
+  echo "$p NOT CONFIGURED on this box - a login cannot fix this"
+elif ! A=$(aws sts get-caller-identity --profile "$p" --query Account --output text 2>/dev/null); then
+  echo "$p session invalid - run: aws sso login --profile $p"
+elif [ "$A" != "$WANT" ]; then
+  echo "$p is account $A, wanted $WANT - wrong profile for this step"
+fi
+```
+
+**Better still, do not take the profile's name from me at all.** `op-dev`,
+`usx-dev` and a dozen others are equally plausible and only one is real.
+Resolve it by the thing that actually identifies the target — the account
+number:
+
+```bash
+for p in $(aws configure list-profiles 2>/dev/null); do
+  A=$(aws sts get-caller-identity --profile "$p" --query Account --output text 2>/dev/null) || true
+  [ "$A" = "$WANT" ] && { echo "$p"; break; }
+done
+```
+
 ## ⚠️ Not a mode: the echo scrambles, the bytes do not
 
 Measured 2026-10-15. A pasted block came back in the transcript as:
