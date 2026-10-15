@@ -1,6 +1,6 @@
 ---
 name: handing-over-commands
-description: Write a shell command for Doke to paste on WSL — before handing over any runnable block, and when a handed-over command fails for a reason unrelated to the task ("command not found", a truncated paste, a shell stranded at a > prompt, a closed shell, "No commits between main and main", a guard that fired on a missing binary or aborted a correct change). Eight measured failure modes, each with the positive form.
+description: Write a shell command for Doke to paste on WSL — before handing over any runnable block, and when a handed-over command fails for a reason unrelated to the task ("command not found", a truncated paste, a shell stranded at a > prompt, a closed shell, "No commits between main and main", a guard that fired on a missing binary or aborted a correct change). Nine measured failure modes, each with the positive form, plus the display artefact that imitates two of them.
 ---
 
 # Handing over commands
@@ -218,6 +218,39 @@ The general form: **a flag's value must be asserted before the flag is used**, a
 assertion names what it expected. One `grep` that matches nothing is otherwise indistinguishable
 from a correct answer.
 
+## ⚠️ Not a mode: the echo scrambles, the bytes do not
+
+Measured 2026-10-15. A pasted block came back in the transcript as:
+
+    fi )--title "feat(promote): promote QA and prod..." --body-file "$B"
+
+The `fi )` had jumped ahead of the line it followed, and a heredoc block echoed with its
+closing lines spliced into the middle of the Python. Both look exactly like mode 2 and mode 7.
+
+**They were not.** The commands ran correctly and opened the PR. What interleaves is the
+terminal's *echo* of a multi-line paste with the output of the lines already executing — a
+display artefact. The bytes arrive intact.
+
+I read the scramble as corruption, announced it to Doke, and rewrote the remaining blocks to
+remove every `\` continuation. That work bought nothing, and the message asserting the paste
+was corrupting was wrong. The real failure in the same sequence was ordinary: **a block was
+skipped**, and its own `NOT MEASURED` guard said so immediately.
+
+**How to tell them apart — never from the echo:**
+
+* Corruption shows up in a **measurement**: a line count that disagrees, `syntax OK` failing,
+  a `sha256sum` mismatch, a shell stranded at `>`.
+* A scramble shows up only in how the paste *looks*, while every guard passes and the command
+  does its job.
+
+So judge the paste by the arrival check, not by reading it back. And note that `wc -l` plus a
+syntax check is weaker than it looks for a generated script — a file can keep its line count
+and still have lost a block. Count the **structure**: `grep -c 'hits += 1'` against an expected
+number is what actually proved the 42-line patch script had all four of its replacements.
+
+This is [[transport-failure-not-a-verdict]] turned around: not a transport failure reported as
+a finding about the system, but a *display* artefact reported as a finding about the transport.
+
 ## Before sending any block
 
 - [ ] Every line under ~120 characters.
@@ -235,6 +268,11 @@ from a correct answer.
       block of its own and passed with `--body-file`.
 - [ ] Every block names its shell in the preceding sentence, and is syntactically invalid in
       the other shell so a misdirected paste fails instead of half-running.
+- [ ] A generated script's arrival check counts its **structure** (`grep -c` on a repeated
+      marker, against a stated number), not just `wc -l` — a file can keep its line count and
+      still have lost a block.
+- [ ] A scrambled echo is judged by the guards, never by reading it back. Every guard passing
+      means the paste arrived.
 
 ## Why this exists
 
