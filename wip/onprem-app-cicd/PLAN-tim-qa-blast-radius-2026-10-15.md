@@ -239,3 +239,84 @@ need to be — it holds `.env` files, and discovery globs only `*.sql` and `*.rw
 5. ~~Exclusion self-test~~ — **already shipped as `EXCLUDE_STRICT`.**
 6. `syncPolicy.retry` — unchanged.
 7. CODEOWNERS on the applier pin — unchanged.
+
+---
+
+## ⛔ SETTLED — there is no placeholder validation in the shipped applier
+
+Lines 177-185, read verbatim:
+
+    rendered_content=$(<"$f")
+    while IFS= read -r token; do
+      var="${token:1:${#token}-2}"
+      rendered_content="${rendered_content//"$token"/${!var}}"
+    done < <(grep -oE '%[A-Z][A-Z0-9_]*%' "$f" | sort -u)
+
+No `missing` array. No `-z` test. No `UNRESOLVED` message. No `return 1`. The only thing
+standing between a bad value and the database is bash's own `set -u`, and it only covers half
+the cases:
+
+| Value | What bash does | Result |
+|---|---|---|
+| **unset** | `set -u` fires on `${!var}` | `line 181: FOO: unbound variable` — whole run dies. No file name, no key name |
+| **set but empty** | `${!var}` → `''`, **no error** | DDL applied with an empty string, hashed, and **recorded in `pipeline_applied` as a success** |
+
+**The empty case is the worst thing in this investigation.** `[[eso-writes-partial-secrets]]`
+means a `SecretSyncedError` still writes the keys it *could* resolve — so a partial secret
+plus this applier applies DDL with empty topics or empty credentials, records it green, and
+leaves no trace but the object itself. When the real value lands the hash changes, so on an
+environment with `REAPPLY_CHANGED=false` it is then **REFUSED forever**.
+
+This retroactively explains why checking QA's 13 keys for *emptiness* rather than `Ready`
+mattered so much on 10-14. That was the only thing between QA and silently-empty DDL.
+
+### And the regex is wider than the draft's
+`%[A-Z][A-Z0-9_]*%` — one character minimum, where the draft required two. `%` is SQL's
+`LIKE` wildcard, so **`WHERE x LIKE '%ABC%'` is read as the placeholder `%ABC%`** and aborts
+the run with `ABC: unbound variable`. New row in the action table, and entirely invisible in
+review.
+
+### Rows, settled
+
+| # | What Tim does | QA | Why |
+|---|---|---|---|
+| 5 | adds a file using a value QA lacks | 🔴 **whole run dies** | `set -u` on `${!var}`, before anything applies |
+| 5b | **a value QA has but is EMPTY** | ⚠️ **silently applies broken DDL** | no error, recorded as applied |
+| 6 | adds a new pipeline directory | 🔴 whole run dies | as #5 |
+| 15 | **writes `LIKE '%PATTERN%'`** | 🔴 whole run dies | the wildcard is parsed as a placeholder |
+
+### `DRY_RUN=true` cannot be the PR gate as written
+The substitution runs at line 178, but `DRY_RUN` is only tested at ~line 208 — *after*
+`prev=$(pg -tAq -c "SELECT sha256 …")`. **A dry run needs a Postgres connection.** So fix 1
+becomes a small additive change rather than a free win.
+
+## Final plan
+
+| # | Change | Closes | Risk |
+|---|---|---|---|
+| 1 | **`VALIDATE_ONLY=true`** in `apply.sh`: discovery → exclusion → substitution → exit, no DB. Collect **every** missing key with its file instead of dying on the first with `unbound variable` | 5, 6, 15 — and makes 2 possible | additive; no env opts in until it does |
+| 2 | **PR check in `risingwave-poc`** running `VALIDATE_ONLY` against a committed fixture of each env's placeholder **names** (no values) | 5, 6, 15 at PR time | new workflow + fixture; touches no cluster |
+| 3 | **Reject an empty value** the way an unset one is rejected — `: "${!var:?}"` or an explicit test | **5b** | behaviour change; QA2 → dev → QA. Will surface anything already applied empty |
+| 4 | **Idempotency lint** — every `CREATE` is `IF NOT EXISTS`/`OR REPLACE` | 7, 9 (rename, renumber) | lint only |
+| 5 | Narrow the placeholder regex to `[A-Z][A-Z0-9_]+` and require a word boundary, or make `LIKE` patterns escapable | 15 | behaviour change; check no live placeholder is 1 char |
+| 6 | Normalise comments/whitespace before hashing | 2 (cosmetic edit rebuilds DDL) | behaviour change |
+| 7 | Settle `KAFKA_TOPIC_ACTIVE_RESOURCE`, declared in both the ConfigMap and `qa.env` | 10 (silently void edits) | Idris's owed PR |
+| 8 | `syncPolicy.retry` on QA's `app-risingwave` | needing Doke to write `.operation` | one field |
+| 9 | CODEOWNERS on `build-sql-image.yml` | 12 (unreviewed applier pin bump) | one file |
+
+**3 is the one to do first.** It is the only item on this list where QA is wrong and *green*;
+everything else is loud. Note it is the inverse of the usual off-by-default rule — making the
+applier stricter can turn a currently-green environment red, so it needs a plan for whatever
+it finds, not just a flag.
+
+~~Fix 5 (exclusion self-test)~~ already shipped as `EXCLUDE_STRICT`.
+
+## Traps added
+
+- `apply.sh` has **two architectures** in circulation. The draft in `wip/reapply/` has a
+  `render()` function with a real validator; the shipped copy has neither. Every statement in
+  this note that was sourced from the draft was wrong about the refusal path. Read the
+  **shipped** file, by line number, before quoting its behaviour.
+- A guard's *absence* is invisible to a grep for the guard's name. I searched for
+  `rendered=$(render` and read the miss as a question about formatting, when it was telling me
+  the function did not exist. **A pattern that does not match says nothing about why.**

@@ -319,6 +319,18 @@ those paths at all yet:
 entry must come off **last** — after the system exists, the secret exists, and the key is
 non-empty. Un-excluding first fails the whole sync-hook Job, not just that file.
 
+> ⛔ **CORRECTED 2026-10-15, read from the SHIPPED applier.** "Rejects a missing OR empty
+> value" is **half wrong**, and the wrong half is the dangerous one. There is no validation
+> code at all — line 181 is a bare `${!var}` indirect expansion:
+> * **missing** ⇒ `set -u` fires, `line 181: FOO: unbound variable`, the whole run dies. No
+>   file name, no key name. Loud, but useless as a diagnostic.
+> * **empty** ⇒ `${!var}` expands to the empty string with **no error**. The DDL is applied
+>   with `''` where the value belonged, hashed, and recorded in `pipeline_applied` as a
+>   success.
+> So the ordering advice still holds, but not for the stated reason: un-excluding a path whose
+> keys exist-but-are-empty does **not** fail — it applies broken DDL silently. See
+> [[empty-value-renders-as-empty-string]].
+
 ## ⚠️ `op-qa-platform-admin` still cannot list secrets
 
 ```
