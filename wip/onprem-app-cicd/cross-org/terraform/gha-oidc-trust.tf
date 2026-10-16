@@ -1,45 +1,88 @@
-# Trusting an app repo in ANOTHER GitHub org to push to one ECR repository.
+# GitHub Actions -> ECR push roles in 064859874041 (Infrastructure-Common).
 #
-# This is the whole cross-org credential story. The app team is never handed a
-# secret; we add their repo to a trust policy on our side, and GitHub's OIDC
-# token does the rest. Removing their access is deleting a line here.
+# What these are for: a workflow in a named repo gets a short-lived AWS token because
+# the role trusts that exact repo and ref. No secret is stored, rotated or leaked, and
+# removing a repo's access is deleting an entry from `apps`.
 #
-# ⚠️ SET github_org / github_repo BEFORE APPLYING. The `sub` claim is an exact
-#    string match -- an app repo that MOVES ORG stops authenticating, with no
-#    warning and no config change on their side. That is the single most likely
-#    failure of this design, and it is why the org question from the 2026-10-07
-#    call has to be settled before this is applied, not after.
+# ⚠️ These three roles ALREADY EXIST and were created by hand. This file must be
+#    IMPORTED onto them, never applied fresh: a second definition of a live role is how
+#    a destroy removes the real one. See two-projects-one-resource.
+#
+#      terraform import 'aws_iam_role.ecr_push["risingwave-etl"]' gha-risingwave-etl-ecr-push
+#      terraform import 'aws_iam_role.ecr_push["risingwave-poc"]' gha-risingwave-poc-ecr-push
+#      terraform import 'aws_iam_role.ecr_push["sql-applier"]'    gha-sql-applier-ecr-push
+#      terraform import 'aws_iam_role_policy.push["risingwave-etl"]' gha-risingwave-etl-ecr-push:ecr-push
+#      terraform import 'aws_iam_role_policy.push["risingwave-poc"]' gha-risingwave-poc-ecr-push:ecr-push
+#      terraform import 'aws_iam_role_policy.push["sql-applier"]'    gha-sql-applier-ecr-push:ecr-push
+#
+#    The map KEY renders the role name as gha-${key}-ecr-push, so the keys below are not
+#    cosmetic — a key of "rw-poc" would create gha-rw-poc-ecr-push instead of importing
+#    gha-risingwave-poc-ecr-push. Measured against the live roles 2026-10-16.
+#
+# ⚠️ The `sub` claim is an exact string match. An app repo that MOVES ORG stops
+#    authenticating with no warning and no change on their side.
 
 variable "apps" {
-  description = "Each app repo trusted to push to its own ECR repository."
+  description = "Each repo trusted to push, and the ECR repositories it may push to."
   type = map(object({
-    github_org  = string # e.g. "variant-inc" or the USX org -- NOT guessed, confirmed
+    github_org  = string
     github_repo = string
-    ecr_repo    = string
-    branches    = list(string)
+    ecr_repos   = list(string)
+    refs        = list(string) # full git refs, e.g. refs/heads/master
+    description = string
   }))
-  default = {}
 
-  # ⚠️ These resources ALREADY EXIST in 064859874041 (measured 2026-10-07):
-  #     ECR repo       risingwave/etl-pipeline
-  #     IAM role       gha-risingwave-etl-ecr-push
-  #     OIDC provider  token.actions.githubusercontent.com
-  # So this file must be IMPORTED or reconciled against whatever already manages
-  # them -- creating a second definition of the same role is how a destroy takes
-  # out a live one. Find the owning repo before applying. See two-projects-one-resource.
-  #
-  # Confirmed 2026-10-07:
-  #   rw-poc = {
-  #     github_org  = "usxpressinc"
-  #     github_repo = "risingwave-poc"
-  #     ecr_repo    = "risingwave/etl-pipeline"
-  #     branches    = ["master"]        # NOT main -- that repo defaults to master
-  #   }
+  # Measured from the live roles on 2026-10-16, not inferred from their descriptions:
+  # gha-risingwave-etl-ecr-push's description claims "main branch only" while its trust
+  # policy pins master. The policy is the truth; the description is corrected here, so
+  # the first apply will show that change.
+  default = {
+    risingwave-etl = {
+      github_org  = "variant-inc"
+      github_repo = "risingwave-pipeline"
+      ecr_repos   = ["risingwave/etl-pipeline", "risingwave/poc-pipeline"]
+      refs        = ["refs/heads/master"]
+      description = "GitHub Actions push to ECR. variant-inc/risingwave-pipeline, master only."
+    }
+    risingwave-poc = {
+      github_org  = "usxpressinc"
+      github_repo = "risingwave-poc"
+      ecr_repos   = ["risingwave/poc-pipeline", "risingwave/sql-applier"]
+      refs        = ["refs/heads/master"]
+      description = "GitHub Actions: build the RW SQL pipeline image. usxpressinc/risingwave-poc, master only."
+    }
+    sql-applier = {
+      github_org  = "variant-inc"
+      github_repo = "iaac-risingwave-cicd"
+      ecr_repos   = ["risingwave/sql-applier"]
+      refs        = ["refs/heads/main"]
+      description = "GitHub Actions: publish the SQL applier base image. variant-inc/iaac-risingwave-cicd, main only."
+    }
+  }
+}
+
+# ⚠️ KNOWN OVER-SCOPE, reproduced here DELIBERATELY so the import plan is clean.
+#    Two roles reach an image they do not own:
+#      risingwave-etl  -> poc-pipeline  (the image QA and dev actually run, owned by the poc repo)
+#      risingwave-poc  -> sql-applier   (the base image every on-prem app build depends on)
+#    So a bad build in either repo can overwrite the other's image. That contradicts the
+#    one-repo-one-image intent. Tighten it as its OWN change after the import, where it
+#    shows up as a reviewable diff instead of vanishing into a state operation.
+
+variable "tags" {
+  description = "Applied to every role. The roles currently carry NO tags at all."
+  type        = map(string)
+  default = {
+    ManagedBy = "terraform"
+    Component = "github-actions-ecr-push"
+    Ticket    = "INFRA-1706"
+  }
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
-# One OIDC provider per account, created once. Reference it, don't recreate it.
+# One OIDC provider per account, created once. Reference it, never recreate it.
 data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
@@ -62,19 +105,13 @@ data "aws_iam_policy_document" "assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Pinned to repo + branch. Deliberately NOT pinned to `environment:` --
-    # a sub containing environment:<name> only matches when the calling JOB
-    # declares `environment:`, and a caller that omits it fails with a generic
-    # "Not authorized to perform sts:AssumeRoleWithWebIdentity" that reads as a
-    # permissions problem rather than a missing declaration. We have lost time
-    # to that before. If an environment pin is ever wanted, the caller workflow
-    # must be changed in the same PR.
+    # StringEquals, not StringLike: an exact ref, so a tag or another branch cannot assume.
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        for b in each.value.branches :
-        "repo:${each.value.github_org}/${each.value.github_repo}:ref:refs/heads/${b}"
+        for r in each.value.refs :
+        "repo:${each.value.github_org}/${each.value.github_repo}:ref:${r}"
       ]
     }
   }
@@ -83,21 +120,22 @@ data "aws_iam_policy_document" "assume" {
 resource "aws_iam_role" "ecr_push" {
   for_each = var.apps
 
-  name               = "gha-${each.key}-ecr-push"
-  description        = "GitHub Actions push for ${each.value.github_org}/${each.value.github_repo}"
-  assume_role_policy = data.aws_iam_policy_document.assume[each.key].json
+  name                 = "gha-${each.key}-ecr-push"
+  description          = each.value.description
+  assume_role_policy   = data.aws_iam_policy_document.assume[each.key].json
   max_session_duration = 3600
+  tags                 = var.tags
 }
 
-# Scoped to ONE repository. A compromised app pipeline cannot reach another
-# app's images, and cannot delete anything.
 data "aws_iam_policy_document" "push" {
   for_each = var.apps
 
+  # GetAuthorizationToken has no resource form, so it is "*" by necessity. It only
+  # mints a registry login; the statement below is what bounds the actual push.
   statement {
     effect    = "Allow"
     actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"] # this action has no resource form
+    resources = ["*"]
   }
 
   statement {
@@ -112,7 +150,8 @@ data "aws_iam_policy_document" "push" {
       "ecr:GetDownloadUrlForLayer",
     ]
     resources = [
-      "arn:aws:ecr:us-east-2:${data.aws_caller_identity.current.account_id}:repository/${each.value.ecr_repo}"
+      for r in each.value.ecr_repos :
+      "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/${r}"
     ]
   }
 }
@@ -125,7 +164,7 @@ resource "aws_iam_role_policy" "push" {
   policy = data.aws_iam_policy_document.push[each.key].json
 }
 
-output "push_role_arns" {
-  description = "Paste the matching ARN into each app's caller workflow."
+output "role_arns" {
+  description = "Paste these into each repo's workflow as the role-to-assume."
   value       = { for k, r in aws_iam_role.ecr_push : k => r.arn }
 }
