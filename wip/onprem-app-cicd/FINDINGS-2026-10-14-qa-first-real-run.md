@@ -593,3 +593,63 @@ for `np_risingwave_service` (whoever owns Atlas).
 
 **Scheduled, not forgotten:** `wal_level=logical` on QA needs a restart of `pg-postgresql`,
 which is also RisingWave's meta store — a deliberate slot, not an end-of-session action.
+
+---
+
+## 2026-10-16 — risingwave-pipeline has a SECOND live SQL apply path
+
+`gh workflow list --all` on `variant-inc/risingwave-pipeline`: **`Pipeline Query Runner`
+(`pipeline.yaml`) is `active`**, not disabled. It triggers on **push to `master`, `qa` or
+`dev`** with `paths: ['pipelines/**']`, detects changed `.sql`/`.rw`, and applies them — its
+own header describes `validate -> approve (leader must approve) -> execute`, with an
+env-detect step mapping ref to account, namespace and role.
+
+So SQL reaches a cluster two ways:
+
+| Path | Source of SQL | Gate |
+|---|---|---|
+| chart + Argo CD sync hook | the `poc-pipeline` image, built from `usxpressinc/risingwave-poc` | `promote.yml` digest chain, `pipeline_applied` ledger |
+| **`pipeline.yaml`** | **`variant-inc/risingwave-pipeline/pipelines/` — the MIRROR** | a manual approval, and nothing else |
+
+That is INFRA-1705's divergence with a delivery mechanism attached. The mirror is not a stale
+copy sitting harmlessly in git: a merge to the `qa` branch of our own repo applies the
+mirror's SQL to QA, outside the digest chain and outside the ledger. The mirror is also the
+copy that carries `Brand/300-transform.sql`, which the source of truth does not have.
+
+### Which directories are actually referenced
+
+`grep -hoE "pipelines/(shared|Brand|employee|canary|Template|secret_manager)"` across all six
+live workflows:
+
+    14  pipelines/shared     <- secret.yaml (1) + user-access-deploy.yaml (13)
+     1  pipelines/canary     <- pipeline.yaml
+
+`Brand`, `employee`, `Template` and `secret_manager` are named by **nothing**. They are swept
+only by `pipeline.yaml`'s `pipelines/**` glob.
+
+### ⛔ The ordering trap — deleting first triggers the thing you are removing
+
+A push that DELETES files under `pipelines/` is a push matching `paths: ['pipelines/**']`, so
+the deletion itself fires `Pipeline Query Runner`, whose change detection is diff-based
+(line 103: `grep -E '^pipelines/.*(\.sql|\.rw)$'`). The deletion commit therefore presents the
+removed files as "changed" to a workflow whose job is to apply them. The approval gate is the
+only thing standing in front of it.
+
+**Correct order, same shape as the exclusion/value ordering above:**
+1. Narrow `pipeline.yaml`'s `paths` to `pipelines/shared/**` — the only tree anything still
+   names — or retire the workflow. This is the guard.
+2. *Then* delete `pipelines/{Brand,employee,Template,secret_manager}`.
+3. Keep `pipelines/shared/` (two live deployment workflows read it) and `pipelines/canary/`.
+
+Reversing 1 and 2 asks a live apply workflow to act on a commit that deletes its inputs.
+
+### The open decision, which is bigger than the ticket
+`pipeline.yaml` predates the chart. Now that the chart plus Argo CD is the delivery path,
+a second apply mechanism reading a different copy of the SQL is the defect, not the mirror.
+Narrowing it to `shared/**` keeps it alive for secret and user-access deployment; retiring it
+means moving those two consumers somewhere else first. That is a decision for Doke, not a
+tidy-up.
+
+**Correction to this file's own earlier framing:** I twice described 1705 as "delete the
+loser, one commit". It is not. `shared/` is load-bearing, and the delete is gated behind a
+trigger change.
