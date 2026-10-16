@@ -139,6 +139,23 @@ bash scripts/rw-prod-status.test.sh || findings=$((findings+1))
 bash scripts/rw-fleet-licence-status.test.sh || findings=$((findings+1))
 bash scripts/flux-kustomization-health.test.sh || findings=$((findings+1))
 bash scripts/lib-onprem-ctx.test.sh || findings=$((findings+1))
+bash scripts/prune-codespace-cache.test.sh || findings=$((findings+1))
 python3 scripts/lib-pod-health.test.py || findings=$((findings+1))
+
+section "13. Codespace disk — caches that keep every version"
+# Measured 2026-10-16: the workspace hit 90% (2.1G of 20G) and VS Code raised a low-disk
+# warning. ~/.cache/copilot held 27 Copilot CLI versions at ~180M each = 4.8G, 28% of
+# everything used, while the repo itself was 74M. `copilot update` never removes the
+# version it supersedes, so this refills at roughly 1.6G/month. Reported here, pruned
+# deliberately by scripts/prune-codespace-cache.sh --apply.
+used=$(df --output=pcent / | tail -1 | tr -dc 0-9)
+avail=$(df -BM --output=avail / | tail -1 | tr -dc 0-9)
+out=$(bash scripts/prune-codespace-cache.sh 2>&1)
+fence "root filesystem: ${used}% used, ${avail}M available (warn at 80%)"
+fence "$out"
+if [ "$used" -ge 80 ]; then
+  fence "DISK LOW: ${used}% used - run: bash scripts/prune-codespace-cache.sh --apply"
+  findings=$((findings+1))
+fi
 
 printf '\nweekly-maintenance: %s finding(s)\n' "$findings"
