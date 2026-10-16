@@ -77,12 +77,33 @@ CLOSE = [
      "This item carried from Sprint 5 and then Sprint 6. INFRA-1718 should be split per "
      "document if it does not finish next sprint - re-estimating it as one item is what "
      "has failed twice."),
+
+    ("INFRA-1709",
+     "Closing. Measured on op-usxpress-qa 2026-10-16 with scripts/rw-sql.sh:\n\n"
+     "SOURCES (2): public.brand_source_kafka, public.activeresource_source_kafka\n"
+     "MATERIALIZED VIEWS (4): public.brand_mv_raw, public.brand_mv_state, "
+     "public.brand_mv_flat, public.canary_promotion_mv\n"
+     "SINKS (1): public.activeresource_sink\n\n"
+     "So the objects exist at the destination - the Job is applying SQL, not merely "
+     "reporting Succeeded. No Employee objects, which is correct: Employee is excluded "
+     "on QA by EXCLUDE_RE. The canary MV is there too, so the promotion path has run "
+     "end to end.\n\n"
+     "Scope items 1-3 are done: the chart is in a repo Argo CD reads "
+     "(risingwave-pipeline deploy/chart), values-qa.yaml pins the image by DIGEST, and "
+     "the Application on op-usxpress-qa is Synced/Succeeded over real objects.\n\n"
+     "ONE CRITERION DELIBERATELY NOT MET. This ticket asks for QA to pick up a new "
+     "digest 'without a human touching anything but the merge button'. PR #122 made QA "
+     "and prod promotion DISPATCH-ONLY on purpose: a scheduled run has no inputs, so "
+     "only dev can pass the gate. Before that, one 10-minute tick could carry an image "
+     "ECR -> dev -> QA -> prod-PR with zero soak. The criterion is out of date, not the "
+     "system. Automatic QA promotion is a separate decision if it is still wanted.\n\n"
+     "Scope item 5 - retiring the duplicated pipelines/ in risingwave-pipeline - is "
+     "INFRA-1705 and stays there."),
 ]
 
 SKIP = [
     ("INFRA-1708", "pin is on an unmerged branch; master still reads trivy-action@master"),
     ("INFRA-1705", "needs Tim on Brand/300-transform.sql, then the deletion"),
-    ("INFRA-1709", "QA sources/sinks unmeasured"),
     ("INFRA-1706", "not started"),
 ]
 
