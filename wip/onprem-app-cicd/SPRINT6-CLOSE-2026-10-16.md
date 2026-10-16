@@ -70,3 +70,33 @@ by the time they were worked:
 - A commit deleting files under a watched `paths:` glob is itself a push matching that glob,
   and diff-based detection presents the deleted files to the workflow. Change the trigger
   before changing the inputs.
+
+---
+
+## Executed 2026-10-16, verified at the destination
+
+`close-sprint6-tickets.py --go` commented and transitioned four. Re-read via
+`sprint6-detail.py` (the agile sprint endpoint, not a JQL on the status field):
+
+    INFRA-1696  [Done]       INFRA-1705  [In Progress]
+    INFRA-1703  [Done]       INFRA-1706  [In Progress]
+    INFRA-1704  [Done]       INFRA-1708  [In Progress]
+    INFRA-1707  [Done]       INFRA-1709  [In Progress]
+
+**4 of 8 closed.** Successors INFRA-1716 / 1717 / 1718 exist in the backlog and must be
+moved onto the next sprint by hand — the API does not place them.
+
+Three of the four still open are waiting on **other people**, not on work:
+
+| | Waiting on |
+|---|---|
+| 1708 | a `lazy-devs` approval on `actions-collection#99` (green, CODEOWNERS-blocked; `--admin` does not override it) |
+| 1705 | Tim: is `Brand/300-transform.sql` still needed? |
+| 1709 | one query — `rw-sql.sh qa "SHOW SOURCES;"` |
+| 1706 | genuinely not started |
+
+Also in Sprint 6 but not Doke's: **INFRA-1713 is UNASSIGNED** ("Shell script to sync AWS
+Secrets Manager secrets into RisingWave"), so it will carry by default with no owner. And
+**INFRA-1697** ("close the dev → QA edge cases before a prod cutover date", Idris) is the
+ticket `PLAN-tim-qa-blast-radius-2026-10-15.md` answers — the work happened here and the
+ticket does not know it.
