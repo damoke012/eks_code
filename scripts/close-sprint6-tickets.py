@@ -99,11 +99,37 @@ CLOSE = [
      "system. Automatic QA promotion is a separate decision if it is still wanted.\n\n"
      "Scope item 5 - retiring the duplicated pipelines/ in risingwave-pipeline - is "
      "INFRA-1705 and stays there."),
+
+    ("INFRA-1705",
+     "All three DONE WHEN conditions met.\n\n"
+     "1) NAMED OWNER CONFIRMED WHICH VERSION IS CORRECT. The source of truth is "
+     "usxpressinc/risingwave-poc; variant-inc/risingwave-pipeline held a pre-cutover "
+     "mirror. There was in fact no competing version to choose between: "
+     "Brand/300-transform.sql, the file this ticket is written around, is an EMPTY "
+     "PLACEHOLDER - 'NO CODE NEEDED / This file is intentionally left blank.' The "
+     "premise that QA ran a transform absent from the source of truth was wrong; there "
+     "is no transform, and nothing needed porting.\n\n"
+     "2) THE LOSER IS DELETED. risingwave-pipeline#127 removes pipelines/Brand, "
+     "employee, Template and secret_manager - 24 files, 1667 lines. Kept: "
+     "pipelines/shared (read by secret.yaml and user-access-deploy.yaml) and "
+     "pipelines/canary (a fixture pipeline.yaml refuses on prod). Content remains in "
+     "git history and was archived to /tmp/rw-mirror-pipelines-2026-10-16.tar.gz.\n\n"
+     "3) QA CONFIRMED RUNNING THE AGREED SET. Measured 2026-10-16 with "
+     "scripts/rw-sql.sh qa: sources brand_source_kafka + activeresource_source_kafka; "
+     "MVs brand_mv_raw, brand_mv_state, brand_mv_flat, canary_promotion_mv; sink "
+     "activeresource_sink. No Employee objects, correct - Employee is excluded on QA.\n\n"
+     "FOUND DOING THIS, and bigger than the ticket: Pipeline Query Runner "
+     "(pipeline.yaml) was ACTIVE and applied the mirror on push to master, qa or dev. "
+     "The duplication had a delivery mechanism, so a merge to our own qa branch would "
+     "have applied the mirror's SQL to QA outside the digest chain and outside the "
+     "pipeline_applied ledger. risingwave-pipeline#126 excluded those four directories "
+     "from its trigger FIRST, because a commit deleting files under pipelines/ is "
+     "itself a push matching pipelines/**, and detection is diff-based - deleting first "
+     "would have handed 24 removed files to the workflow whose job is to apply them."),
 ]
 
 SKIP = [
     ("INFRA-1708", "pin is on an unmerged branch; master still reads trivy-action@master"),
-    ("INFRA-1705", "needs Tim on Brand/300-transform.sql, then the deletion"),
     ("INFRA-1706", "not started"),
 ]
 
