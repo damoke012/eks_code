@@ -126,11 +126,38 @@ CLOSE = [
      "from its trigger FIRST, because a commit deleting files under pipelines/ is "
      "itself a push matching pipelines/**, and detection is diff-based - deleting first "
      "would have handed 24 removed files to the workflow whose job is to apply them."),
+
+    ("INFRA-1706",
+     "All three DONE WHEN conditions met, measured 2026-10-16.\n\n"
+     "PLAN IS CLEAN WITH ALL ROLES IMPORTED: 'No changes. Your infrastructure matches "
+     "the configuration.' Six addresses imported (three roles, three inline policies) "
+     "into DevOps/iac-tf-manual-runs/gha_ecr_push_roles/terraform.tfstate in "
+     "lazy-tf-state-80a9de7d7f07. Code: variant-inc/iac-tf-manual-runs#39, at "
+     "apps/common/gha_ecr_push_roles, matching the layout ecr_endpoint already uses.\n\n"
+     "EVERY ROLE IS TAGGED: via provider default_tags, which is this repo's convention "
+     "rather than per-resource tags. All three carried NO tags at all before.\n\n"
+     "DESCRIPTIONS MATCH THE TRUST POLICIES: gha-risingwave-etl-ecr-push said 'main "
+     "branch only' while its policy pins master. Corrected. The other two were already "
+     "accurate.\n\n"
+     "THE TICKET SAYS FOUR ROLES AND THERE ARE THREE: gha-risingwave-etl-ecr-push, "
+     "gha-risingwave-poc-ecr-push, gha-sql-applier-ecr-push. No fourth exists.\n\n"
+     "FOUND DURING THE IMPORT, and the reason the first plan was not clean: "
+     "gha-risingwave-etl-ecr-push also holds ecr:DescribeImages and ecr:ListImages, "
+     "which the other two do not. Nothing recorded why. Reproduced as found rather than "
+     "dropped - poc-pipeline is tag-immutable, so a build checking whether a tag exists "
+     "would use exactly those calls, and removing them would have failed a build days "
+     "later for no visible reason.\n\n"
+     "STILL OPEN, deliberately out of scope here: two roles can push an image they do "
+     "not own. risingwave-etl reaches poc-pipeline (the image QA and dev run, owned by "
+     "the poc repo) and risingwave-poc reaches sql-applier (the base image every "
+     "on-prem build depends on). That contradicts the one-repo-one-image intent stated "
+     "in the config's own comments. Reproduced exactly so the import plan was clean; "
+     "tightening it belongs in its own change where it is a reviewable diff instead of "
+     "disappearing into a state operation."),
 ]
 
 SKIP = [
     ("INFRA-1708", "pin is on an unmerged branch; master still reads trivy-action@master"),
-    ("INFRA-1706", "not started"),
 ]
 
 
