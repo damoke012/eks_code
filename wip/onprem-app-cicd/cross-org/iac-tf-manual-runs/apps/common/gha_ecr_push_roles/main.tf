@@ -69,18 +69,10 @@ variable "apps" {
 #    one-repo-one-image intent. Tighten it as its OWN change after the import, where it
 #    shows up as a reviewable diff instead of vanishing into a state operation.
 
-variable "tags" {
-  description = "Applied to every role. The roles currently carry NO tags at all."
-  type        = map(string)
-  default = {
-    ManagedBy = "terraform"
-    Component = "github-actions-ecr-push"
-    Ticket    = "INFRA-1706"
-  }
-}
-
 data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
+locals {
+  ecr_region = "us-east-2"
+}
 
 # One OIDC provider per account, created once. Reference it, never recreate it.
 data "aws_iam_openid_connect_provider" "github" {
@@ -124,7 +116,6 @@ resource "aws_iam_role" "ecr_push" {
   description          = each.value.description
   assume_role_policy   = data.aws_iam_policy_document.assume[each.key].json
   max_session_duration = 3600
-  tags                 = var.tags
 }
 
 data "aws_iam_policy_document" "push" {
@@ -151,7 +142,7 @@ data "aws_iam_policy_document" "push" {
     ]
     resources = [
       for r in each.value.ecr_repos :
-      "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/${r}"
+      "arn:aws:ecr:${local.ecr_region}:${data.aws_caller_identity.current.account_id}:repository/${r}"
     ]
   }
 }
