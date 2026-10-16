@@ -100,3 +100,36 @@ Secrets Manager secrets into RisingWave"), so it will carry by default with no o
 **INFRA-1697** ("close the dev → QA edge cases before a prod cutover date", Idris) is the
 ticket `PLAN-tim-qa-blast-radius-2026-10-15.md` answers — the work happened here and the
 ticket does not know it.
+
+---
+
+## 1709 closed — QA measured, and a standing belief disproven
+
+`scripts/rw-sql.sh qa` on op-usxpress-qa, 2026-10-16:
+
+    SOURCES (2)  public.brand_source_kafka, public.activeresource_source_kafka
+    MVs (4)      public.brand_mv_raw, public.brand_mv_state, public.brand_mv_flat,
+                 public.canary_promotion_mv
+    SINKS (1)    public.activeresource_sink
+
+The Job is applying SQL, not merely reporting Succeeded. No Employee objects — correct, it is
+excluded on QA. `canary_promotion_mv` means the promotion path has run end to end.
+
+⛔ **This disproves [[green-hook-over-an-empty-cluster]]**, which claimed QA had 0 sources and
+0 sinks and had never run a Brand pipeline. That was recorded as a hypothesis, carried for
+weeks, and was wrong. The worry had the right shape — a green hook cannot prove rows — but
+the inference ran backwards: "green does not prove present" never licensed "therefore absent."
+One command and an `aws sso login` settled it.
+
+1709 closed with one criterion **deliberately unmet and stated in the comment**: it asks for
+QA to promote "without a human touching anything but the merge button", and PR #122 made QA
+dispatch-only on purpose, because a single 10-minute tick could otherwise carry an image
+ECR → dev → QA → prod-PR with zero soak. The criterion is out of date, not the system.
+
+**Sprint 6 final: 5 of 8 closed** (1696, 1703, 1704, 1707, 1709).
+
+| Still open | Blocked on |
+|---|---|
+| 1705 | Tim on `Brand/300-transform.sql`, then the deletion PR. The guard (#126) is merged |
+| 1708 | a `variant-inc/lazy-devs` code-owner approval. Idris approved but is not a code owner, so it does not satisfy the rule; branch also needs updating (gh on this box has no `pr update-branch`) |
+| 1706 | **no AWS profile on the box resolves to 064859874041**, so the roles cannot even be enumerated. Plus `var.apps` is `{}`, no tags, no backend |
