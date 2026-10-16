@@ -162,3 +162,25 @@ remaining gate.
 Worth raising separately: Idris does RisingWave work across this org and is a code owner
 nowhere in it, so every review he gives costs a second person. That is an org-owner
 conversation, not a blocker on this ticket.
+
+## 1705 closed — the disputed file was empty
+
+`Brand/300-transform.sql`, which INFRA-1705 is entirely written around, contains:
+
+    /* NO CODE NEEDED */
+    -- This file is intentionally left blank.
+    -- Transformations for the Brand pipeline are handled in the 400-extract.sql file.
+
+So the ticket's premise — "WHAT RUNS ON QA INCLUDES A TRANSFORM THAT IS NOT IN THE SOURCE OF
+TRUTH" — was false. There is no transform. `risingwave-poc` lacks the file because there is
+nothing in it. No owner decision was needed and nothing required porting.
+
+`#127` merged: 24 files, 1667 lines. `shared/` and `canary/` kept. Archived to
+`/tmp/rw-mirror-pipelines-2026-10-16.tar.gz`, and in git history regardless.
+
+**The ticket was wrong about its premise and right that something was wrong.** Investigating
+it is what surfaced the live `Pipeline Query Runner` applying the mirror to QA outside the
+digest chain and outside the ledger — a real defect it never mentions.
+
+**Sprint 6 final: 6 of 8** (1696, 1703, 1704, 1705, 1707, 1709).
+Remaining: 1708 (one `lazy-devs` approval), 1706 (no AWS access to 064859874041).
