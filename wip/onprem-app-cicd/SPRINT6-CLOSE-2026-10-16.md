@@ -133,3 +133,32 @@ ECR → dev → QA → prod-PR with zero soak. The criterion is out of date, not
 | 1705 | Tim on `Brand/300-transform.sql`, then the deletion PR. The guard (#126) is merged |
 | 1708 | a `variant-inc/lazy-devs` code-owner approval. Idris approved but is not a code owner, so it does not satisfy the rule; branch also needs updating (gh on this box has no `pr update-branch`) |
 | 1706 | **no AWS profile on the box resolves to 064859874041**, so the roles cannot even be enumerated. Plus `var.apps` is `{}`, no tags, no backend |
+
+## 1708 — the exact gate, so nobody re-walks this
+
+`.github/CODEOWNERS` in `variant-inc/actions-collection` is `*  @variant-inc/lazy-devs`.
+Classic branch protection returns **404**, so the rule comes from a repository ruleset, which
+is also why `gh pr merge --admin` answers "Waiting on code owner review" instead of merging.
+
+`lazy-devs` = `usx-devops stevebduckjr rsaini15 dare-x papachoriusx mlashore-usxpress`.
+
+- **Doke IS a code owner** (`dare-x`), but he authored the PR and GitHub will not let an
+  author's own approval satisfy the requirement.
+- **`ifagbemi-usxpress` is NOT in the team**, so Idris's approval — given twice — cannot clear
+  it. The PR shows `ifagbemi-usxpress: APPROVED` and `reviewDecision: REVIEW_REQUIRED`
+  simultaneously, which reads like a bug and is not one.
+- **Adding him to the team is not available to Doke**: `PUT /orgs/.../teams/lazy-devs/
+  memberships/...` returns 403 "must be an organization owner or team maintainer" *after* a
+  successful `gh auth refresh -s admin:org`. The refresh is what discriminates the two causes
+  — before it, the same 403 also carried a scope hint, and the two are indistinguishable
+  without eliminating one.
+
+**Only path:** an approval from `stevebduckjr`, `rsaini15`, `papachoriusx` or
+`mlashore-usxpress`. The last two are already requested reviewers.
+
+Branch state is `BLOCKED` (not `BEHIND`) after merging master in, so review is the sole
+remaining gate.
+
+Worth raising separately: Idris does RisingWave work across this org and is a code owner
+nowhere in it, so every review he gives costs a second person. That is an org-owner
+conversation, not a blocker on this ticket.
