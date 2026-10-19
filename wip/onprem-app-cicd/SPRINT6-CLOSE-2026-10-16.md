@@ -297,3 +297,20 @@ UI Sprint 7 (6296) **created and started**, 2026-10-19 → 2026-10-30, holding 1
 Sprint 6 had **never been started** (state `future`), which is why it had no usable report
 before today. Creating a sprint does not start it; that is a separate call, and it is the step
 that was missed last time.
+
+## QA re-verified 2026-10-19, after #126 and #127 merged
+
+| Check | Result |
+|---|---|
+| RisingWave sources on QA | `brand_source_kafka`, `activeresource_source_kafka` — unchanged |
+| Argo Application | `argocd/risingwave-etl` **Synced / Healthy** |
+| Tim can dispatch QA himself | `timothypreble` has **push** on `variant-inc/risingwave-pipeline` |
+
+Neither merge touched `deploy/chart`, and the measurement agrees. **Tim is clear to promote.**
+
+⚠️ The Argo `Application` lives in the **argocd** namespace, not `app-risingwave`. Querying
+the app's own namespace returns `NotFound`, which reads as "the Application is gone" and is
+only a wrong namespace. Use `get applications -A`.
+
+The four ways a later push still takes QA red are unchanged and unmitigated — see
+PLAN-tim-qa-blast-radius-2026-10-15.md. None of the hardening shipped.
