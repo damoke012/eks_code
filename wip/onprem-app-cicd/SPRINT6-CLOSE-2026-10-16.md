@@ -282,3 +282,18 @@ A PR with a red check is a PR nobody opens. The review never stalled on willingn
 prefix **and CRLF endings** — the anchor can never hit. `tr -d '\r'` first. The tell is not the
 pattern, it is the implausibility of the result: one hit in 43 KB of a failing job's log is not
 an answer, it is a broken instrument ([[a-guard-can-measure-the-wrong-thing]]).
+
+## Rollover executed 2026-10-19
+
+UI Sprint 6 (6290) **closed**: 18 committed, 8 completed — all eight Doke's.
+UI Sprint 7 (6296) **created and started**, 2026-10-19 → 2026-10-30, holding 13:
+
+- 10 carried from Sprint 6 — `1697`, `1698`, `1713`, `1715`, `1719`–`1724`.
+  **Six are unassigned** (`1713`, `1719`–`1724`, the pricing-rfp-handler set). They carried
+  because nobody owns them, and they will carry again on the same grounds.
+- 3 added explicitly — `1716`, `1717`, `1718`, the successors. API-filed tickets land in the
+  backlog, so a rollover never sees them.
+
+Sprint 6 had **never been started** (state `future`), which is why it had no usable report
+before today. Creating a sprint does not start it; that is a separate call, and it is the step
+that was missed last time.
