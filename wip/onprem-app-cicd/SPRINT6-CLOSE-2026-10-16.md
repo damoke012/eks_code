@@ -184,3 +184,54 @@ digest chain and outside the ledger — a real defect it never mentions.
 
 **Sprint 6 final: 6 of 8** (1696, 1703, 1704, 1705, 1707, 1709).
 Remaining: 1708 (one `lazy-devs` approval), 1706 (no AWS access to 064859874041).
+
+---
+
+## FINAL — 2026-10-19: 8 of 8
+
+| Ticket | Closed on | Evidence |
+|---|---|---|
+| 1696, 1703, 1704 | 10-16 | split; successors INFRA-1718 / 1716 / 1717 |
+| 1707 | 10-16 | 0 open alerts (measured with stderr visible); branch rebased, applier build intact |
+| 1709 | 10-16 | QA has 2 sources, 4 MVs, 1 sink — objects at the destination |
+| 1705 | 10-16 | `#126` guard + `#127` deletion; the disputed file was an empty placeholder |
+| 1706 | 10-19 | six addresses imported, `No changes. Your infrastructure matches the configuration.` |
+| 1708 | 10-19 | `actions-collection#99` merged; master line 106 reads `@57a97c7e…  # 0.35.0` |
+
+### ⚠️ One loose end that outlived the sprint
+
+**`iac-tf-manual-runs#39` is still open.** INFRA-1706's Terraform is applied — the roles are
+tagged, the state is in S3 — but until that PR merges the config exists only on a branch. A
+state file whose code is not in the repo is worse than the hand-made roles were, because the
+next person finds state they cannot plan against. Needs an approval from `lazy-devs`.
+
+Its `pre-commit` was **red for three days** and nobody said so. Four tflint warnings, all mine:
+no `required_version`, no provider version constraint, and `variable`/`output` not split into
+their own files. A PR with a red check is a PR nobody opens — the review did not stall on
+willingness.
+
+### The provider pin, and why it stopped being cosmetic
+
+tflint's "Missing version constraint for provider aws" landed the same day the Kafka dev
+deploy failed on a provider upgrade: OpenTofu called `lambda:ListVersionsByFunction` while
+READING `ccloud-kafka-key-rotation`, a call older provider versions never made, and the deploy
+died with nothing applied. Reverting the Lambda version stopped the question being asked; it
+did not grant the permission.
+
+`iac-tf-manual-runs` **gitignores `.terraform.lock.hcl`** (confirmed: `.gitignore:7`, and zero
+other configs commit one), so in that repo the `required_providers` constraint IS the pin.
+Without it every fresh `init` takes whatever is newest that day. Now `~> 6.69`, matching the
+provider the state was built with.
+
+Same defect class as `trivy-action@master` in INFRA-1708 — found twice in one week, in two
+repos, by two different mechanisms, neither of them a person looking for it.
+
+### Traps added this sprint
+
+- `gh pr merge --admin` does **not** override a CODEOWNERS review when the rule comes from a
+  repository **ruleset**. Classic branch protection returns **404** on such a repo, which reads
+  as "no protection configured" and is the opposite.
+- An approval from someone outside the owning team is recorded and does not count. The PR shows
+  `APPROVED` and `REVIEW_REQUIRED` simultaneously.
+- `yamllint --strict` fails a pin for *"too few spaces before comment: expected 2"*. One space
+  before `#`. It reads as a content problem and is formatting.
