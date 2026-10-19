@@ -3,12 +3,12 @@
 variable "apps" {
   description = "Each repo trusted to push, and the ECR repositories it may push to."
   type = map(object({
-    github_org  = string
-    github_repo = string
-    ecr_repos   = list(string)
+    github_org    = string
+    github_repo   = string
+    ecr_repos     = list(string)
     extra_actions = list(string)
-    refs        = list(string) # full git refs, e.g. refs/heads/master
-    description = string
+    refs          = list(string) # full git refs, e.g. refs/heads/master
+    description   = string
   }))
 
   # Measured from the live roles on 2026-10-16, not inferred from their descriptions:
@@ -27,17 +27,17 @@ variable "apps" {
       description   = "GitHub Actions push to ECR. variant-inc/risingwave-pipeline, master only."
     }
     risingwave-poc = {
-      github_org  = "usxpressinc"
-      github_repo = "risingwave-poc"
-      ecr_repos   = ["risingwave/poc-pipeline", "risingwave/sql-applier"]
+      github_org    = "usxpressinc"
+      github_repo   = "risingwave-poc"
+      ecr_repos     = ["risingwave/poc-pipeline", "risingwave/sql-applier"]
       refs          = ["refs/heads/master"]
       extra_actions = []
       description   = "GitHub Actions: build the RW SQL pipeline image. usxpressinc/risingwave-poc, master only."
     }
     sql-applier = {
-      github_org  = "variant-inc"
-      github_repo = "iaac-risingwave-cicd"
-      ecr_repos   = ["risingwave/sql-applier"]
+      github_org    = "variant-inc"
+      github_repo   = "iaac-risingwave-cicd"
+      ecr_repos     = ["risingwave/sql-applier"]
       refs          = ["refs/heads/main"]
       extra_actions = []
       description   = "GitHub Actions: publish the SQL applier base image. variant-inc/iaac-risingwave-cicd, main only."
