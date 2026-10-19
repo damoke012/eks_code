@@ -154,10 +154,30 @@ CLOSE = [
      "in the config's own comments. Reproduced exactly so the import plan was clean; "
      "tightening it belongs in its own change where it is a reviewable diff instead of "
      "disappearing into a state operation."),
+
+    ("INFRA-1708",
+     "Done. variant-inc/actions-collection#99 merged 2026-10-19.\n\n"
+     "build-push-image/build-push-core/action.yml line 106 now reads\n"
+     "aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # 0.35.0\n"
+     "instead of @master. 57a97c7e is tag 0.35.0, the version our own workflows already "
+     "pinned, so this aligns the shared action with them rather than introducing a new "
+     "version.\n\n"
+     "RENOVATE TRACKS IT: no renovate.json was added. The repo is already onboarded (it "
+     "carries a live renovate/major-github-actions-dependencies branch), and the trailing "
+     "version comment is the form Renovate reads, so it keeps bumping both the SHA and the "
+     "comment. A config restricting enabledManagers to github-actions was drafted and "
+     "REMOVED before the PR opened - it would have switched off every other manager "
+     "Renovate currently runs in that repo.\n\n"
+     "Two things worth recording for the next one. yamllint --strict rejected the pin for "
+     "'too few spaces before comment: expected 2' - one space before the # was the entire "
+     "failure, and it reads as a content problem rather than a formatting one. And "
+     "gh pr merge --admin does NOT override a CODEOWNERS review: the rule comes from a "
+     "repository ruleset (classic branch protection returns 404 on that repo), so it took "
+     "an approval from papachoriusx. Idris approved twice and it never counted, because "
+     "ifagbemi-usxpress is not in variant-inc/lazy-devs."),
 ]
 
 SKIP = [
-    ("INFRA-1708", "pin is on an unmerged branch; master still reads trivy-action@master"),
 ]
 
 
