@@ -235,3 +235,50 @@ repos, by two different mechanisms, neither of them a person looking for it.
   `APPROVED` and `REVIEW_REQUIRED` simultaneously.
 - `yamllint --strict` fails a pin for *"too few spaces before comment: expected 2"*. One space
   before `#`. It reads as a content problem and is formatting.
+
+---
+
+## ✅ CLOSED OUT — 2026-10-19
+
+Both PRs landed. **Sprint 6 finished 8 of 8 with nothing left open.**
+
+| PR | Ticket | Merged |
+|---|---|---|
+| `actions-collection#99` | INFRA-1708 | squash |
+| `iac-tf-manual-runs#39` | INFRA-1706 | **merge commit** — squash and rebase are both DISABLED on that repo |
+
+The loose end recorded above is resolved: INFRA-1706's Terraform state now has its code in the
+repo, not on a branch and in `/tmp`.
+
+### What #39 cost, and why
+
+It sat three days with a **red `pre-commit`** that nobody mentioned, then needed two more
+rounds after the first fix:
+
+1. **tflint** — four warnings, all mine: no `required_version`, no provider version
+   constraint, `variable` and `output` not in their own files.
+2. **`tofu fmt`** — because copying the files from this repo into the branch **overwrote a
+   `terraform fmt` already run there**. The draft here is upstream in the workflow and
+   downstream in reality: `fmt` only happens where terraform exists, which is WSL.
+
+A PR with a red check is a PR nobody opens. The review never stalled on willingness.
+
+### Three environment facts worth not rediscovering
+
+- **`git push` to `damoke012/eks_code` fails from WSL** — `Permission to damoke012/eks_code.git
+  denied to dare-x`. That box is authenticated as the corp identity, so it can *read* the
+  personal repo but never write it. Any flow assuming a round trip through eks_code is one-way
+  from there; the codespace has to do the writing.
+- **Merge methods differ per repo.** `risingwave-pipeline` and `actions-collection` take
+  `--squash`; `iac-tf-manual-runs` allows only a merge commit. Read
+  `gh repo view --json mergeCommitAllowed,rebaseMergeAllowed,squashMergeAllowed` rather than
+  guessing twice.
+- **GitHub served 503s on the web UI** mid-session while the API kept working. A page that
+  will not load is not a finding about the PR.
+
+### The grep that under-matched, three times
+
+`Failed$` found nothing in a 43 KB pre-commit log, because GitHub log lines carry a timestamp
+prefix **and CRLF endings** — the anchor can never hit. `tr -d '\r'` first. The tell is not the
+pattern, it is the implausibility of the result: one hit in 43 KB of a failing job's log is not
+an answer, it is a broken instrument ([[a-guard-can-measure-the-wrong-thing]]).
