@@ -126,3 +126,5 @@
 - [Atlas PrivateLink may not reach on-prem](atlas-privatelink-may-not-reach-onprem.md) — CONFIRMED: the Atlas host is an AWS interface endpoint on 10.16.x.x ports 1024-1026, so a lifted app has no route to its DB; public DNS already returns the private IPs, so the gap is routing not DNS
 - [TGW joins AWS and on-prem](usx-transit-gateway-joins-aws-and-onprem.md) — tgw-09c7b37043d31e43a (network acct) attaches all 3 EKS VPCs plus a LIVE VPN, and the VPCs route 10/8 into it; they are not separate islands
 - [On-prem egress to partner APIs works](onprem-egress-to-partner-apis-works.md) — PROVEN from a pod: both Knight-Swift endpoints answer 405 with the public CA trusted; grafana is the op-qa pod that has curl
+- [On-prem Kubernetes 1.32 is out of support](onprem-k8s-132-out-of-support.md) — MEASURED: op-qa runs v1.32.0 on every node, upstream EOL 2026-02-28, never patched past .0; self-managed so no extended support
+- [On-prem platform component inventory](onprem-platform-component-inventory.md) — MEASURED on op-qa: 183 pods/20 namespaces/30 Kustomizations all Ready; CNI is Cilium, Istio is ambient, Rook-Ceph live, aws-iam-authenticator is Flux-managed

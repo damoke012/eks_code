@@ -109,7 +109,7 @@ Grouped by the question each answers. Every row is **recorded, not re-measured**
 | | State | Work |
 |---|---|---|
 | Flux | ⚠️ prod on **v2.7.5**, dev on **v2.8.8** | decide whether to align; dev is ahead, so dev is not a valid rehearsal for Flux behaviour |
-| Kubernetes / Talos version | ❌ **not known on any on-prem cluster** | measure, then apply the N-1-and-support-window rule |
+| Kubernetes version | ⛔ **op-qa measured 2026-10-20: `v1.32.0`. Upstream support ended 2026-02-28** and the line's final patch was 1.32.13 — so it is the initial release of a dead line, never patched. Self-managed, so no extended support exists. prod unmeasured but near-certain to match | **its own sprint.** Control-plane work on three clusters, no written Talos upgrade path |
 | RisingWave console version | ⚠️ displays a stale version on prod | cosmetic; low priority |
 
 ---
@@ -131,6 +131,12 @@ the cheapest real risk reduction available.
 
 **Explicitly not this sprint:** the rebuild-from-scratch proof, Flux alignment, log retention
 policy. Each deserves its own ticket.
+
+⛔ **And one that may outrank the whole list: the Kubernetes version.** op-qa runs v1.32.0,
+out of upstream support since 2026-02-28. It cannot be a task inside this sprint — it is
+control-plane work on three clusters with no written Talos upgrade path — but a cluster
+eight months past end of life is a harder answer to "is it production-ready" than anything
+else here. **Raise it as its own piece of work before this sprint's scope is agreed.**
 
 ---
 

@@ -35,8 +35,16 @@ application workers, 3 platform workers, 2 system workers, 13 in total. dev (.50
 **Pod network: 10.244.0.0/16**, allocated as a /24 per node. Pods leave the cluster
 masqueraded to their node's address, so **10.244.x.x is never what a remote service sees**.
 
-⚠️ **Unverified:** the Kubernetes version and the Talos version on each cluster. Nobody has
-read them recently. §11 has the command.
+**Kubernetes `v1.32.0` on every op-qa node, measured 2026-10-20**, OS Talos, built
+2024-12-11.
+
+⛔ **That version left upstream support on 2026-02-28**, and the line's final patch was
+**1.32.13** — so op-qa is running the *initial* release of a line that ended eight months ago,
+having never taken a single patch. Self-managed Talos means **no vendor extended support
+applies**. Cloud EKS, for contrast, runs 1.35 and 1.36.
+
+⚠️ dev and prod are **not measured**. Near-certain to match, since all three are built from the
+same Terraform and image — but near-certain is not measured.
 
 ## 3. How a cluster gets created
 
@@ -107,8 +115,28 @@ print `✔ applied revision op-prod@sha1:<old>`, which reads as success. Use
 | **Istio ingress gateway** (6 pods, one per node) | `istio-ingress` | all inbound traffic |
 | **Grafana** | `grafana` | dashboards — and the only pod we found carrying `curl` |
 
-⚠️ **Not re-verified today:** Prometheus, Alertmanager, Velero, Kyverno, Rook-Ceph and the Wiz
-sensor. Each is recorded as present from earlier work; §11 has the command to list them.
+**Measured 2026-10-20 on op-qa — 183 pods across 20 namespaces:** `rook-ceph` **62**,
+`velero` **44**, `kube-system` 32, `istio-system` 28, `risingwave` 13, `prometheus` 13,
+`istio-ingress` 10, `cert-manager` 6, `kyverno` 5, `argocd` 5, `flux-system` 4, and `keda`,
+`external-secrets`, `etcd-backup` 3 each, `pod-identity-webhook` and `ecr-credentials` 2 each,
+`reloader`, `local-path-storage`, `grafana`, `external-dns` 1 each.
+
+**Three corrections to what this document assumed:**
+
+* **The CNI is Cilium** — `cilium-lb` and `cilium-hygiene` Kustomizations, 105 days old. The
+  per-node /24 out of `10.244.0.0/16` is Cilium's allocation.
+* **Istio runs in ambient mode** — there is an `istio-ztunnel` Kustomization, so workloads are
+  meshed without a per-pod sidecar.
+* **KEDA is installed** and appeared in none of our notes.
+
+**Rook-Ceph is live**, not merely stood up once. **`aws-iam-authenticator` is a Flux
+Kustomization** on QA, 83 days old — which is what makes it a clean copy for another cluster.
+
+**All 30 Kustomizations reported `True`**, and the two-source model is visible in one
+listing: every entry reports `op-qa@sha1:625b1cc9…` except `flux-system`, which reports
+`master@sha1:db4812ce…`.
+
+⚠️ **This is QA.** dev and prod are not measured, and dev differs at least in Flux version.
 
 **Flux versions drift:** `bm-dev` runs **v2.8.8** while QA and prod run **v2.7.5**. So
 "prove it on dev first" is invalid for anything Flux-behavioural — dev is ahead.
@@ -290,7 +318,12 @@ The third names each Flux component and whether it is Ready.
 
 ## Not measured
 
-The Kubernetes and Talos versions on all three clusters; whether Prometheus, Alertmanager,
-Velero, Kyverno, Rook-Ceph and the Wiz sensor are currently running; the state of Rook-Ceph;
-whether prod's alerting was ever completed; and the dev and prod `op-*-platform-admin` IAM
-fixes.
+**dev and prod** — every measurement above is op-qa. Also: whether prod's alerting was ever
+completed; the dev and prod `op-*-platform-admin` IAM fixes; whether the Wiz sensor is still
+running; and whether any certificate is expired behind a Ready status on any cluster.
+
+## The finding that outranks everything else here
+
+**Kubernetes 1.32 left support in February 2026 and op-qa runs v1.32.0.** An upgrade is
+control-plane work on three clusters with no written Talos upgrade path, so it is
+sprint-sized on its own — larger than the human-access work that prompted the measurement.
