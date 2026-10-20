@@ -16,6 +16,7 @@
 # leaked credential usually hides.
 #
 # Usage, on WSL:
+#   bash scripts/discover-cloud-app.sh --context-match prod --find pricing
 #   bash scripts/discover-cloud-app.sh --context <ctx> --find pricing
 #   bash scripts/discover-cloud-app.sh --context <ctx> -n <ns> --app <workload>
 #   ... --values            also print ConfigMap values
@@ -25,10 +26,11 @@
 # reported as absence.
 set -uo pipefail
 
-CTX=""; NS=""; APP=""; FIND=""; AWSP=""; SHOW_VALUES=0
+CTX=""; CTXM=""; NS=""; APP=""; FIND=""; AWSP=""; SHOW_VALUES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --context)     CTX="${2:-}"; shift 2 ;;
+    --context-match) CTXM="${2:-}"; shift 2 ;;
     -n|--namespace) NS="${2:-}"; shift 2 ;;
     --app)         APP="${2:-}"; shift 2 ;;
     --find)        FIND="${2:-}"; shift 2 ;;
@@ -45,6 +47,28 @@ nm(){  printf 'NOT MEASURED  %s\n' "$*"; }
 for t in kubectl jq; do
   command -v "$t" >/dev/null 2>&1 || { nm "$t absent on this box -- nothing read"; exit 2; }
 done
+
+# --context-match resolves a context by substring so no name has to be copied by hand.
+# It must resolve to EXACTLY ONE, because "the only match" and "the first of several"
+# are different answers and only one of them is safe.
+if [ -n "$CTXM" ] && [ -z "$CTX" ]; then
+  HITS=$(kubectl config get-contexts -o name 2>/dev/null | grep -i -- "$CTXM")
+  N=$(printf '%s' "$HITS" | grep -c . || true)
+  echo "contexts matching '$CTXM': ${N:-0}"
+  printf '%s\n' "$HITS" | sed 's/^/  /'
+  if [ "${N:-0}" = "1" ]; then
+    CTX="$HITS"
+    echo "resolved --context $CTX"
+  elif [ "${N:-0}" = "0" ]; then
+    nm "no context name contains '$CTXM' -- nothing queried"
+    echo "contexts on this box:"
+    kubectl config get-contexts -o name 2>/dev/null | sed 's/^/  /'
+    exit 2
+  else
+    nm "'$CTXM' matches $N contexts -- refusing to pick one. Re-run with --context <exact>"
+    exit 2
+  fi
+fi
 
 # An empty --context silently selects the CURRENT context. On 2026-10-09 that sent four
 # on-prem queries to a cloud cluster and the output read as a finding about on-prem.
