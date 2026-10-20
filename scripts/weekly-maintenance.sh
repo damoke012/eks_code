@@ -141,6 +141,7 @@ bash scripts/flux-kustomization-health.test.sh || findings=$((findings+1))
 bash scripts/lib-onprem-ctx.test.sh || findings=$((findings+1))
 bash scripts/prune-codespace-cache.test.sh || findings=$((findings+1))
 bash scripts/app-config-coverage.test.sh || findings=$((findings+1))
+python3 scripts/octopus-dump-app-vars.py --self-test || findings=$((findings+1))
 python3 scripts/lib-pod-health.test.py || findings=$((findings+1))
 
 section "13. Codespace disk — caches that keep every version"
