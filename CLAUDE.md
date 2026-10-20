@@ -53,6 +53,7 @@ clusters. It is **not** a deployment source: nothing here is applied from here.
 | Skill | Reach for it when |
 |---|---|
 | `capture-learning` | an investigation just concluded — run it before moving on |
+| `explain-plainly` | writing anything another person reads — a status, a finding, a message Doke forwards |
 | `pr-review-rw` | "review PR #N on `<repo>`", anything touching RisingWave namespaces |
 | `prod-auth-triage` | blanket 401s from a prod API, `IDX10214`, `AADSTS500011` |
 | `entra-authz-claims` | an Entra login succeeds and the user has **no permissions** — empty Argo UI, "SSO is broken" |
