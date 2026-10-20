@@ -3,6 +3,9 @@
 **2026-10-20.** The sprint ask is **AWS SSO on prod**, plus everything else prod needs to be
 genuinely production-ready.
 
+**Published page:** https://claude.ai/artifact/PtHGTNEjhcrEaYpJRrcJHS
+("Prod Readiness Plan" — plain language, with the order-of-work diagram)
+
 **The shape of the work:** QA already has all of this and it is written down. So this is a
 **delta against QA**, not a design — and QA is the right reference because it holds the
 proven configuration ([[compare-against-the-governed-env]]).

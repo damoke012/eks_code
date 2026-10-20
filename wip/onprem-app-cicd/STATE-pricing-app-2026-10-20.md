@@ -94,3 +94,8 @@ inherits.
   security-group rule lands, because a timeout before then proves nothing.
 * The Octopus side from our own tooling — the push that would enable it is blocked; Idris has
   the export (58 variables, 10 library sets).
+
+## Related pages published 2026-10-20
+
+* **Prod readiness (Sprint 7)** — https://claude.ai/artifact/PtHGTNEjhcrEaYpJRrcJHS
+  repo copy: `wip/prod-readiness/PLAN-prod-ready-2026-10-20.md`
