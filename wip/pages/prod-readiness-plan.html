@@ -103,6 +103,48 @@
   </section>
 
   <section class="card">
+    <h2>Measured 20 October: most of this is already done</h2>
+    <p>The plan below assumed production had none of the sign-on work. <b>It has most of
+    it.</b></p>
+    <div class="rail">
+      <table>
+        <thead><tr><th>Piece</th><th>Lives in</th><th>QA</th><th>Production</th></tr></thead>
+        <tbody>
+          <tr><td>The authenticator itself</td><td>Git</td><td class="yes">running, 3 of 3</td><td class="yes"><b>running, 3 of 3</b></td></tr>
+          <tr><td>The role-to-group map</td><td>Git</td><td class="yes">present</td><td class="yes"><b>present</b></td></tr>
+          <tr><td>The three permission bindings</td><td>Git</td><td class="yes">present</td><td class="yes"><b>present</b></td></tr>
+          <tr><td><b>The API server setting</b></td><td><b>Terraform</b></td><td class="yes">on</td><td class="no"><b>off &mdash; the one real gap</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:.9rem"><b>The split follows the repository boundary.</b> Everything
+    held in Git was copied to production's branch and applied. The one piece held in Terraform
+    was switched on for QA only, by a setting that was never extended to production.</p>
+    <div class="warn">
+      <b>This shrinks the risky step rather than removing it.</b> The hazard was that the API
+      server will not start if a file is missing &mdash; and the component that writes that
+      file has been running on production for some time. The prerequisite is already satisfied.
+      Confirm the file on each control-plane machine anyway, then make the change.
+    </div>
+    <div class="warn">
+      <b>The production sign-on role already exists.</b> Its identifier carries a real
+      generated suffix, which cannot be invented &mdash; so the permission set was created.
+      <b>Who is assigned to it is unknown.</b>
+    </div>
+    <div class="danger" style="margin-top:1rem">
+      <p style="margin-bottom:.5rem"><b>A defect found by the same check &mdash; and it affects
+      QA too.</b></p>
+      <p style="margin-bottom:0">Four of the six role mappings across the two clusters name a
+      role that <b>cannot exist</b>, because the identifier still contains placeholder text
+      where a value belongs. <b>Only the administrator tier works, on either cluster.</b>
+      Someone in the operator or reader tier would sign in successfully and arrive with no
+      permissions at all &mdash; which reads as "sign-on is broken" and is really an unfinished
+      entry. It has been this way for months, unnoticed, because only administrators have used
+      it. One line of checking would have caught it.</p>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>The one step that can take production down</h2>
     <div class="danger">
       <p style="margin-bottom:.5rem"><b>The API server will not start if a file it is told to

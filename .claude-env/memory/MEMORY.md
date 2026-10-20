@@ -128,3 +128,5 @@
 - [On-prem egress to partner APIs works](onprem-egress-to-partner-apis-works.md) — PROVEN from a pod: both Knight-Swift endpoints answer 405 with the public CA trusted; grafana is the op-qa pod that has curl
 - [On-prem Kubernetes 1.32 is out of support](onprem-k8s-132-out-of-support.md) — MEASURED: op-qa runs v1.32.0 on every node, upstream EOL 2026-02-28, never patched past .0; self-managed so no extended support
 - [On-prem platform component inventory](onprem-platform-component-inventory.md) — MEASURED on op-qa: 183 pods/20 namespaces/30 Kustomizations all Ready; CNI is Cilium, Istio is ambient, Rook-Ceph live, aws-iam-authenticator is Flux-managed
+- [Prod SSO is half landed](onprem-prod-sso-is-half-landed.md) — MEASURED: op-prod already runs the authenticator 3/3 with aws-auth and all bindings; only the kube-apiserver webhook flag is missing, because that half lives in Terraform not Git
+- [SSO placeholders break two tiers](onprem-sso-placeholders-break-two-tiers.md) — MEASURED: aws-auth on BOTH clusters maps operator and reader to ARNs containing literal `<FILL>` text; only admin works, unnoticed for months

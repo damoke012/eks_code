@@ -15,6 +15,54 @@ them have been wrong before. **Measure first** (§5), then size the work.
 
 ---
 
+## 1. AWS SSO on prod — ⚠️ MEASURED 2026-10-20: three of seven pieces are already done
+
+**Correction to everything below.** The original delta assumed prod had none of this. It has
+most of it:
+
+| Piece | Where it lives | op-qa | op-prod |
+|---|---|---|---|
+| `aws-iam-authenticator` DaemonSet | Flux, platform repo | ✅ 3/3 ready | ✅ **3/3 ready** |
+| `aws-auth` ConfigMap | Flux, platform repo | ✅ admin tier only | ✅ **admin tier only** |
+| Three ClusterRoleBindings | Flux, platform repo | ✅ | ✅ |
+| **kube-apiserver webhook flag** | **Terraform, via Octopus** | ✅ | ⛔ **absent — the one real gap** |
+
+**The split is the repository boundary.** Everything in the platform **Git** repo was copied
+to the `op-prod` branch and reconciled. The piece that lives in **Terraform** was applied to
+QA only, because it is enabled by an Octopus variable that was never scoped to production.
+
+**This shrinks the risky step rather than removing it.** The documented hazard is that the API
+server will not start if the webhook file is missing — and the DaemonSet that writes it has
+been running 3/3 on prod for some time. The prerequisite is **already satisfied**. Verify the
+file on each control-plane node anyway (a Ready pod is not a written file), then land the
+flag.
+
+**The prod admin role already exists:**
+`arn:aws:iam::937464026810:role/AWSReservedSSO_usx-on-prem-admins_837df2a43495aaf1` — that
+suffix cannot be invented, so the permission set was created. **Who is assigned to it is
+unknown.**
+
+### ⛔ New defect found by the same check — and it affects QA too
+
+**Four of six `aws-auth` mappings name a role that cannot exist**, because the ARN contains a
+literal placeholder:
+
+| Cluster | operator | reader |
+|---|---|---|
+| op-qa | `…op-qa-platform-operator_<FILL>` | `…op-qa-platform-reader_<FILL>` |
+| op-prod | `…usx-on-prem-operators_FILL_FROM_LIST_ROLES` | `…usx-on-prem-readers_FILL_FROM_LIST_ROLES` |
+
+**Only the admin tier works, on either cluster.** An operator or reader would authenticate and
+arrive with no groups — which presents as "SSO is broken" and is an unfinished mapping. It has
+been this way for months and nobody noticed, because only admins have used it.
+
+**One line would have caught it:** grep the rendered `aws-auth` for `FILL`, `<`, `TBD` or
+`CHANGEME` and fail.
+
+---
+
+## 1b. The original delta, for reference
+
 ## 1. AWS SSO on prod — the delta
 
 QA went live 2026-07-28 and the account is in
