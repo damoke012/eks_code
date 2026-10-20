@@ -30,6 +30,9 @@
     - 10.7.0.0/16        # Jenkins
     - 10.8.0.0/16        # Jenkins
     - 10.8.90.0/24       # AzureAD site (subset of 10.8.0.0/16; listed separately in AD)
+    # ⚠️ The next four are ALREADY inside the existing 10.96.0.0/12 service-CIDR entry
+    #    (10.96.0.0/12 spans 10.96.0.0 - 10.111.255.255). Listing them is harmless and
+    #    documents intent, but see the COLLISION note at the bottom of this file.
     - 10.100.0.0/16      # Jenkins
     - 10.102.0.0/16      # Jenkins
     - 10.107.0.0/16      # Jenkins
@@ -55,3 +58,24 @@
         protocol: TCP
       - port: "5432"
         protocol: TCP
+
+# ---------------------------------------------------------------------------
+# ⚠️ COLLISION FOUND 2026-10-20 — not part of this change, but do not lose it.
+#
+# The cluster SERVICE CIDR is 10.96.0.0/12, which spans 10.96.0.0 - 10.111.255.255.
+# AD Sites and Services registers FOUR corporate subnets inside that span:
+#
+#     10.100.0.0/16   10.102.0.0/16   10.107.0.0/16   10.110.0.0/16
+#
+# Consequences, in order of how much they matter:
+#
+# 1. A POD trying to reach a corporate host in any of those ranges will have its packet
+#    claimed by Kubernetes service routing instead of leaving the cluster. This is a real
+#    latent fault, not a policy question, and it is present on all three clusters.
+# 2. Hosts in those four ranges were already admitted by the 10.96.0.0/12 entry, so they
+#    were never part of the office outage.
+#
+# 10.96.0.0/12 is the kubeadm default and was almost certainly never checked against the
+# corporate registry. Changing a live cluster's service CIDR is a rebuild, so this is a
+# "know about it" finding, not a fix. Raise it separately.
+# ---------------------------------------------------------------------------
