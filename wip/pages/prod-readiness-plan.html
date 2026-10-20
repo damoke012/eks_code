@@ -1,0 +1,311 @@
+<title>Prod Readiness Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Reference page, same family as the other on-prem pages. Amber is reserved
+     for the one step that can take the production control plane down. */
+  :root {
+    --bg: #f5f7f9; --surface: #ffffff; --surface-2: #e9edf1; --line: #ccd5de;
+    --fg: #15202a; --fg-dim: #566573; --accent: #a2600f; --accent-bg: #fcf2e2;
+    --good: #1c6b40; --bad: #9c2b36;
+    --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101519; --surface: #192026; --surface-2: #222b33; --line: #33404a;
+      --fg: #e6edf3; --fg-dim: #94a3b1; --accent: #e7a84f; --accent-bg: #2b2114;
+      --good: #6ac98d; --bad: #f2919c; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101519; --surface: #192026; --surface-2: #222b33; --line: #33404a;
+    --fg: #e6edf3; --fg-dim: #94a3b1; --accent: #e7a84f; --accent-bg: #2b2114;
+    --good: #6ac98d; --bad: #f2919c; color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6; }
+  .wrap {
+    max-width: 62rem; margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 2rem 4rem; display: flex; flex-direction: column; gap: 1.6rem;
+  }
+  h1 { font-size: clamp(1.6rem, 1.1rem + 2vw, 2.3rem); font-weight: 700; letter-spacing: -.025em; margin: 0; text-wrap: balance; }
+  h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 .6rem; letter-spacing: -.01em; }
+  h3 { font-size: .92rem; font-weight: 600; margin: 1.2rem 0 .5rem; }
+  p { margin: 0 0 .75rem; max-width: 70ch; }
+  p:last-child { margin-bottom: 0; }
+  .eyebrow { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--fg-dim); }
+  .headline { border-left: 3px solid var(--accent); background: var(--accent-bg); padding: 1rem 1.1rem; border-radius: 0 10px 10px 0; }
+  .headline p { font-size: 1.05rem; }
+  section.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem; min-width: 0; }
+  figure { margin: 0; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+  figure svg { width: 100%; max-width: 100%; height: auto; display: block; }
+  figcaption { font-size: .85rem; color: var(--fg-dim); max-width: 70ch; }
+  .dgm-box { fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .dgm-acc { fill: none; stroke: var(--accent); stroke-width: 2.2; }
+  .dgm-line { stroke: currentColor; stroke-width: 1.5; fill: none; }
+  .dgm-dash { stroke: currentColor; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; opacity: .65; }
+  .dgm-t { fill: currentColor; font-family: "Archivo", system-ui, sans-serif; font-size: 13px; }
+  .dgm-s { fill: currentColor; font-family: "Archivo", system-ui, sans-serif; font-size: 11.5px; opacity: .72; }
+  .dgm-a { fill: var(--accent); font-family: "Archivo", system-ui, sans-serif; font-size: 12px; font-weight: 600; }
+  .dgm-head { fill: currentColor; }
+  table { border-collapse: collapse; width: 100%; font-size: .87rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .67rem; text-transform: uppercase; letter-spacing: .07em; color: var(--fg-dim); }
+  tr:last-child td { border-bottom: 0; }
+  .rail { overflow-x: auto; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: .1rem .3rem; border-radius: 4px; }
+  pre { font-family: var(--mono); font-size: .8rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: .75rem .85rem; overflow-x: auto; margin: 0 0 .6rem; line-height: 1.5; }
+  ul, ol { margin: 0; padding-left: 1.15rem; max-width: 70ch; }
+  li { margin-bottom: .4rem; }
+  .warn { border-left: 3px solid var(--accent); padding-left: .85rem; margin-bottom: .85rem; max-width: 70ch; }
+  .warn:last-child { margin-bottom: 0; }
+  .warn b { font-weight: 700; }
+  .danger { border-left: 4px solid var(--bad); background: var(--surface-2); padding: .9rem 1rem; border-radius: 0 8px 8px 0; max-width: 70ch; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">On-prem production &middot; Sprint 7 &middot; 20 October 2026</span>
+    <h1>Prod Readiness Plan</h1>
+  </header>
+
+  <div class="headline">
+    <p><b>The ask:</b> sign in to the production cluster with AWS single sign-on, and close
+    whatever else stops production being genuinely production-ready.</p>
+    <p><b>The good news:</b> QA already has all of this, and we wrote down what went wrong
+    doing it. This is a <b>difference against QA</b>, not a design.</p>
+  </div>
+
+  <section class="card">
+    <h2>Single sign-on: seven pieces, two of them new</h2>
+    <p>QA went live on 28 July. Afterwards, signing in there produced the right identity and
+    the right groups with no certificate involved at all. The same seven pieces apply to
+    production; five are copies, two carry production's own values.</p>
+    <div class="rail">
+      <table>
+        <thead><tr><th>#</th><th>Piece</th><th>Where it lands</th><th>New?</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>The authenticator, running on the control plane</td><td>the platform repository, production branch</td><td>copy</td></tr>
+          <tr><td>2</td><td>Its permissions inside the cluster</td><td>same</td><td>copy</td></tr>
+          <tr><td>3</td><td>The map from the sign-on role to a cluster group</td><td>same</td><td><b>production's role</b></td></tr>
+          <tr><td>4</td><td>Three group-based permission bindings</td><td>same</td><td>copy</td></tr>
+          <tr><td>5</td><td><b>The API server setting that turns it on</b></td><td><b>Terraform, deployed through Octopus</b></td><td>copy &mdash; see below</td></tr>
+          <tr><td>6</td><td>The switch that enables it, scoped to production</td><td><b>an Octopus variable, not a file in Git</b></td><td><b>yes</b></td></tr>
+          <tr><td>7</td><td>A sign-on permission set in the production account, assigned to people</td><td>AWS Identity Center</td><td><b>yes</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>The one step that can take production down</h2>
+    <div class="danger">
+      <p style="margin-bottom:.5rem"><b>The API server will not start if a file it is told to
+      read does not exist.</b></p>
+      <p style="margin-bottom:0">Piece 5 points the API server at a file. Piece 1 is what
+      writes that file &mdash; on <b>every</b> control-plane machine. Land them in the wrong
+      order and the production control plane does not come back.</p>
+    </div>
+    <h3>So the order is not a preference</h3>
+    <ol>
+      <li>Land the authenticator. <b>Confirm the file exists on all three control-plane
+        machines.</b></li>
+      <li>Only then land the API server setting, and watch the control plane restart
+        <b>one machine at a time</b>.</li>
+      <li>Keep the break-glass certificate access <b>open in another window</b> throughout.</li>
+    </ol>
+    <p><b>The reason that third step saves you:</b> the setting needs the <i>file</i>, not a
+    running service. If the authenticator itself fails, single sign-on stops working and
+    certificate access still works. That escape hatch only helps if someone is already
+    holding it.</p>
+    <div class="warn"><b>This needs a change window.</b> It is the only item in this plan that
+    touches a production control plane.</div>
+  </section>
+
+  <section class="card">
+    <h2>Three traps QA already paid for</h2>
+    <div class="warn">
+      <b>Production applies for real.</b> Everywhere else, an Octopus deployment prints its
+      plan and changes nothing unless a flag is set &mdash; and that flag is <b>on for
+      production</b>. The usual "deploy it to see the plan" is not safe here.
+    </div>
+    <div class="warn">
+      <b>The settings file in Git is not what a deployment reads.</b> On QA the enabling value
+      sat in a Git file and was never read; the deployment takes its values from Octopus. Piece
+      6 is an Octopus variable, and putting it in Git instead looks right and does nothing.
+    </div>
+    <div class="warn">
+      <b>A release freezes its variables when it is created.</b> Adding the variable does not
+      reach a release that already exists. Refresh it, or deploy a new one &mdash; otherwise
+      the deployment is another silent success.
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>What else production needs</h2>
+    <p>Grouped by the question each one answers. <b>Every row below is from notes six to twelve
+    weeks old and has not been re-checked</b> &mdash; which is why the first task is measuring,
+    not building.</p>
+
+    <h3>Can we get in, and get back in?</h3>
+    <div class="rail">
+      <table>
+        <thead><tr><th>Item</th><th>State</th></tr></thead>
+        <tbody>
+          <tr><td>Sign-on access</td><td class="no">Production is certificates only</td></tr>
+          <tr><td>Break-glass certificate path</td><td class="yes">Exists &mdash; but write down where to find it under pressure</td></tr>
+          <tr><td>The platform's own AWS role</td><td class="no">Held <b>one</b> permission and could not write its own secrets. QA fixed in August; <b>production never was</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Will we know when it breaks?</h3>
+    <div class="rail">
+      <table>
+        <tbody>
+          <tr><td>Alerts actually delivered</td><td class="no">Dev and QA fixed in August. <b>Production still fires alerts into nothing</b></td></tr>
+          <tr><td>Dashboards</td><td class="yes">Running &mdash; confirm the data sources resolve</td></tr>
+          <tr><td>Log retention</td><td class="no">Unknown here, and unknown in the cloud too. Nobody owns it</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Can we recover it?</h3>
+    <div class="rail">
+      <table>
+        <tbody>
+          <tr><td>Backups</td><td>Installed, <b>never restore-tested on production</b>. A restore is the only proof a backup exists</td></tr>
+          <tr><td>Cluster database snapshots</td><td>QA's were stale for weeks behind a <b>green</b> status with an empty value. Check production's age and contents, not its status</td></tr>
+          <tr><td>Rebuild from nothing</td><td>Never proven end to end. Name it as its own piece of work, not this sprint</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Is it safe, and is it current?</h3>
+    <div class="rail">
+      <table>
+        <tbody>
+          <tr><td>Certificates genuinely valid</td><td>Unverified. Dev served <b>expired</b> certificates on every hostname for 41 days while reporting healthy</td></tr>
+          <tr><td>A resource declared in two places</td><td>One storage bucket is declared by two separate Terraform projects. A removal in the wrong one deletes it</td></tr>
+          <tr><td>Kubernetes version</td><td class="no"><b>QA measured 20 October: v1.32.0 &mdash; support ended 28 February 2026</b>, and that line's last patch was 1.32.13. The first release of a dead line, never patched. Self-managed, so no extended support exists. Production unmeasured but near-certain to match</td></tr>
+          <tr><td>Deployment tooling version</td><td>Production is behind dev &mdash; so dev is not a valid rehearsal for anything that depends on it</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>The order of work</h2>
+    <figure>
+      <svg viewBox="0 0 1100 320" role="img"
+           aria-label="Measuring comes first. Then the sign-on work in sequence: land the authenticator, verify the file exists on all three control plane machines, then the API server setting during a change window with break-glass access open. Independently and in parallel: the AWS role fix, alert delivery, and a restore test.">
+        <defs>
+          <marker id="pr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="dgm-head"></path>
+          </marker>
+        </defs>
+        <rect class="dgm-box" x="20" y="48" width="150" height="62" rx="8"></rect>
+        <text class="dgm-t" x="95" y="75" text-anchor="middle">Measure</text>
+        <text class="dgm-s" x="95" y="95" text-anchor="middle">half a day</text>
+
+        <line class="dgm-line" x1="170" y1="79" x2="206" y2="79" marker-end="url(#pr)"></line>
+        <rect class="dgm-box" x="210" y="48" width="200" height="62" rx="8"></rect>
+        <text class="dgm-t" x="310" y="75" text-anchor="middle">Land the authenticator</text>
+        <text class="dgm-s" x="310" y="95" text-anchor="middle">low risk, Git only</text>
+
+        <line class="dgm-line" x1="410" y1="79" x2="446" y2="79" marker-end="url(#pr)"></line>
+        <rect class="dgm-box" x="450" y="48" width="200" height="62" rx="8"></rect>
+        <text class="dgm-t" x="550" y="75" text-anchor="middle">Verify the file</text>
+        <text class="dgm-s" x="550" y="95" text-anchor="middle">on all 3 control planes</text>
+
+        <line class="dgm-line" x1="650" y1="79" x2="686" y2="79" marker-end="url(#pr)"></line>
+        <rect class="dgm-acc" x="690" y="48" width="250" height="62" rx="8"></rect>
+        <text class="dgm-t" x="815" y="75" text-anchor="middle">API server setting</text>
+        <text class="dgm-a" x="815" y="95" text-anchor="middle">change window, break-glass open</text>
+
+        <line class="dgm-dash" x1="95" y1="110" x2="95" y2="200"></line>
+        <line class="dgm-dash" x1="95" y1="200" x2="206" y2="200" marker-end="url(#pr)"></line>
+
+        <rect class="dgm-box" x="210" y="170" width="200" height="62" rx="8"></rect>
+        <text class="dgm-t" x="310" y="197" text-anchor="middle">Fix the AWS role</text>
+        <text class="dgm-s" x="310" y="217" text-anchor="middle">copy of QA's, isolated</text>
+
+        <rect class="dgm-box" x="450" y="170" width="200" height="62" rx="8"></rect>
+        <text class="dgm-t" x="550" y="197" text-anchor="middle">Deliver the alerts</text>
+        <text class="dgm-s" x="550" y="217" text-anchor="middle">already proven on dev + QA</text>
+
+        <rect class="dgm-box" x="690" y="170" width="250" height="62" rx="8"></rect>
+        <text class="dgm-t" x="815" y="197" text-anchor="middle">Restore test</text>
+        <text class="dgm-s" x="815" y="217" text-anchor="middle">turns a belief into a fact</text>
+
+        <text class="dgm-s" x="210" y="266">These three never touch the control plane and run alongside the sign-on work.</text>
+        <text class="dgm-a" x="210" y="290">The two middle ones are copies of changes already working elsewhere &mdash; the cheapest risk reduction available.</text>
+      </svg>
+      <figcaption>
+        One step needs a window; everything else can proceed in parallel. The two changes
+        already proven in another environment are the ones to do first.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section class="card">
+    <h2>Measure first &mdash; nothing below changes anything</h2>
+    <pre>KP=$HOME/.kube/op-usxpress-prod.yaml
+kubectl --kubeconfig=$KP get --raw /version | head -c 200; echo
+kubectl --kubeconfig=$KP get nodes -o wide --no-headers | awk '{print $1"  "$5"  "$8}'</pre>
+    <pre>kubectl --kubeconfig=$KP -n kube-system get ds,deploy -o name | grep -i auth || echo "NO authenticator on prod"</pre>
+    <pre>kubectl --kubeconfig=$KP get certificate -A -o custom-columns=NS:.metadata.namespace,N:.metadata.name,READY:.status.conditions[0].status,EXPIRES:.status.notAfter</pre>
+    <pre>kubectl --kubeconfig=$KP get externalsecrets -A -o custom-columns=NS:.metadata.namespace,N:.metadata.name,READY:.status.conditions[0].status | head -20</pre>
+    <p>These settle the Kubernetes and operating system versions, whether an authenticator
+    already exists, whether any certificate is expiring behind a healthy status, and whether
+    secret delivery is working. <b>Several rows in the previous section may already be
+    closed</b>, and two of those notes have been wrong before.</p>
+  </section>
+
+  <section class="card">
+    <h2>What is in this sprint, and what is not</h2>
+    <div class="rail">
+      <table>
+        <thead><tr><th>In</th><th>Not in &mdash; each deserves its own ticket</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>
+              <ul style="margin:0">
+                <li>Measure the current state</li>
+                <li>Sign-on, in two separate pieces of work</li>
+                <li>The AWS role fix</li>
+                <li>Alert delivery</li>
+                <li>A restore test</li>
+              </ul>
+            </td>
+            <td>
+              <ul style="margin:0">
+                <li>Proving a rebuild from nothing</li>
+                <li>Aligning the deployment tooling versions</li>
+                <li>A log retention policy</li>
+                <li>Resolving the doubly-declared resource</li>
+              </ul>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="danger" style="margin-top:1rem">
+      <p style="margin-bottom:.5rem"><b>One item may outrank this entire list.</b></p>
+      <p style="margin-bottom:0">QA runs a Kubernetes version whose support ended in February,
+      and it is the first release of that line &mdash; thirteen patches shipped afterwards and
+      none was applied. It cannot be a task inside this sprint, because it is control-plane work
+      across three clusters with no written procedure. But a cluster eight months past end of
+      life is a harder answer to "is it production-ready" than anything else on this page.
+      <b>Raise it as its own piece of work before this sprint's scope is agreed.</b></p>
+    </div>
+    <p style="margin-top:.9rem"><b>Split the sign-on work into two tickets.</b> The Git half is
+    low risk and can land any time; the control-plane half needs a window and a second person.
+    One ticket for both would stall the safe half behind the scheduling of the risky one.</p>
+  </section>
+</div>
