@@ -25,7 +25,7 @@ of them**:
 
 | Question | Ask | Not |
 |---|---|---|
-| Which variables does it read? | **Octopus project variables**, plus what **DX creates in Terraform** (pull Parul or Rohit) | `docker-compose.yml` — local dev only, "may not even work" |
+| Which variables does it read? | the **keys inside its `envFrom` objects** (`get secret|cm` each one), plus **Octopus project variables** and what **DX creates in Terraform** | `.env` in the spec — measured 1 named var against 8 `envFrom` objects ([[envfrom-hides-the-inventory]]); or `docker-compose.yml`, local dev only |
 | Which are sensitive? | the **app developer**, who **approves** the split; we only propose | your own judgement alone |
 | CPU / memory / replicas | the **live DX prod cluster** — DX generates the deployment YAML | the app team; they have never set them |
 | Which image? | the **ECR repository their build already fills** | a new repository you create |

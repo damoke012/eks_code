@@ -98,6 +98,12 @@ Quoted output, YAML fragments and expected results reach the terminal as command
 **Put only runnable lines in ```bash fences.** Quote expected output as indented text or a
 table, and pass any prose to a tool with `--body-file`, never `--body`.
 
+⚠️ **Recurred 2026-10-20.** A *measured value quoted back to the reader* —
+`sg-0c8f8db29b16a1477   allow TCP 0-65535 from 10.16.0.0/20 only` — was put in a bash
+fence because it looked like command output. It was pasted and ran:
+`sg-0c8f8db29b16a1477: command not found`. A finding is prose however much it looks like
+a terminal line. Only lines meant to be executed go in the fence.
+
 ## 6. A guard is a measurement, and it can measure the wrong thing
 
 ```bash
