@@ -23,3 +23,26 @@ suspicious (all eight identical, and the version query silently empty).
 * Keep value queries stdout-only; diagnostics go to a separate stream or file.
 * Give every statement a `timeout` so a hang is a labelled verdict, not a Ctrl-C.
 * Related: [[prod-incident-instrument-check]] — validate the instrument before trusting it.
+
+## 2026-10-20 — and the other half: don't run a test a known blocker already explains
+
+Two things happened in one command against op-qa, and only one of them is a finding.
+
+**Not a finding.** `istio-ingressgateway` has neither `curl` nor `getent`:
+`exec: "curl": executable file not found in $PATH`. That is **NOT MEASURED** about the
+network — the probe never left the pod. An Istio proxy image is minimal; so are
+cert-manager, external-secrets and the Flux controllers. Candidates that usually do carry
+tools: `argocd-repo-server`, `grafana`. Test for the binary before trusting the silence.
+
+**The finding, and it is about sequencing.** The connection test was going to measure whether
+on-prem can reach an AWS PrivateLink endpoint — while we already knew the endpoint's security
+group admits `10.16.0.0/20` **only**. A timeout was fully explained *before the test ran*, so
+the test could return no information: success was impossible and failure was ambiguous
+between "no route" and "the rule we already know about".
+
+**How to apply.** Before running a probe, ask what each possible result would change. If one
+outcome is impossible and the other is already explained by a known cause, **remove the known
+cause first, then measure.** Otherwise the test burns a round trip and, worse, its predicted
+failure gets quoted later as evidence of something it never measured.
+
+Related: [[proxy-is-not-the-property]], [[a-guard-can-measure-the-wrong-thing]].

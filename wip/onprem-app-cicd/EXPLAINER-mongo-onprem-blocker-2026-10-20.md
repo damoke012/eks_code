@@ -55,18 +55,39 @@ looks like the database is simply not responding.
 
 | # | What | Who | Status |
 |---|---|---|---|
-| 1 | Confirm the exact on-prem address range the connection will come from | platform | in progress |
-| 2 | Find who owns the security group — its name says it was created by Terraform, so it should be changed in code rather than by hand | platform | in progress |
-| 3 | Add the on-prem range to the security group, ports 1024-1026 | network / cloud team | **the actual fix** |
-| 4 | Test a connection from an on-prem cluster and confirm it succeeds | platform | after 3 |
+| 1 | Confirm the on-prem address range | platform | ✅ **10.10.82.0/24** — all three on-prem clusters' machines sit in it |
+| 2 | Find who owns the security group | platform | ✅ **an Octopus project called `mongodb`**, space `USXpress`, group `enterprise` — not the platform team's code |
+| 3 | Add the on-prem range to the security group, ports 1024-1026 | **the owner of that Octopus project** | **the actual fix** |
+| 4 | Test a connection from an on-prem cluster | platform | after 3 |
 
 **The change itself, precisely:**
 
 ```
-Security group   sg-0c8f8db29b16a1477
+Security group   sg-0c8f8db29b16a1477   ("mongodb-interface-endpoint")
 Account          937464026810, region us-east-2
-Add inbound      TCP ports 1024-1026, from the on-prem worker address range
+Add inbound      TCP ports 1024-1026, source 10.10.82.0/24
+Reason           on-prem Kubernetes clusters reaching MongoDB Atlas
 ```
+
+**Who to ask.** The security group's tags name its owner: Octopus project **`mongodb`**,
+space **`USXpress`**, project group **`enterprise`**, environment **`production`**. So this
+is not a console edit and not ours to make — it is a code change in that project, raised with
+whoever owns it.
+
+⚠️ **Two things to insist on when it is deployed.**
+
+1. The group's own description reads *"open within VPC"*. Admitting an outside network is a
+   deliberate change to its security posture, so it needs the owner's agreement rather than a
+   mechanical edit.
+2. **An Octopus deployment going green does not mean the change was applied.** These projects
+   print the plan and skip the apply unless a flag is set. Ask for the task log and confirm it
+   contains `Apply complete!` before testing — otherwise a successful-looking deployment and a
+   failed connection will send everyone back to the network.
+
+**One assumption, which the test in step 4 settles.** On-prem pods are expected to leave the
+cluster carrying their machine's address (10.10.82.x) rather than their internal pod address
+(10.244.x.x). That is the normal behaviour and is why the rule names the machine range. If the
+test still fails after the rule lands, this is the first thing to re-check.
 
 Ports 1024-1026 look unusual and are correct — that is the port range Atlas uses for a
 private connection. **A request written for the usual MongoDB port 27017 would be approved

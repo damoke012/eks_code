@@ -51,8 +51,22 @@ On-prem is 10.10.82.x, a different network.
 | The VPN's own table (`tgw-rtb-056c87f242ae7a6bc`) carries 10.16.0.0/20 | ✅ |
 | **The endpoint's security group `sg-0c8f8db29b16a1477` admits only 10.16.0.0/20** | ❌ |
 
-**So the fix is one inbound rule: TCP 1024-1026 from the on-prem worker range.** Not a new
-network, not a credential change, and not a reason to pause the rest of the onboarding.
+**So the fix is one inbound rule: TCP 1024-1026 from 10.10.82.0/24.** Not a new network, not
+a credential change, and not a reason to pause the rest of the onboarding.
+
+**Measured on-prem addressing:** every op-qa node sits in **10.10.82.0/24** (.23 .24 .25 .30
+.105 .106 .107 .138 .139 .177 .182 .183 .184), and op-dev (.50) and op-prod (.52) are in the
+same /24 — so **one source range covers all three clusters**. The pod network is
+**10.244.0.0/16**, per-node /24s, and is not what AWS will see as the source, since pods leave
+the cluster masqueraded to their node's address.
+
+**Who owns the security group:** its tags say Octopus project **`mongodb`**, space
+**`USXpress`**, project group **`enterprise`**, environment **`production`** — so the change
+belongs to that project's owner, not to us, and its description (*"open within VPC"*) means
+admitting an outside network is a posture decision rather than an edit.
+
+⚠️ **Verify the apply.** An Octopus deploy of that project will report Success after printing
+a plan it did not apply. Require `Apply complete!` in the task log before testing.
 
 ⚠️ **A request naming port 27017 would be approved and would not work.** 1024-1026 is the
 private-endpoint port range.
