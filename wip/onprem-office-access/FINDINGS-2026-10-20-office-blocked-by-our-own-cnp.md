@@ -11,7 +11,8 @@ command:
 |---|---|---|
 | `Test-NetConnection 10.10.82.21 -Port 443` | TcpTestSucceeded **False** | TcpTestSucceeded **True** |
 
-**op-qa and op-prod still carry the unfixed policy.**
+✅ **op-qa done the same evening** — PR #179 (`4005c6e`), 22 CIDRs live, all Kustomizations
+Ready. **op-prod is the only one left.**
 
 ⚠️ **The verification nearly produced a false negative.** The first two reads of the live
 object after the merge returned the OLD four CIDRs: annotating the Kustomization re-applies
@@ -87,6 +88,26 @@ branch `op-<env>`. INFRA-1496 Phase 3, CIDR list decided 2026-06-01.
   records point at the machines and each terminates TLS itself.
 * **"A corporate firewall rule, network team to fix."** My own first verdict, wrong. The
   block is ours.
+
+## Traps around VERIFYING this change — three near-misses on one commit
+
+Each of these would have produced a confident wrong answer, and all three were about
+reading the sync instead of the value:
+
+1. **Annotating the Kustomization does not refetch Git.** It re-applies the cached artifact
+   and reports success. Two reads after the merge returned the OLD four CIDRs. The
+   GitRepository must be annotated too — that is what `flux reconcile --with-source` does,
+   and `flux` is not installed on the WSL box.
+2. **A read taken during a reconcile shows the previous revision.** Dev and QA both did
+   this. The cure is a second read, not a diagnosis.
+3. ⚠️ **`.status.lastAppliedRevision` and the Ready condition DISAGREED on op-qa.** The
+   field said `625b1cc`, the condition in the same object said
+   `Applied revision: op-qa@sha1:4005c6e` with a timestamp 30 seconds old. **Trust the
+   condition — it carries `lastTransitionTime`; the field does not.** QA runs Flux v2.7.5
+   against dev's v2.8.8, so this may be version-specific.
+
+**The only reliable gate is reading the value itself**, which is why every block here ends
+with the live `fromCIDR` list rather than a Ready column.
 
 ## Traps
 
