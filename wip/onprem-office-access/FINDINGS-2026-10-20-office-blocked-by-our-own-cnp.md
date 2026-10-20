@@ -1,5 +1,24 @@
 # Office staff cannot reach any on-prem URL — it is our own CiliumNetworkPolicy
 
+## ✅ FIXED ON op-dev 2026-10-20 — confirmed by the original reporter
+
+PR #178 (`1f70fda`) added the 18 AD-registered corporate subnets to
+`allow-corp-vpn-to-ingressgateway`. The live object now carries **22 CIDRs** with all four
+originals intact. Jenni Ray, same office Wi-Fi machine, same source `10.10.72.227`, same
+command:
+
+| | Before | After |
+|---|---|---|
+| `Test-NetConnection 10.10.82.21 -Port 443` | TcpTestSucceeded **False** | TcpTestSucceeded **True** |
+
+**op-qa and op-prod still carry the unfixed policy.**
+
+⚠️ **The verification nearly produced a false negative.** The first two reads of the live
+object after the merge returned the OLD four CIDRs: annotating the Kustomization re-applies
+the cached artifact and reports success without refetching Git. A third read, after
+annotating the **GitRepository** too, showed `lastAppliedRevision` had advanced and the
+value had changed. Read the value, not the sync — [[gitops-has-four-stale-layers]].
+
 **Reported:** 2026-10-20, Steve Duck relaying Jeremy Kays. "Folks in the office and Tim on
 his ASA can't access this link" (`risingwave-console.op-dev.usxpress.io`). VPN users fine.
 
