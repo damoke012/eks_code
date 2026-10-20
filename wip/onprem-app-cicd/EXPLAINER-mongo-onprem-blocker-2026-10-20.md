@@ -1,9 +1,10 @@
-# Why the pricing app can't reach its database from on-prem — and what fixes it
+# The pricing app's move to on-prem — how it runs today, and how it will run there
 
 **2026-10-20.** Written for anyone who needs to act on this: the application team, the
 network team, and whoever signs off the change. No prior context needed.
 
 **Shareable page with diagrams:** https://claude.ai/artifact/1R9Qbe1K5ex9jnZg7u3Hxc
+("Pricing App On-Prem Move")
 (private until shared from its own Share menu).
 
 ## In one line
@@ -133,6 +134,70 @@ Ports 1024-1026 look unusual and are correct — that is the port range Atlas us
 private connection. **A request written for the usual MongoDB port 27017 would be approved
 and would not work.**
 
+## Where the application's settings come from
+
+The application reads **70 values**: 58 ordinary settings and 12 credentials. Almost none of
+them are visible in the deployment itself — it names **one** setting directly and pulls in
+**eight whole objects** wholesale, so the real list is the keys inside those objects.
+
+**Today, two sources, and the application team can only see one of them.**
+
+```
+  Octopus variables  ---substituted--->  ConfigMap + Secret  ---+
+  53 values, per environment             (...-chart)            |
+                                                                +---> pricing-rfp-handler
+  DX Terraform       ---creates------->  AWS Secrets Manager ---+     pulls in 8 objects
+  builds 14 credentials                  injected as Secrets          names 1 directly
+```
+
+Octopus variables belong to the application team. What DX builds in AWS is invisible to them
+— which is why "all of ours are in Octopus" and "I'm not sure DX provisions those" were both
+said honestly in the same conversation.
+
+**On-prem, two destinations, and both are reviewable.**
+
+```
+  values-<env>.yaml in Git  ---renders--->  Argo CD  ---ConfigMap---+
+  58 settings, changed by PR                applies the chart       |
+                                                                    +---> pricing-rfp-handler
+  AWS Secrets Manager       ---fetches--->  External  ---Secret-----+     reads them exactly
+  12 credentials                            Secrets                       as it does today
+```
+
+The application does not change. Ordinary settings become visible and reviewable in Git;
+credentials get one home, and the value never appears in a repository.
+
+| Held today in | Count | On-prem |
+|---|---|---|
+| Octopus project variable | 50 | `values-<env>.yaml`, applied by Argo CD |
+| Octopus **sensitive** variable | 3 | AWS Secrets Manager → External Secrets |
+| Built by DX into AWS Secrets Manager | 14 | 9 stay credentials; **5 become ordinary settings** |
+| Chart or image default | 3 | `values-<env>.yaml` |
+
+**Three things worth saying plainly:**
+
+* **Five values move sides.** The Kafka server address, REST endpoint, resource id, service
+  account and schema-registry address are in a credential store only because they were created
+  next to real credentials. They are addresses. On-prem they belong in the settings file — so
+  the credential bundle is **split**, not copied.
+* **One thing gets slower on purpose.** A setting that can be changed in a web form today
+  becomes a pull request. That is the point — a change that can be reviewed, and a
+  configuration that survives a rebuild — but it is a real difference, not an upgrade in every
+  direction.
+* **The application developer approves the split.** The platform proposes which values are
+  credentials and which are settings; the person who knows the application signs it off.
+
+## What else has to travel with it
+
+| Depends on | What it needs on-prem |
+|---|---|
+| **MongoDB Atlas** | the firewall rule described above |
+| **Confluent Kafka** | topic **and consumer-group** permissions for the same service account. Without the group permission it starts, reports healthy and reads nothing |
+| **Two SQL Servers** | network reachability, plus the CA bundle it already carries — it refuses an unverified server |
+| **Knight-Swift pricing API** | reachable from on-prem. This is the reason for the move and it is still untested |
+| **Tariff API** | reachable on **port 83**, unusual enough to be dropped when copying a hostname |
+| **Telemetry** | a collector inside the cluster, plus the profiling service. Miss these and the app runs perfectly while its logs reach nobody |
+
 ## What this is *not*
 
 * **Not a redesign.** Nothing about the application changes.
@@ -140,6 +205,9 @@ and would not work.**
 * **Not a credential problem.** The certificates are unaffected.
 * **Not a reason to pause the onboarding.** The rest of the work — the image, the
   configuration, the deployment — is unblocked and can continue in parallel.
+* **Not a rebuild of the image.** The image running in production today is the one that runs
+  on-prem, pinned by its exact digest rather than a version label, so what runs is provably
+  what was tested.
 
 ## Why it matters beyond this one application
 
