@@ -171,6 +171,20 @@ misdirected paste fails loudly instead of half-running:
 
 Never interleave them. Give all the PowerShell, let it finish, then give the bash.
 
+**A block written for someone else will be run by Doke first.** On 2026-10-20 a
+`Test-NetConnection` line was written for an office colleague to run in Windows PowerShell,
+labelled as such. Doke pasted it into his WSL prompt **twice**, both times getting
+`Test-NetConnection: command not found` — because he is the one driving, and he tests before
+he forwards. Labelling the shell is not enough when the audience is a third party.
+
+**Hand over both twins at once.** The colleague's PowerShell line *and* the bash equivalent
+Doke can run himself, each labelled, so there is nothing to translate:
+
+```
+timeout 5 bash -c 'cat < /dev/null > /dev/tcp/10.10.82.21/443' && echo OPEN || echo BLOCKED
+```
+
+
 **`wsl --shutdown` cannot run inside the WSL it is shutting down** — it is a Windows binary.
 Writing `%USERPROFILE%\.wslconfig` is doable from either side (`/mnt/c/Users/<user>/.wslconfig`
 from bash), but when the operator is already at a PowerShell prompt, keep everything there:
