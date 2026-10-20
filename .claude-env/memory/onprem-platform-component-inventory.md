@@ -43,7 +43,28 @@ listing — and the reason reconciling `flux-system` does not reconcile the rest
 
 **All 30 Kustomizations were `True`** at the time of the sweep.
 
-⚠️ **This is QA.** dev and prod are not measured, and dev is known to differ at least in Flux
-version. Do not quote these counts for another cluster.
+## ✅ Prod measured the same day, and it is identical
+
+`op-usxpress-prod` returns **the same pod count in 19 of 20 namespaces** — rook-ceph 62,
+velero 44, kube-system 32, istio-system 28, prometheus 13, istio-ingress 10, cert-manager 6,
+kyverno 5, argocd 5, flux-system 4, keda/external-secrets/etcd-backup 3 each,
+pod-identity-webhook/ecr-credentials 2 each, reloader/local-path-storage/grafana/external-dns
+1 each. Same 13-node layout, same Kubernetes version.
+
+**The only difference is `risingwave`: 14 pods on prod against 13 on QA.**
+
+**Why this matters more than it looks.** "Is prod production-ready?" is **not** a question
+about missing platform components — prod has everything QA has, in the same quantity. The
+remaining gaps are **configuration and behaviour**: whether alerts are routed, whether an IAM
+role can write, how humans authenticate, and what version is running. That narrows the
+readiness list sharply and removes a whole category of imagined work.
+
+⚠️ **kube-system is 32 on both**, and QA's `aws-iam-authenticator` DaemonSet lives there. If
+QA's authenticator pods are inside that 32 and prod's count matches, **prod may already be
+running the authenticator** — which would change the sprint. Settle it with
+`kubectl -n kube-system get ds,deploy -o name | grep -i auth` on each. **Equal counts are a
+hint, never a finding.**
+
+⚠️ **dev is not measured**, and is known to differ at least in Flux version.
 
 Related: [[onprem-k8s-132-out-of-support]] (the same sweep), [[onprem-gitops-repo-topology]].

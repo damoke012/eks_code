@@ -1,12 +1,13 @@
 ---
 name: onprem-k8s-132-out-of-support
-description: "MEASURED 2026-10-20: op-usxpress-qa runs Kubernetes v1.32.0 on every node — upstream EOL since 2026-02-28, and never patched past .0 while the line ended at 1.32.13. Self-managed Talos, so no vendor extended support exists"
+description: "MEASURED 2026-10-20: op-usxpress-qa AND op-usxpress-prod both run Kubernetes v1.32.0 on every node — upstream EOL since 2026-02-28, never patched past .0 while the line ended at 1.32.13. Self-managed Talos, so no vendor extended support exists"
 metadata:
   type: project
 ---
 
-**Measured on op-usxpress-qa, 2026-10-20.** All 13 nodes report **`v1.32.0`**, built
-2024-12-11, OS Talos.
+**Measured on op-usxpress-qa AND op-usxpress-prod, 2026-10-20.** All 13 nodes on each report
+**`v1.32.0`**, built 2024-12-11, OS Talos. Both clusters have the same node layout: 3 control
+plane, 5 application, 3 platform, 2 system.
 
 | | |
 |---|---|
@@ -24,9 +25,8 @@ and none was applied.
 ([[dont-chase-the-latest-version]]) is *move when the support window is closing* — not chase
 the newest. The window did not close recently; it closed in February.
 
-⚠️ **Prod is not measured.** Near-certain to be the same, since all three clusters are built
-from the same Terraform and content-library image, but **near-certain is not measured**. Run
-the same command against `op-usxpress-prod.yaml`.
+✅ **Prod measured 2026-10-20 and confirms it** — the near-certainty was right, and now it is
+a measurement. **dev is still unmeasured.**
 
 **How to apply.** Any "is on-prem production-ready" conversation has to carry this. It is
 larger than the item that prompted it (human sign-on), it needs a Talos upgrade path nobody

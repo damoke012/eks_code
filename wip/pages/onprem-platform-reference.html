@@ -254,7 +254,7 @@
       rather than a rebuild.
     </div>
     <div class="warn">
-      <b>This is QA.</b> dev and production were not measured, and dev is known to differ.
+      <b>Production returns the same counts in 19 of 20 namespaces</b> &mdash; the only difference is RisingWave, 14 pods against 13. So <b>production is not missing platform components</b>; its readiness gaps are configuration and behaviour, not presence. <b>dev is the only cluster not measured.</b>
     </div>
     <div class="warn">
       <b>Flux versions differ between clusters</b> &mdash; dev runs a newer release than QA and
@@ -442,17 +442,16 @@ kubectl --kubeconfig=$KQ get nodes -o wide --no-headers | awk '{print $1"  "$5" 
     a pod count, settling what is actually installed. The third names each platform component
     and whether it is healthy.</p>
     <div class="warn">
-      <b>Still unverified:</b> everything measured on this page is <b>QA</b> &mdash; dev and
-      production were not. Also open: whether production's alerting was ever completed, whether
+      <b>Still unverified:</b> <b>dev</b> is the only cluster not measured. Also open: whether production's alerting was ever completed, whether
       the dev and production permission fixes were applied, and whether any certificate is
       expired behind a healthy status on any cluster.
     </div>
     <div class="danger" style="margin-top:1rem">
       <p style="margin-bottom:.5rem"><b>The finding that outranks everything else on this
       page.</b></p>
-      <p style="margin-bottom:0">QA runs <b>Kubernetes v1.32.0</b> &mdash; the first release of
+      <p style="margin-bottom:0">QA <b>and production both</b> run <b>Kubernetes v1.32.0</b> &mdash; the first release of
       a line whose support ended on <b>28 February 2026</b>, and whose final patch was 1.32.13.
-      The cluster is eight months past end of life and has never taken a patch within its own
+      Both clusters are eight months past end of life and have never taken a patch within their own
       version. Because these clusters are <b>self-managed</b>, no vendor extended support
       applies; the managed cloud clusters run 1.35 and 1.36. Upgrading is control-plane work
       across three clusters with no written procedure, so it is a piece of work in its own

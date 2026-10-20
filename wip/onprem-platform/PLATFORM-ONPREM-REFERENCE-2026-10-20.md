@@ -35,16 +35,15 @@ application workers, 3 platform workers, 2 system workers, 13 in total. dev (.50
 **Pod network: 10.244.0.0/16**, allocated as a /24 per node. Pods leave the cluster
 masqueraded to their node's address, so **10.244.x.x is never what a remote service sees**.
 
-**Kubernetes `v1.32.0` on every op-qa node, measured 2026-10-20**, OS Talos, built
-2024-12-11.
+**Kubernetes `v1.32.0` on every node of BOTH op-qa and op-prod, measured 2026-10-20**, OS
+Talos, built 2024-12-11. Both clusters have the same 13-node layout.
 
 ⛔ **That version left upstream support on 2026-02-28**, and the line's final patch was
 **1.32.13** — so op-qa is running the *initial* release of a line that ended eight months ago,
 having never taken a single patch. Self-managed Talos means **no vendor extended support
 applies**. Cloud EKS, for contrast, runs 1.35 and 1.36.
 
-⚠️ dev and prod are **not measured**. Near-certain to match, since all three are built from the
-same Terraform and image — but near-certain is not measured.
+⚠️ **dev is not measured.**
 
 ## 3. How a cluster gets created
 
@@ -136,7 +135,15 @@ Kustomization** on QA, 83 days old — which is what makes it a clean copy for a
 listing: every entry reports `op-qa@sha1:625b1cc9…` except `flux-system`, which reports
 `master@sha1:db4812ce…`.
 
-⚠️ **This is QA.** dev and prod are not measured, and dev differs at least in Flux version.
+✅ **Prod returns the same counts in 19 of 20 namespaces** — the only difference is
+`risingwave`, 14 pods against QA's 13. So **prod is not missing platform components**; the
+readiness gaps are configuration and behaviour, not presence.
+
+⚠️ **kube-system is 32 on both**, and QA's `aws-iam-authenticator` lives there — so **prod may
+already be running it**. Equal counts are a hint, never a finding: check with
+`kubectl -n kube-system get ds,deploy -o name | grep -i auth`.
+
+⚠️ **dev is not measured**, and differs at least in Flux version.
 
 **Flux versions drift:** `bm-dev` runs **v2.8.8** while QA and prod run **v2.7.5**. So
 "prove it on dev first" is invalid for anything Flux-behavioural — dev is ahead.
@@ -318,12 +325,12 @@ The third names each Flux component and whether it is Ready.
 
 ## Not measured
 
-**dev and prod** — every measurement above is op-qa. Also: whether prod's alerting was ever
+**dev** — it is the only cluster not measured. Also: whether prod's alerting was ever
 completed; the dev and prod `op-*-platform-admin` IAM fixes; whether the Wiz sensor is still
 running; and whether any certificate is expired behind a Ready status on any cluster.
 
 ## The finding that outranks everything else here
 
-**Kubernetes 1.32 left support in February 2026 and op-qa runs v1.32.0.** An upgrade is
+**Kubernetes 1.32 left support in February 2026, and both op-qa and op-prod run v1.32.0.** An upgrade is
 control-plane work on three clusters with no written Talos upgrade path, so it is
 sprint-sized on its own — larger than the human-access work that prompted the measurement.

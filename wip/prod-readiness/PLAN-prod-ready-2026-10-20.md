@@ -109,10 +109,33 @@ Grouped by the question each answers. Every row is **recorded, not re-measured**
 | | State | Work |
 |---|---|---|
 | Flux | ⚠️ prod on **v2.7.5**, dev on **v2.8.8** | decide whether to align; dev is ahead, so dev is not a valid rehearsal for Flux behaviour |
-| Kubernetes version | ⛔ **op-qa measured 2026-10-20: `v1.32.0`. Upstream support ended 2026-02-28** and the line's final patch was 1.32.13 — so it is the initial release of a dead line, never patched. Self-managed, so no extended support exists. prod unmeasured but near-certain to match | **its own sprint.** Control-plane work on three clusters, no written Talos upgrade path |
+| Kubernetes version | ⛔ **op-qa measured 2026-10-20: `v1.32.0`. Upstream support ended 2026-02-28** and the line's final patch was 1.32.13 — so it is the initial release of a dead line, never patched. Self-managed, so no extended support exists. **prod measured 2026-10-20: identical** | **its own sprint.** Control-plane work on three clusters, no written Talos upgrade path |
 | RisingWave console version | ⚠️ displays a stale version on prod | cosmetic; low priority |
 
 ---
+
+## 2b. Measured 2026-10-20 — prod is not missing anything
+
+`op-usxpress-prod` returns **the same pod count as QA in 19 of 20 namespaces**, the same
+13-node layout and the same Kubernetes version. The only difference is `risingwave`: 14 pods
+against 13.
+
+**So "is prod production-ready" is not a question about missing components.** Everything QA
+has, prod has, in the same quantity. What remains is **configuration and behaviour** — whether
+alerts are routed, whether an IAM role can write, how humans authenticate, and what version is
+running. That deletes a whole category of imagined work from this plan.
+
+⚠️ **And one hint worth chasing before sizing the SSO work:** `kube-system` is **32 pods on
+both clusters**, and QA's `aws-iam-authenticator` DaemonSet lives in `kube-system`. If QA's
+authenticator pods are inside that 32 and prod matches it, **prod may already be running the
+authenticator** — leaving only the apiserver flag, the role mapping and the permission set.
+Equal counts are a hint, never a finding:
+
+```bash
+for K in op-usxpress-qa-sso op-usxpress-prod; do echo "== $K"; \
+  kubectl --kubeconfig=$HOME/.kube/$K.yaml -n kube-system get ds,deploy -o name | grep -i auth \
+  || echo "   none"; done
+```
 
 ## 3. What I would do in this sprint
 

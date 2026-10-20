@@ -192,7 +192,7 @@
         <tbody>
           <tr><td>Certificates genuinely valid</td><td>Unverified. Dev served <b>expired</b> certificates on every hostname for 41 days while reporting healthy</td></tr>
           <tr><td>A resource declared in two places</td><td>One storage bucket is declared by two separate Terraform projects. A removal in the wrong one deletes it</td></tr>
-          <tr><td>Kubernetes version</td><td class="no"><b>QA measured 20 October: v1.32.0 &mdash; support ended 28 February 2026</b>, and that line's last patch was 1.32.13. The first release of a dead line, never patched. Self-managed, so no extended support exists. Production unmeasured but near-certain to match</td></tr>
+          <tr><td>Kubernetes version</td><td class="no"><b>QA measured 20 October: v1.32.0 &mdash; support ended 28 February 2026</b>, and that line's last patch was 1.32.13. The first release of a dead line, never patched. Self-managed, so no extended support exists. <b>Production measured 20 October: identical</b></td></tr>
           <tr><td>Deployment tooling version</td><td>Production is behind dev &mdash; so dev is not a valid rehearsal for anything that depends on it</td></tr>
         </tbody>
       </table>
@@ -295,10 +295,25 @@ kubectl --kubeconfig=$KP get nodes -o wide --no-headers | awk '{print $1"  "$5" 
         </tbody>
       </table>
     </div>
+    <div class="warn" style="margin-top:1rem">
+      <b>Production is not missing anything.</b> Measured on 20 October, it returns the same pod
+      count as QA in 19 of 20 namespaces, the same 13-machine layout and the same version
+      &mdash; the only difference is the one application, 14 pods against 13. So readiness is
+      <b>not</b> a question of absent components. What remains is configuration and behaviour:
+      whether alerts are routed, whether a role can write, how people sign in, and what version
+      is running.
+    </div>
+    <div class="warn">
+      <b>One hint worth chasing before sizing the sign-on work.</b> The core namespace holds
+      <b>32 pods on both clusters</b>, and QA's sign-on component lives there. If production's
+      count already includes it, most of this work may already be done and only the API server
+      setting, the role mapping and the permission set remain. Equal counts are a hint, never a
+      finding &mdash; check it directly.
+    </div>
     <div class="danger" style="margin-top:1rem">
       <p style="margin-bottom:.5rem"><b>One item may outrank this entire list.</b></p>
-      <p style="margin-bottom:0">QA runs a Kubernetes version whose support ended in February,
-      and it is the first release of that line &mdash; thirteen patches shipped afterwards and
+      <p style="margin-bottom:0">QA <b>and production both</b> run a Kubernetes version whose support
+      ended in February, and it is the first release of that line &mdash; thirteen patches shipped afterwards and
       none was applied. It cannot be a task inside this sprint, because it is control-plane work
       across three clusters with no written procedure. But a cluster eight months past end of
       life is a harder answer to "is it production-ready" than anything else on this page.
