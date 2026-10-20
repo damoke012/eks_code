@@ -1,0 +1,462 @@
+<title>On-Prem Platform Reference</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Reference page: stacked sections, each self-contained. Amber marks every
+     claim that is NOT measured, so the gaps are visible at a glance. */
+  :root {
+    --bg: #f5f7f9; --surface: #ffffff; --surface-2: #e9edf1; --line: #ccd5de;
+    --fg: #15202a; --fg-dim: #566573; --accent: #a2600f; --accent-bg: #fcf2e2;
+    --good: #1c6b40; --bad: #9c2b36;
+    --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101519; --surface: #192026; --surface-2: #222b33; --line: #33404a;
+      --fg: #e6edf3; --fg-dim: #94a3b1; --accent: #e7a84f; --accent-bg: #2b2114;
+      --good: #6ac98d; --bad: #f2919c; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101519; --surface: #192026; --surface-2: #222b33; --line: #33404a;
+    --fg: #e6edf3; --fg-dim: #94a3b1; --accent: #e7a84f; --accent-bg: #2b2114;
+    --good: #6ac98d; --bad: #f2919c; color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6; }
+  .wrap {
+    max-width: 62rem; margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 2rem 4rem; display: flex; flex-direction: column; gap: 1.6rem;
+  }
+  h1 { font-size: clamp(1.6rem, 1.1rem + 2vw, 2.3rem); font-weight: 700; letter-spacing: -.025em; margin: 0; text-wrap: balance; }
+  h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 .6rem; letter-spacing: -.01em; }
+  h3 { font-size: .92rem; font-weight: 600; margin: 1.2rem 0 .5rem; }
+  p { margin: 0 0 .75rem; max-width: 70ch; }
+  p:last-child { margin-bottom: 0; }
+  .eyebrow { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--fg-dim); }
+  .headline { border-left: 3px solid var(--accent); background: var(--accent-bg); padding: 1rem 1.1rem; border-radius: 0 10px 10px 0; }
+  .headline p { font-size: 1.05rem; }
+  section.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem; min-width: 0; }
+  .toc { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .toc a {
+    font-size: .78rem; text-decoration: none; color: var(--fg);
+    background: var(--surface-2); border: 1px solid var(--line);
+    padding: .25rem .6rem; border-radius: 999px;
+  }
+  figure { margin: 0; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+  figure svg { width: 100%; max-width: 100%; height: auto; display: block; }
+  figcaption { font-size: .85rem; color: var(--fg-dim); max-width: 70ch; }
+  .dgm-box { fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .dgm-zone { fill: none; stroke: currentColor; stroke-width: 1.25; stroke-dasharray: 6 5; opacity: .55; }
+  .dgm-line { stroke: currentColor; stroke-width: 1.5; fill: none; }
+  .dgm-t { fill: currentColor; font-family: "Archivo", system-ui, sans-serif; font-size: 13px; }
+  .dgm-m { fill: currentColor; font-family: "JetBrains Mono", monospace; font-size: 11px; opacity: .8; }
+  .dgm-s { fill: currentColor; font-family: "Archivo", system-ui, sans-serif; font-size: 11.5px; opacity: .72; }
+  .dgm-a { fill: var(--accent); font-family: "Archivo", system-ui, sans-serif; font-size: 12px; font-weight: 600; }
+  .dgm-head { fill: currentColor; }
+  table { border-collapse: collapse; width: 100%; font-size: .87rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .67rem; text-transform: uppercase; letter-spacing: .07em; color: var(--fg-dim); }
+  tr:last-child td { border-bottom: 0; }
+  .rail { overflow-x: auto; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: .1rem .3rem; border-radius: 4px; }
+  pre { font-family: var(--mono); font-size: .8rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: .75rem .85rem; overflow-x: auto; margin: 0; line-height: 1.5; }
+  ul, ol { margin: 0; padding-left: 1.15rem; max-width: 70ch; }
+  li { margin-bottom: .4rem; }
+  .warn { border-left: 3px solid var(--accent); padding-left: .85rem; margin-bottom: .85rem; max-width: 70ch; }
+  .warn:last-child { margin-bottom: 0; }
+  .warn b { font-weight: 700; }
+  .danger { border-left: 4px solid var(--bad); background: var(--surface-2); padding: .9rem 1rem; border-radius: 0 8px 8px 0; max-width: 70ch; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">On-prem platform &middot; reference &middot; 20 October 2026</span>
+    <h1>On-Prem Platform Reference</h1>
+  </header>
+
+  <div class="headline">
+    <p>Three self-managed <b>Talos Linux</b> Kubernetes clusters in the datacenter, built by
+    Terraform through Octopus, configured entirely by <b>Flux</b> from Git, running
+    applications through <b>Argo CD</b>, and joined to AWS by a <b>VPN and transit gateway
+    that already carries traffic</b>.</p>
+  </div>
+
+  <section class="card">
+    <h2>On this page</h2>
+    <div class="toc">
+      <a href="#clusters">The clusters</a>
+      <a href="#build">How one is built</a>
+      <a href="#installed">What runs on it</a>
+      <a href="#network">Networking and DNS</a>
+      <a href="#cloud">The link to AWS</a>
+      <a href="#secrets">Secrets and the registry</a>
+      <a href="#identity">Identity</a>
+      <a href="#traps">The traps</a>
+      <a href="#gaps">What is not measured</a>
+    </div>
+    <p style="margin-top:.9rem">Every claim is marked <b>measured</b>, <b>recorded</b> from
+    earlier verified work, or <b>not verified</b>. Nothing is inferred and presented as fact.</p>
+  </section>
+
+  <section class="card" id="clusters">
+    <h2>The three clusters</h2>
+    <div class="rail">
+      <table>
+        <thead><tr><th></th><th>dev</th><th>QA</th><th>production</th></tr></thead>
+        <tbody>
+          <tr><td>Name</td><td><code>op-usxpress-dev</code></td><td><code>op-usxpress-qa</code></td><td><code>op-usxpress-prod</code></td></tr>
+          <tr><td>API address</td><td><code>10.10.82.50:6443</code></td><td><code>10.10.82.51:6443</code></td><td><code>10.10.82.52:6443</code></td></tr>
+          <tr><td>AWS account</td><td>700736442855</td><td>527101283767</td><td>937464026810</td></tr>
+          <tr><td>Flux directory</td><td><b><code>bm-dev</code></b> &mdash; not the cluster name</td><td><code>op-usxpress-qa</code></td><td><code>op-usxpress-prod</code></td></tr>
+          <tr><td>Platform branch</td><td><code>op-dev</code></td><td><code>op-qa</code></td><td><code>op-prod</code></td></tr>
+          <tr><td>Human access</td><td>certificates (break-glass)</td><td><b>AWS SSO</b> since 2026-07-28</td><td>certificates (break-glass)</td></tr>
+          <tr><td>Argo CD sync</td><td>automatic</td><td>automatic, self-healing</td><td><b>manual only</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:.9rem"><b>Measured 20 October:</b> op-qa has 13 nodes &mdash; 3 control
+    plane, 5 application workers, 3 platform workers, 2 system workers &mdash; and every one of
+    them is in <code>10.10.82.0/24</code>. dev and production are in the same range, so
+    <b>one address range covers all three clusters</b>, which is what a firewall rule should
+    name.</p>
+    <p><b>Pod network: <code>10.244.0.0/16</code></b>, a /24 per node. Pods leave the cluster
+    carrying their node's address, so <code>10.244.x.x</code> is never what a remote service
+    sees.</p>
+  </section>
+
+  <section class="card" id="build">
+    <h2>How a cluster is built</h2>
+    <figure>
+      <svg viewBox="0 0 1100 160" role="img"
+           aria-label="Octopus runs Terraform for the iaac-talos project, which creates virtual machines on vSphere from a content library image, installs Talos Linux as control plane and worker pools, and bootstraps Flux, after which everything else arrives from Git.">
+        <defs>
+          <marker id="pb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="dgm-head"></path>
+          </marker>
+        </defs>
+        <rect class="dgm-box" x="20" y="38" width="195" height="68" rx="8"></rect>
+        <text class="dgm-t" x="117" y="66" text-anchor="middle">Octopus</text>
+        <text class="dgm-m" x="117" y="88" text-anchor="middle">iaac-talos</text>
+        <line class="dgm-line" x1="215" y1="72" x2="256" y2="72" marker-end="url(#pb)"></line>
+        <rect class="dgm-box" x="260" y="38" width="185" height="68" rx="8"></rect>
+        <text class="dgm-t" x="352" y="66" text-anchor="middle">Terraform</text>
+        <text class="dgm-s" x="352" y="88" text-anchor="middle">on an Octopus worker</text>
+        <line class="dgm-line" x1="445" y1="72" x2="486" y2="72" marker-end="url(#pb)"></line>
+        <rect class="dgm-box" x="490" y="38" width="175" height="68" rx="8"></rect>
+        <text class="dgm-t" x="577" y="66" text-anchor="middle">vSphere</text>
+        <text class="dgm-s" x="577" y="88" text-anchor="middle">VMs from an image</text>
+        <line class="dgm-line" x1="665" y1="72" x2="706" y2="72" marker-end="url(#pb)"></line>
+        <rect class="dgm-box" x="710" y="38" width="175" height="68" rx="8"></rect>
+        <text class="dgm-t" x="797" y="66" text-anchor="middle">Talos Linux</text>
+        <text class="dgm-s" x="797" y="88" text-anchor="middle">control plane + pools</text>
+        <line class="dgm-line" x1="885" y1="72" x2="926" y2="72" marker-end="url(#pb)"></line>
+        <rect class="dgm-box" x="930" y="38" width="150" height="68" rx="8"></rect>
+        <text class="dgm-t" x="1005" y="66" text-anchor="middle">Flux</text>
+        <text class="dgm-s" x="1005" y="88" text-anchor="middle">then Git takes over</text>
+        <text class="dgm-a" x="20" y="142">Deployed through Octopus only. A local apply is never the answer, in any environment.</text>
+      </svg>
+      <figcaption>
+        Terraform builds the machines; Flux builds everything above them. The handover point
+        is the only moment the platform is configured by anything other than Git.
+      </figcaption>
+    </figure>
+
+    <div class="warn" style="margin-top:1.1rem">
+      <b>The cluster's whole specification lives in a web form.</b> 121 Terraform variables on
+      the Octopus project &mdash; addresses, cluster names, vSphere placement, node sizes
+      &mdash; in no repository and under no review. The repository that manages Octopus itself
+      creates environments, worker pools and lifecycles, and <b>no project variables at all</b>.
+    </div>
+    <div class="warn">
+      <b>A green deployment may have applied nothing.</b> The apply step is behind a flag that
+      is off by default: the deploy prints the full plan, skips the apply and reports Success.
+      Confirm the task log contains <code>Apply complete!</code>. <b>QA has had it on since
+      July</b>, so QA deploys are live.
+    </div>
+    <div class="warn">
+      <b>A variable scoped to "all environments" is invisible</b> to anything that copies an
+      environment's explicit settings. A generator built that way once planned 13 machines for
+      a 4-machine cluster.
+    </div>
+    <div class="warn">
+      <b>A release freezes its variables when it is created.</b> Correcting a variable
+      afterwards does nothing to a release that already exists.
+    </div>
+    <div class="warn">
+      <b>An environment missing from a lifecycle can never receive a deployment</b> &mdash;
+      and adding it to the environment list alone gives a green pull request and a dead
+      environment.
+    </div>
+    <p style="margin-top:.9rem"><b>Seven vSphere placement values exist only in Octopus</b>
+    &mdash; datacenter, datastore, cluster, folder, network, content library and image. A new
+    environment cannot be built without them, and they are in no repository.</p>
+  </section>
+
+  <section class="card" id="installed">
+    <h2>What runs on the platform, and what installs it</h2>
+    <p>Flux reads two repositories, in order. The first supplies the wiring; the second
+    supplies the content.</p>
+    <div class="rail">
+      <table>
+        <thead><tr><th>Source</th><th>Repository</th><th>Ref</th><th>Supplies</th></tr></thead>
+        <tbody>
+          <tr><td><code>flux-system</code></td><td><code>iaac-talos-flux-cluster</code></td><td>branch <code>master</code></td><td>the Kustomization definitions &mdash; where Flux looks next</td></tr>
+          <tr><td><code>infra</code></td><td><code>iaac-talos-flux-platform</code></td><td>branch <code>op-&lt;env&gt;</code></td><td>every platform component</td></tr>
+          <tr><td><code>gateway-api-upstream</code></td><td><code>kubernetes-sigs/gateway-api</code></td><td>tag <b>v1.4.0</b></td><td>the Gateway API definitions</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="warn" style="margin-top:1rem">
+      <b>Reconciling <code>flux-system</code> reconciles the wrong repository.</b> It fetches
+      the cluster repo; components sourced from the platform repo stay on their cached revision
+      and still print a success line naming an old revision. Reconcile the component
+      <i>with its source</i>, and check the revision actually moved.
+    </div>
+
+    <h3>Measured on QA, 20 October &mdash; 183 pods</h3>
+    <div class="rail">
+      <table>
+        <thead><tr><th>Component</th><th>Namespace</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><b>Flux</b>, 4 controllers</td><td><code>flux-system</code></td><td>source, kustomize, helm, notification</td></tr>
+          <tr><td><b>Argo CD</b>, 5 pods</td><td><code>argocd</code></td><td>deploys applications; signs in through Entra</td></tr>
+          <tr><td><b>cert-manager</b> + cainjector + webhook</td><td><code>cert-manager</code></td><td>certificates</td></tr>
+          <tr><td><b>trust-manager</b></td><td><code>cert-manager</code></td><td>distributes trust bundles</td></tr>
+          <tr><td><b>istio-csr</b></td><td><code>cert-manager</code></td><td>issues workload certificates for the mesh</td></tr>
+          <tr><td><b>External Secrets</b>, 3 pods</td><td><code>external-secrets</code></td><td>AWS Secrets Manager into Kubernetes</td></tr>
+          <tr><td><b>external-dns</b></td><td><code>external-dns</code></td><td>writes DNS records into Route 53</td></tr>
+          <tr><td><b>Istio ingress</b>, 6 pods</td><td><code>istio-ingress</code></td><td>all inbound traffic</td></tr>
+          <tr><td><b>Grafana</b></td><td><code>grafana</code></td><td>dashboards &mdash; and the only pod found carrying <code>curl</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="warn" style="margin-top:1rem">
+      <b>Measured on QA, 20 October &mdash; 183 pods across 20 namespaces.</b> Rook-Ceph
+      <b>62</b> pods, Velero <b>44</b>, kube-system 32, istio-system 28, RisingWave 13,
+      Prometheus 13, istio-ingress 10, cert-manager 6, Kyverno 5, Argo CD 5, Flux 4, and KEDA,
+      External Secrets and etcd-backup 3 each. All 30 Flux components reported healthy.
+    </div>
+    <div class="warn">
+      <b>Three corrections to what this page assumed.</b> The network layer is <b>Cilium</b>.
+      Istio runs in <b>ambient mode</b>, so workloads are meshed without a helper container
+      each. And <b>KEDA is installed</b> &mdash; it appeared in none of our notes.
+    </div>
+    <div class="warn">
+      <b>Rook-Ceph is genuinely live</b>, not merely stood up once &mdash; it is the largest
+      thing running on the cluster. <b>The sign-on component is already managed from Git on
+      QA</b>, and has been for 83 days, which is what makes it a clean copy for another cluster
+      rather than a rebuild.
+    </div>
+    <div class="warn">
+      <b>This is QA.</b> dev and production were not measured, and dev is known to differ.
+    </div>
+    <div class="warn">
+      <b>Flux versions differ between clusters</b> &mdash; dev runs a newer release than QA and
+      production. So "prove it on dev first" does not hold for anything that depends on Flux's
+      own behaviour: dev is ahead, not representative.
+    </div>
+  </section>
+
+  <section class="card" id="network">
+    <h2>Networking, ingress and DNS</h2>
+    <div class="rail">
+      <table>
+        <thead><tr><th>Gateway</th><th>Ports</th><th>For</th></tr></thead>
+        <tbody>
+          <tr><td><code>shared-http</code></td><td>80, 443</td><td>ordinary HTTP and HTTPS</td></tr>
+          <tr><td><code>tcp-passthrough</code></td><td>4567, 5432</td><td>protocols that are not HTTP &mdash; database and SQL frontends</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:.9rem"><b>DNS is ours and automatic.</b> external-dns reads the
+    annotations on a route definition and writes the record into Route 53. The zone lives in
+    the <b>network account, 155768531003</b>, and each cluster has its own owner identifier so
+    one cluster cannot overwrite another's records. Each record points at <b>that cluster's own
+    worker addresses</b> &mdash; dev 7, QA 3, production 10.</p>
+    <div class="warn">
+      <b>A copied route definition fails silently.</b> It carries the source cluster's hostname
+      or targets, external-dns does exactly what it is told, and nothing reports a problem.
+    </div>
+    <div class="warn">
+      <b>Looking a name up to see whether it exists is what hides it.</b> The zone caches a
+      negative answer for 24 hours. Ask the Route 53 API; only resolve names already confirmed
+      to exist.
+    </div>
+    <p><b>Corporate DNS and Active Directory are reachable from inside the cluster</b> &mdash;
+    the cluster's resolver forwards the corporate domain, and secure LDAP is open.</p>
+  </section>
+
+  <section class="card" id="cloud">
+    <h2>The link to AWS &mdash; traced in full on 20 October</h2>
+    <p>This is the part most people assume is missing. It is not.</p>
+    <figure>
+      <svg viewBox="0 0 1100 300" role="img"
+           aria-label="The datacenter at 10.10.82.0/24 connects over two site-to-site VPN connections to the USX Infrastructure Transit Gateway in the network account. That gateway has seven VPC attachments including the three EKS accounts, two peering attachments and one VPN attachment, and all eight of its route tables carry the datacenter range advertised by the VPN.">
+        <defs>
+          <marker id="cl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="dgm-head"></path>
+          </marker>
+        </defs>
+        <text class="dgm-s" x="22" y="34">DATACENTER</text>
+        <rect class="dgm-zone" x="20" y="44" width="260" height="110" rx="10"></rect>
+        <rect class="dgm-box" x="42" y="72" width="216" height="58" rx="8"></rect>
+        <text class="dgm-t" x="150" y="96" text-anchor="middle">three Talos clusters</text>
+        <text class="dgm-m" x="150" y="117" text-anchor="middle">10.10.82.0/24</text>
+
+        <line class="dgm-line" x1="280" y1="100" x2="376" y2="100" marker-end="url(#cl)"></line>
+        <text class="dgm-s" x="328" y="88" text-anchor="middle">site-to-site VPN</text>
+        <text class="dgm-s" x="328" y="118" text-anchor="middle">two connections, both up</text>
+
+        <rect class="dgm-box" x="380" y="60" width="250" height="82" rx="8"></rect>
+        <text class="dgm-t" x="505" y="88" text-anchor="middle">transit gateway</text>
+        <text class="dgm-s" x="505" y="109" text-anchor="middle">network account</text>
+        <text class="dgm-s" x="505" y="128" text-anchor="middle">8 route tables, all carry 10/8</text>
+
+        <line class="dgm-line" x1="630" y1="101" x2="716" y2="78" marker-end="url(#cl)"></line>
+        <line class="dgm-line" x1="630" y1="101" x2="716" y2="140" marker-end="url(#cl)"></line>
+        <line class="dgm-line" x1="630" y1="101" x2="716" y2="202" marker-end="url(#cl)"></line>
+
+        <rect class="dgm-box" x="720" y="48" width="360" height="56" rx="8"></rect>
+        <text class="dgm-t" x="900" y="72" text-anchor="middle">cloud EKS accounts &mdash; dev, QA, production</text>
+        <text class="dgm-s" x="900" y="92" text-anchor="middle">three of the seven attached networks</text>
+
+        <rect class="dgm-box" x="720" y="112" width="360" height="56" rx="8"></rect>
+        <text class="dgm-t" x="900" y="136" text-anchor="middle">four more attached networks</text>
+        <text class="dgm-s" x="900" y="156" text-anchor="middle">plus two peerings</text>
+
+        <rect class="dgm-box" x="720" y="176" width="360" height="56" rx="8"></rect>
+        <text class="dgm-t" x="900" y="200" text-anchor="middle">managed services behind private endpoints</text>
+        <text class="dgm-s" x="900" y="220" text-anchor="middle">reachable in principle &mdash; see the note below</text>
+
+        <text class="dgm-a" x="20" y="272">The datacenter advertises its range by BGP and AWS advertises its networks back. No Direct Connect exists.</text>
+      </svg>
+      <figcaption>
+        On-prem and AWS are not separate islands. When a connection into AWS fails, the cause
+        is usually a security group rather than the network.
+      </figcaption>
+    </figure>
+    <div class="warn" style="margin-top:1rem">
+      <b>Read a transit gateway's route table by the attachment's association, never by
+      position.</b> Asking for "the first" route table can return one the network in question
+      does not use. On 20 October every table happened to agree, so the shortcut gave the right
+      answer for the wrong reason.
+    </div>
+    <p><b>Egress to the public internet works, and the public certificate bundle is
+    trusted</b> &mdash; proven from a pod: two external partner endpoints answered with a valid
+    certificate chain and no extra configuration.</p>
+  </section>
+
+  <section class="card" id="secrets">
+    <h2>Secrets and the container registry</h2>
+    <p><b>External Secrets Operator</b> pulls from <b>AWS Secrets Manager</b> into Kubernetes,
+    per cluster, from that cluster's own AWS account. The value never appears in a repository.</p>
+    <div class="warn">
+      <b>A green sync is not a valid value.</b> On an error the operator still writes the keys
+      it could resolve, and the pod then dies at container creation with <b>zero restarts</b>
+      &mdash; invisible to every restart alert. Count the keys and check none is empty.
+    </div>
+    <div class="warn">
+      <b>A secret reference resolves when the pod is created.</b> A container restart replays
+      the old value, so a rotated secret can take months to actually arrive.
+    </div>
+    <div class="warn">
+      <b>The platform's own AWS role could not write its own secrets</b> &mdash; it held a
+      single permission. <b>QA was fixed in August; dev and production are still open.</b>
+    </div>
+    <p><b>Registry access</b> is refreshed by a job that writes a pull secret into every
+    namespace every five minutes and attaches it to every service account. So <b>a pull
+    secret's creation date is not the age of its contents</b> &mdash; a seven-week-old secret
+    can hold a fresh token.</p>
+    <p>The registry itself is <b>shared across the organisation</b>, and its repositories grant
+    pull <i>and push</i> to any account in it. The on-prem defence is <b>pinning images by
+    digest</b>, enforced by policy, rather than trusting a version label.</p>
+  </section>
+
+  <section class="card" id="identity">
+    <h2>Identity &mdash; people and workloads</h2>
+    <div class="rail">
+      <table>
+        <tbody>
+          <tr><td><b>Command-line access, QA</b></td><td>AWS single sign-on, live since July</td></tr>
+          <tr><td><b>Command-line access, dev and production</b></td><td>certificates, kept for emergencies only</td></tr>
+          <tr><td><b>Argo CD sign-in</b></td><td>Entra, live on all three clusters since August</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="warn" style="margin-top:1rem">
+      <b>The group membership claim never arrives; application roles do.</b> Permissions must
+      be written against role values. A sign-in that succeeds and lands on an empty screen is
+      an authorisation problem, not a broken login.
+    </div>
+    <div class="warn">
+      <b>One Entra registration is shared by all three environments</b> &mdash; only the
+      redirect address differs. A new environment is an address added to the existing
+      registration, and its secret is a copy, not a new identity.
+    </div>
+    <div class="warn">
+      <b>Identity names do not cross systems.</b> The name used inside Kubernetes is not a
+      directory group, and Argo CD uses a different one again. Three names, three systems, no
+      automatic relationship.
+    </div>
+  </section>
+
+  <section class="card" id="traps">
+    <h2>The traps, collected</h2>
+    <div class="rail">
+      <table>
+        <thead><tr><th>Trap</th><th>What it costs</th></tr></thead>
+        <tbody>
+          <tr><td>The apply flag is off by default</td><td>a green deployment that printed a plan and changed nothing</td></tr>
+          <tr><td>Variables scoped to "all environments"</td><td>invisible to anything copying an environment's own settings</td></tr>
+          <tr><td>A release's frozen variables</td><td>the correction never reaches the existing release</td></tr>
+          <tr><td>Reconciling the wrong Flux source</td><td>prints success while the component stays on an old revision</td></tr>
+          <tr><td>Decoy branches beside the real ones</td><td>a pull request opened against the wrong base</td></tr>
+          <tr><td>Manifests copied between branches</td><td>arrive carrying another environment's identifiers</td></tr>
+          <tr><td>A copied route definition</td><td>published to DNS exactly as written, with no warning</td></tr>
+          <tr><td>Resolving a name to test it</td><td>caches the negative answer for a day</td></tr>
+          <tr><td>A green secret sync</td><td>partial content, pod dead at startup, no alert</td></tr>
+          <tr><td>cert-manager reporting Ready</td><td>an expired certificate served on every hostname for 41 days</td></tr>
+          <tr><td>Route table "the first one"</td><td>may not be the table that network uses</td></tr>
+          <tr><td>Platform images are minimal</td><td>no shell, no <code>curl</code>, no <code>getent</code> &mdash; use Grafana for a probe</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="gaps">
+    <h2>What is not measured, and how to settle it</h2>
+    <p>Read-only, from a machine with cluster access.</p>
+    <pre>KQ=$HOME/.kube/op-usxpress-qa-sso.yaml
+kubectl --kubeconfig=$KQ get --raw /version | head -c 200; echo
+kubectl --kubeconfig=$KQ get nodes -o wide --no-headers | awk '{print $1"  "$5"  "$8}'</pre>
+    <pre style="margin-top:.6rem">kubectl --kubeconfig=$KQ get pods -A --no-headers | awk '{print $1}' | sort | uniq -c | sort -rn</pre>
+    <pre style="margin-top:.6rem">kubectl --kubeconfig=$KQ get kustomizations -A --no-headers | head -30</pre>
+    <p style="margin-top:.9rem">The first gives the Kubernetes version and each machine's
+    operating system image, which is the Talos version. The second lists every namespace with
+    a pod count, settling what is actually installed. The third names each platform component
+    and whether it is healthy.</p>
+    <div class="warn">
+      <b>Still unverified:</b> everything measured on this page is <b>QA</b> &mdash; dev and
+      production were not. Also open: whether production's alerting was ever completed, whether
+      the dev and production permission fixes were applied, and whether any certificate is
+      expired behind a healthy status on any cluster.
+    </div>
+    <div class="danger" style="margin-top:1rem">
+      <p style="margin-bottom:.5rem"><b>The finding that outranks everything else on this
+      page.</b></p>
+      <p style="margin-bottom:0">QA runs <b>Kubernetes v1.32.0</b> &mdash; the first release of
+      a line whose support ended on <b>28 February 2026</b>, and whose final patch was 1.32.13.
+      The cluster is eight months past end of life and has never taken a patch within its own
+      version. Because these clusters are <b>self-managed</b>, no vendor extended support
+      applies; the managed cloud clusters run 1.35 and 1.36. Upgrading is control-plane work
+      across three clusters with no written procedure, so it is a piece of work in its own
+      right rather than a task inside something else.</p>
+    </div>
+  </section>
+</div>
