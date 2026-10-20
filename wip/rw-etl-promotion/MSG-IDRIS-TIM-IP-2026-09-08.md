@@ -6,6 +6,13 @@ DHCP, macOS.
 
 But I do not think an IP is what you need, for two reasons.
 
+⛔ **CORRECTED 2026-10-20 — claim 1 below is FALSE. The policy was already live.**
+`kubectl get cnp -A` against op-dev's own kubeconfig returns
+`istio-ingress/allow-corp-vpn-to-ingressgateway`, age **140d** — so it existed on
+2026-09-08 and was ~98 days old when this message was written. The 2026-09-08 check was
+run against a context that did not resolve, and the error was read as absence. The office
+VLAN block found on 2026-10-20 is this policy. See [[office-vlan-blocked-to-onprem]].
+
 **1. There is no IP allow-list deployed, so nothing is rejecting him by address.**
 The source-CIDR allow-list is INFRA-1496, Phase 3 of the TCP/SNI ingress work. It is
 still `filed` — there is no `CiliumNetworkPolicy` in `istio-ingress` on any cluster, and
