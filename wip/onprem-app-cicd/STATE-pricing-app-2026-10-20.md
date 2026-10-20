@@ -36,6 +36,9 @@
   ("Pricing App On-Prem Move" — opens with the plain-terms summary)
 * **Variable inventory, 70 rows** — https://claude.ai/artifact/AzVn5mJEnzaQspnKuE3UPV
 * **How on-prem delivery is set up** — https://claude.ai/artifact/KFcUymxTX3W7gw1MYfXoCt
+* **How the on-prem platform itself is built** — https://claude.ai/artifact/CduE9WmBzQvsXXRxyjd9rv
+  ("On-Prem Platform Reference" — clusters, bootstrap, Flux, DNS, the VPN to AWS, secrets,
+  identity and the traps; repo copy at `wip/onprem-platform/PLATFORM-ONPREM-REFERENCE-2026-10-20.md`)
   ("On-Prem Delivery Setup" — the four repositories, what a new app needs, and the open
   decision on whether each application gets its own repository)
 
