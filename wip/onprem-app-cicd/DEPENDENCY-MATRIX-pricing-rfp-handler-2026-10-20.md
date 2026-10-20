@@ -21,7 +21,7 @@ is an open decision**, and it changes the Kafka scope.
 |---|---|---|---|---|---|
 | 1 | **Knight-Swift pricing tools** | `pricing-tools.swifttrans.com/api/pricingtools` | HTTPS 443 | OAuth2 client credentials | **the reason for the move.** Never tested from on-prem |
 | 2 | **Entra token endpoint** | `login.microsoftonline.com/0f298105-68e6-4cbe-844d-69ffc1806495` | HTTPS 443 | — | works anywhere; see the tenant question below |
-| 3 | **MongoDB Atlas** | `mongodb-pl-0.1cr18.mongodb.net` | `mongodb+srv` 27017 | **X.509 client certificate** | ⛔ **likely blocked — see below** |
+| 3 | **MongoDB Atlas** | `mongodb-pl-0.1cr18.mongodb.net` | `mongodb+srv` **1024-1026** | **X.509 client certificate** | ⚠️ **one firewall rule away** — see below |
 | 4 | **SQL Server (Bmd)** | `USXSQLA1DBP.usxpress.com` | TDS, port assumed 1433 | SQL login + password | corporate network: needs a route and a firewall rule |
 | 5 | **SQL Server (Psa)** | `USXSQLPSAPRD.usxpress.com` | TDS, port assumed 1433 | SQL login + password | same |
 | 6 | **Tariff API** | `legacyapps.usxpress.com:83` | HTTPS on **port 83** | ClientId | non-standard port; confirm egress policy allows it |
@@ -34,28 +34,35 @@ is in-cluster rather than egress, and #8, which nobody has mentioned.
 
 ## The blocker, in order of severity
 
-### 1. MongoDB Atlas is reached over AWS PrivateLink
+### 1. MongoDB Atlas is reached over AWS PrivateLink — RESOLVED to one firewall rule
 
-The hostname is `mongodb-**pl**-0.1cr18.mongodb.net`. In Atlas, a `-pl-` host is the
-**PrivateLink** form of a cluster's connection string: it resolves to private addresses inside
-the AWS VPC that owns the endpoint. **On-prem is not in that VPC and has no PrivateLink
-path**, so the name will either fail to resolve or resolve to an address with no route.
+**Confirmed 2026-10-20**, by resolving the name through public DNS and then tracing the
+network in AWS. The hostname points at an **AWS interface endpoint** — `vpce-06e6cad5b697c515a`
+in us-east-2 — answering on **10.16.6.113 / 10.16.11.221 / 10.16.8.87**, ports **1024-1026**.
+On-prem is 10.10.82.x, a different network.
 
-⚠️ **This is a strong inference from the naming convention, not a measurement.** It is the
-single most important thing to settle before any build work, and it is settled by one command
-from an on-prem pod:
+**But the path already exists.** Traced end to end:
 
-```
-getent hosts mongodb-pl-0.1cr18.mongodb.net
-```
+| Hop | Status |
+|---|---|
+| Mongo VPC (10.16.0.0/20) routes 10.0.0.0/8 to `tgw-09c7b37043d31e43a` | ✅ |
+| That TGW's route table for this VPC carries 10.0.0.0/8 | ✅ all 8 tables do |
+| The route is propagated from the **vpn** attachment `tgw-attach-02049e22560f04685` | ✅ |
+| The VPN's own table (`tgw-rtb-056c87f242ae7a6bc`) carries 10.16.0.0/20 | ✅ |
+| **The endpoint's security group `sg-0c8f8db29b16a1477` admits only 10.16.0.0/20** | ❌ |
 
-An SRV-only name returning nothing from `getent` is normal and proves nothing on its own — the
-real test is a TLS connection on 27017. Run it from **op-dev**, never from a production
-cluster.
+**So the fix is one inbound rule: TCP 1024-1026 from the on-prem worker range.** Not a new
+network, not a credential change, and not a reason to pause the rest of the onboarding.
 
-If it is blocked, the options are a public Atlas endpoint for the on-prem source addresses,
-an Atlas PrivateLink in a network the on-prem site can reach, or the application keeps using
-cloud for Mongo. **All three are decisions, not configuration.**
+⚠️ **A request naming port 27017 would be approved and would not work.** 1024-1026 is the
+private-endpoint port range.
+
+⚠️ **Still to confirm:** the datacenter must be *receiving* AWS's 10.16.0.0/20 route and
+preferring it — it advertises 10.0.0.0/8, so it believes it owns that range itself. Not
+readable from AWS; the connection test after the rule lands is what settles it.
+
+Plain-language version for the app and network teams:
+`EXPLAINER-mongo-onprem-blocker-2026-10-20.md`.
 
 ### 2. Two corporate SQL Servers
 
