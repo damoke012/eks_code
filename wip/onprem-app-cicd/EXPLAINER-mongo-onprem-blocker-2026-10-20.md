@@ -3,6 +3,9 @@
 **2026-10-20.** Written for anyone who needs to act on this: the application team, the
 network team, and whoever signs off the change. No prior context needed.
 
+**Shareable page with diagrams:** https://claude.ai/artifact/1R9Qbe1K5ex9jnZg7u3Hxc
+(private until shared from its own Share menu).
+
 ## In one line
 
 The application's database only accepts connections from inside one specific AWS network,
@@ -27,6 +30,43 @@ addresses beginning `10.10.82.` — and the private door does not know it.
 **This is not a password problem.** The application proves who it is with a certificate, and
 that certificate works from anywhere. The problem is purely about which network the
 connection arrives from.
+
+## The two pictures
+
+**Today, in production.** The application and the database's entrance are both inside the
+same AWS network, so the firewall on that entrance already permits the connection.
+
+```
+  pricing-rfp-handler pod        Atlas private endpoint        MongoDB Atlas
+  10.16.x.x  (in AWS)            10.16.6.113                   (managed service)
+        |                               |                             |
+        |--- TCP 1024-1026 ------------>|                             |
+        |                               |--- AWS PrivateLink -------->|
+        |                               |                             |
+        \___ firewall on the endpoint: allows 10.16.0.0/20 ___/
+             the app is already inside that range, so it passes
+
+  Both ends sit in the same AWS network. Nothing crosses a boundary.
+```
+
+**After the move.** Same endpoint, longer path. Every hop between the datacenter and that
+AWS network is already routed; only the firewall refuses.
+
+```
+  pricing-rfp-handler pod     VPN + transit      Atlas private endpoint     MongoDB
+  on Kubernetes, on-prem      gateway            10.16.6.113                Atlas
+  leaves as 10.10.82.x
+        |                          |                       |                   |
+        |--- already routed ------>|--- already routed --->|                   |
+        |                          |                       |                   |
+        |                          |      firewall on the endpoint:            |
+        |                          |      blocks 10.10.82.0/24   <-- X         |
+        |                          |      THE ONLY HOP THAT REFUSES            |
+        |                          |                       |--- PrivateLink -->|
+
+  The refusal is silent. The application just sees a timeout, which reads like a
+  network fault rather than a permission one.
+```
 
 ## The good news
 

@@ -75,8 +75,9 @@ private-endpoint port range.
 preferring it — it advertises 10.0.0.0/8, so it believes it owns that range itself. Not
 readable from AWS; the connection test after the rule lands is what settles it.
 
-Plain-language version for the app and network teams:
-`EXPLAINER-mongo-onprem-blocker-2026-10-20.md`.
+Plain-language version for the app and network teams, with before/after diagrams:
+`EXPLAINER-mongo-onprem-blocker-2026-10-20.md`, and as a shareable page at
+https://claude.ai/artifact/1R9Qbe1K5ex9jnZg7u3Hxc
 
 ### 2. Two corporate SQL Servers
 
