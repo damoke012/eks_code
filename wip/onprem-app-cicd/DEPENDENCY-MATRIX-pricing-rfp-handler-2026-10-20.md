@@ -19,7 +19,7 @@ is an open decision**, and it changes the Kafka scope.
 
 | # | What | Endpoint | Protocol | Auth | On-prem |
 |---|---|---|---|---|---|
-| 1 | **Knight-Swift pricing tools** | `pricing-tools.swifttrans.com/api/pricingtools` | HTTPS 443 | OAuth2 client credentials | **the reason for the move.** Never tested from on-prem |
+| 1 | **Knight-Swift pricing tools** | `pricing-tools.swifttrans.com/api/pricingtools` | HTTPS 443 | OAuth2 client credentials | ✅ **REACHABLE from an on-prem pod** — 405 + TLS trusted, 2026-10-20 |
 | 2 | **Entra token endpoint** | `login.microsoftonline.com/0f298105-68e6-4cbe-844d-69ffc1806495` | HTTPS 443 | — | works anywhere; see the tenant question below |
 | 3 | **MongoDB Atlas** | `mongodb-pl-0.1cr18.mongodb.net` | `mongodb+srv` **1024-1026** | **X.509 client certificate** | ⚠️ **one firewall rule away** — see below |
 | 4 | **SQL Server (Bmd)** | `USXSQLA1DBP.usxpress.com` | TDS, port assumed 1433 | SQL login + password | corporate network: needs a route and a firewall rule |
@@ -78,6 +78,28 @@ readable from AWS; the connection test after the rule lands is what settles it.
 Plain-language version for the app and network teams, with before/after diagrams:
 `EXPLAINER-mongo-onprem-blocker-2026-10-20.md`, and as a shareable page at
 https://claude.ai/artifact/1R9Qbe1K5ex9jnZg7u3Hxc
+
+### 1b. ✅ Knight-Swift is reachable from on-prem — the premise holds
+
+**Measured 2026-10-20** from `grafana/grafana-7996f6d86f-dpchf` on **op-usxpress-qa**, a HEAD
+request (never POST — `incumbentDataUpdate` is a write route):
+
+```
+https://pricing-tools-qa.swifttrans.com/api/pricingtools/incumbentDataUpdate
+  code=405  tls_verify=0  ip=199.79.30.140  t=1.02s
+https://pricing-tools.swifttrans.com/api/pricingtools/incumbentDataUpdate
+  code=405  tls_verify=0  ip=199.79.30.130  t=0.34s
+```
+
+**405 is the pass.** Their application answered and refused a HEAD on a POST-only route, so
+DNS, routing, the firewall, TLS and their app layer all worked. `tls_verify=0` means the pod
+trusts their chain with the **default** CA bundle — no custom CA needed for this dependency.
+The addresses match Idris's workstation test exactly, so on-prem resolves these names the same
+way the corporate network does.
+
+⚠️ This is the **network path**, not the application's calls. `login.microsoftonline.com` is a
+separate host and is untested, and a real call needs the client credentials. Measured on
+**op-qa**; op-dev shares the /24 and has not been tested.
 
 ### 2. Two corporate SQL Servers
 

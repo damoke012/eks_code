@@ -14,7 +14,7 @@
 | Kafka ACLs | ❌ not started; longest pole, another team's approval |
 | Namespace / chart / Argo app | ❌ Idris, Stage 1 steps 1-6 |
 | App team agreement | ❌ nobody has signed anything |
-| KNX reachable from on-prem | ❌ the premise of the move, still untested from a pod |
+| KNX reachable from on-prem | ✅ **PROVEN 2026-10-20** — 405 + TLS trusted from a pod on op-qa |
 
 ## The documents
 
@@ -46,7 +46,7 @@
 | 5 | Consumer group: shared or new | the app team — it changes behaviour, not just config |
 | 6 | Approve the settings/credentials split | Matt |
 | 7 | Whose Entra tenant is `0f298105-…` | one command: `az account show --query tenantId` |
-| 8 | Ping KNX from an on-prem pod | platform, after the namespace exists |
+| 8 | ~~Ping KNX from an on-prem pod~~ | ✅ done 2026-10-20 |
 
 ## Proven today
 
@@ -59,6 +59,8 @@
 * **ECR already grants org-wide pull** and the ServiceAccount has **no IRSA** — two work items
   deleted by measurement.
 * Production runs **0.1.39**, contradicting the Stage 1 plan's table.
+* **Both Knight-Swift endpoints answer from inside an on-prem pod** (405, TLS trusted),
+  so the premise of the whole engagement holds — measured from a pod, not a laptop.
 
 ## Still not measured
 

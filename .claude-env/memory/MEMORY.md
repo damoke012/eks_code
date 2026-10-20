@@ -125,3 +125,4 @@
 - [envFrom hides the inventory](envfrom-hides-the-inventory.md) — a DX app's variables are keys inside its envFrom objects, not in .env; the `dx--` infix is DX's fingerprint, and the handler's names prove it is a Kafka consumer
 - [Atlas PrivateLink may not reach on-prem](atlas-privatelink-may-not-reach-onprem.md) — CONFIRMED: the Atlas host is an AWS interface endpoint on 10.16.x.x ports 1024-1026, so a lifted app has no route to its DB; public DNS already returns the private IPs, so the gap is routing not DNS
 - [TGW joins AWS and on-prem](usx-transit-gateway-joins-aws-and-onprem.md) — tgw-09c7b37043d31e43a (network acct) attaches all 3 EKS VPCs plus a LIVE VPN, and the VPCs route 10/8 into it; they are not separate islands
+- [On-prem egress to partner APIs works](onprem-egress-to-partner-apis-works.md) — PROVEN from a pod: both Knight-Swift endpoints answer 405 with the public CA trusted; grafana is the op-qa pod that has curl
