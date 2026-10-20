@@ -40,3 +40,35 @@ be theirs.
 identify what should be purely handled by the platform versus what should be a total
 application call."* The rule decides the default; the app developer still **approves** the
 classification of their own app's variables.
+
+## 2026-10-20 — the operational form of the test: who can fix it
+
+"Does it expire" is the first question, not the whole test, and it leaves real keys undecided
+(it left 11 of the pricing app's 70 unresolved). The sharper criterion is **who can act when
+the value is wrong**:
+
+> If it breaks and the app team cannot resolve it without us, it is platform. If we would have
+> to ask them what the right value is, it is application.
+
+Four questions, first answer wins:
+
+1. **Does it expire or rotate?** → platform. They cannot rotate a Confluent key or reissue a
+   certificate.
+2. **Is it a coordinate of something we run or orchestrate?** → platform.
+3. **Does a wrong value break the same way for every app on the cluster?** → platform.
+4. **Does changing it change application behaviour a developer decides?** → application.
+
+None of them answering means it is **not a classification problem but an unmade decision** —
+record it as undecided with a named owner instead of guessing.
+
+**The finding worth keeping:** applied to the pricing app's SQL configuration, the test
+**splits one logical thing in two**. `UsXpressSqlConfiguration__{Bmd,Psa}__Password` is
+platform — a DBA rotates it and the app team cannot repair the secret afterwards — while
+`__Server`, `__Database` and `__UserId` are application, because they choose which database
+and user and we only have to make it reachable.
+
+So **a credential and its coordinates usually land on opposite sides of the line.** A rule
+that keeps a connection's parts together will put the password in the app team's values file.
+
+Related: [[secret-and-owner-are-two-axes]] (the second, independent axis),
+[[envfrom-hides-the-inventory]] (where the keys actually are).

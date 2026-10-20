@@ -236,3 +236,54 @@ done
 `scripts/wizard-rw-qa-cutover.sh` does this (`profile_for`), and `require_profile` refuses an
 empty result — `--profile ""` is not an error to the AWS CLI, it selects whichever account was
 last used. Account map in [[onprem-app-cicd]].
+
+## 2026-10-20 — the filename lies, and KUBECONFIG is exported at it
+
+Measured on the WSL box: `KUBECONFIG=/home/doke/.kube/op-usxpress-dev.yaml`, **exported**,
+and `kubectl config get-contexts` against it returns exactly one context: **`qa-one`**.
+
+So the file named for on-prem dev holds a **cloud QA EKS** context, and because the variable
+is exported, *every* `kubectl` in that shell goes there — with no flag visible in the command
+to say so. This is the standing cause of the 2026-10-09 incident where four queries meant for
+op-dev ran against qa-one and the output read as a finding about on-prem.
+
+`~/.kube/` currently holds 19 entries, including `op-usxpress-dev.yaml`,
+`op-usxpress-dev.yaml.bak`, **`op-usxpress-dev-fresh.yaml`** (the one
+`scripts/onprem-app-wireup-check.sh` uses), `op-usxpress-qa.yaml`, `op-usxpress-qa-sso.yaml`,
+`op-usxpress-prod.yaml`, plus `prod.yaml`, `qa-one-eks.yaml`, `qa-eks-fresh.yaml` and four
+`config.bak*` files. **A filename in that directory is not evidence of which cluster it
+reaches.**
+
+**How to apply.** Never trust the name, and never trust an inherited `KUBECONFIG`. Resolve by
+the **server endpoint** before any query:
+
+```bash
+for f in ~/.kube/*.yaml; do printf '== %s\n' "$f"
+  kubectl --kubeconfig="$f" config view \
+    -o jsonpath='{range .clusters[*]}   {.name} {.cluster.server}{"\n"}{end}'; done
+```
+
+**Measured map, 2026-10-20** — resolved by server endpoint, so the filenames are irrelevant:
+
+| File | Cluster | Endpoint |
+|---|---|---|
+| `prod.yaml` | **cloud EKS `usxpress-prod`**, acct 937464026810 | BF7BD089… (matches the known prod fingerprint) |
+| `qa-eks-fresh.yaml`, `qa-one-eks.yaml` | cloud EKS `qa-one`, acct 527101283767 | D0E66CB9… |
+| **`op-usxpress-dev.yaml`** | ⛔ **cloud EKS `qa-one`** — the filename is wrong | D0E66CB9… |
+| `op-usxpress-dev-fresh.yaml` | on-prem dev | 10.10.82.50 |
+| `op-usxpress-qa.yaml`, `op-usxpress-qa-sso.yaml` | on-prem QA | 10.10.82.51 |
+| `op-usxpress-prod.yaml` | on-prem prod | 10.10.82.52 |
+| `dare-cluster.yaml` | 10.10.82.20 | |
+| `dpl2-cluster.yaml` | 10.10.82.30 | |
+
+⚠️ **`qa-one-eks.yaml` holds FOUR clusters** — qa-one, usxpress-dev, usxpress-prod and
+op-usxpress-dev. Passing `--kubeconfig` on that file still leaves the cluster to its
+current-context, so prefer a single-cluster file: `prod.yaml` for cloud prod,
+`op-usxpress-dev-fresh.yaml` for on-prem dev.
+
+`aws sso login --profile usx-prod` resolves to 937464026810 with
+`AWSReservedSSO_AWSAdministratorAccess` (verified 2026-10-20).
+
+Then pass `--kubeconfig <file>` on every command. It overrides the exported variable, which
+`--context` does not fix: a context name resolves *within* whatever file the variable points
+at. Known fingerprints are listed above — verify against them, do not assume.

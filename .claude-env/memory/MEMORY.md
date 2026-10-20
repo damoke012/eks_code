@@ -122,3 +122,5 @@
 - [Expiring config is platform-owned IaC](expiring-config-is-platform-owned-iac.md) — one artifact across environments; expiry (not just secrecy) is the test for platform ownership
 - [Cloud is moving to Argo CD + Crossplane](cloud-moving-to-argocd-and-crossplane.md) — Mage out for app deploys, Terraform → Crossplane through a long observe-only phase
 - [Rulesets shadow branch protection](rulesets-shadow-branch-protection.md) — the classic protection API 404s when a ruleset governs the branch
+- [envFrom hides the inventory](envfrom-hides-the-inventory.md) — a DX app's variables are keys inside its envFrom objects, not in .env; the `dx--` infix is DX's fingerprint, and the handler's names prove it is a Kafka consumer
+- [Atlas PrivateLink may not reach on-prem](atlas-privatelink-may-not-reach-onprem.md) — HYPOTHESIS: a mongodb-pl-N host is the PrivateLink form and resolves inside the VPC, so a lifted app may have no path to its database. Test from an op-dev pod

@@ -40,3 +40,26 @@ to copy policies from", from a single sample. It is the *template*, not an outli
 repository's policy is not the registry's posture: enumerate before characterising.
 See [[adjacent-step-green-signals]] for the wider family. Review:
 `wip/onprem-app-cicd/ECR-REGISTRY-REVIEW-2026-08-20.md`.
+
+## 2026-10-20 — measured again on a second app's repository
+
+`knxsynergy/pricing-rfp-handler` in **064859874041 / us-east-2** carries one statement:
+
+```
+Sid AllowPushPull, Effect Allow, Principal AWS "*",
+Condition StringEquals aws:PrincipalOrgID = o-yza5l1xhrc
+Actions: BatchGetImage, GetDownloadUrlForLayer, BatchCheckLayerAvailability, ListImages,
+         PutImage, InitiateLayerUpload, UploadLayerPart, CompleteLayerUpload
+```
+
+Two consequences, pulling in opposite directions:
+
+* ✅ **An existing repository needs no pull grant for on-prem.** Any principal in the AWS
+  Organization may pull, so the usual first blocker — a *new* repository with no policy and a
+  403 at the manifest HEAD ([[ecr-repo-policy-is-per-repository]]) — does not arise when the
+  app already has a repository. That removed a work item from the pricing onboarding.
+* ⚠️ **The same statement grants push org-wide**, confirming the 515-of-517 posture on a
+  second, independently chosen repository. The on-prem defence remains digest pinning.
+
+Also measured: `0.1.39` is digest `sha256:6732ffb9830f2b0327ce5b37bf8e4365024914fc69503fc3d134ce25a2d1f985`,
+pushed 2026-10-08 — the value a values file pins instead of the tag.
