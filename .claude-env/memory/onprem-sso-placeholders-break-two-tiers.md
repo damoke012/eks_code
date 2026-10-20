@@ -30,12 +30,31 @@ template value that looks like a value (`<FILL>` inside an otherwise well-formed
 caught by anything: the ConfigMap is valid YAML, Flux applies it happily, and the
 authenticator only consults the entry when someone with that role logs in.
 
-**The fix** is to list the real roles per account and substitute them:
+## ⚠️ CORRECTED the same day: there is nothing to fill them with
 
-```
-aws iam list-roles --profile <acct profile> \
-  --query "Roles[?starts_with(RoleName,'AWSReservedSSO_')].RoleName" --output text | tr '\t' '\n'
-```
+Listing the SSO roles in both accounts, 2026-10-20:
+
+| Account | Roles beginning `AWSReservedSSO_` and matching op-qa / on-prem |
+|---|---|
+| **527101283767** (QA) | `AWSReservedSSO_op-qa-platform-admin_f8b5c3ff8895fdf6`, `AWSReservedSSO_usx-on-prem-admins_8c7f139e431625e0` |
+| **937464026810** (prod) | `AWSReservedSSO_usx-on-prem-admins_837df2a43495aaf1` |
+
+**No operator or reader permission set exists in either account.** So the fix is not a lookup
+and substitution — **the permission sets have to be created and assigned first**, in AWS
+Identity Center, and only then can the mapping be completed. That is a larger piece of work
+than "fill in the ARN", and it is console work in Identity Center.
+
+⚠️ **The QA account carries a second admin role that QA's `aws-auth` does not map.**
+`usx-on-prem-admins` exists in **both** accounts, but QA maps only `op-qa-platform-admin`. So
+anyone granted `usx-on-prem-admins` on the QA account authenticates and lands with **no
+groups** — the same failure as the operator and reader tiers, from a different cause. The
+newer `usx-on-prem-*` naming looks like the intended standard and `op-qa-platform-admin` the
+original; QA is mid-rename and the map was never finished.
+
+✅ **Prod's admin mapping is exact.** `aws-auth` names
+`…AWSReservedSSO_usx-on-prem-admins_837df2a43495aaf1` and that role exists with that suffix —
+so **prod admin sign-in will work the moment the API server flag is on**, with no AWS work at
+all.
 
 **Naming differs between the clusters** and that is not a defect, just a surprise:
 op-qa uses `op-qa-platform-admin/operator/reader`, op-prod uses

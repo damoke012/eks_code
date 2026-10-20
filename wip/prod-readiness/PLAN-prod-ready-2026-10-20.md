@@ -59,6 +59,25 @@ been this way for months and nobody noticed, because only admins have used it.
 **One line would have caught it:** grep the rendered `aws-auth` for `FILL`, `<`, `TBD` or
 `CHANGEME` and fail.
 
+⚠️ **And it is worse than a lookup.** Listing the SSO roles in both accounts on 2026-10-20
+returned **no operator or reader permission set in either one**:
+
+| Account | Matching roles |
+|---|---|
+| 527101283767 (QA) | `op-qa-platform-admin_f8b5c3ff8895fdf6`, `usx-on-prem-admins_8c7f139e431625e0` |
+| 937464026810 (prod) | `usx-on-prem-admins_837df2a43495aaf1` |
+
+So the two broken tiers cannot be fixed by substitution — **the permission sets must be
+created and assigned in Identity Center first**. Console work, and its own ticket.
+
+⚠️ **QA carries a second admin role it does not map.** `usx-on-prem-admins` exists in the QA
+account too, but QA's `aws-auth` maps only `op-qa-platform-admin`. Anyone granted the former
+on QA lands with no groups. QA looks mid-rename toward the `usx-on-prem-*` scheme and the map
+was never finished.
+
+✅ **Prod's admin mapping is exact** — the ARN in `aws-auth` matches a role that exists, suffix
+and all. **Prod admin sign-in works the moment the API server flag is on, with no AWS work.**
+
 ---
 
 ## 1b. The original delta, for reference

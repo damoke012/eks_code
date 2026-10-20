@@ -142,6 +142,23 @@
       entry. It has been this way for months, unnoticed, because only administrators have used
       it. One line of checking would have caught it.</p>
     </div>
+    <div class="warn" style="margin-top:1rem">
+      <b>And it cannot be fixed by filling in a value.</b> Listing the sign-on roles in both
+      accounts found <b>no operator or reader permission set in either one</b> &mdash; so those
+      two tiers need the permission sets created and assigned in Identity Center first. That is
+      console work and its own ticket, not a text substitution.
+    </div>
+    <div class="warn">
+      <b>QA also carries a second administrator role it does not recognise.</b> The newer
+      naming exists in the QA account, but QA maps only the original name. Anyone granted the
+      newer one on QA signs in and lands with no permissions. QA looks mid-rename, and the map
+      was never finished.
+    </div>
+    <div class="warn">
+      <b>Production's administrator mapping is exact.</b> The identifier in the cluster matches
+      a role that exists, suffix and all. <b>Production administrator sign-in will work the
+      moment the API server setting is on &mdash; with no AWS work at all.</b>
+    </div>
   </section>
 
   <section class="card">
