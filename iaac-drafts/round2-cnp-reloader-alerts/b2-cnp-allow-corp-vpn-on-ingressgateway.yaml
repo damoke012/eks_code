@@ -1,3 +1,14 @@
+# ⛔ SUPERSEDED 2026-10-20 — DO NOT APPLY THIS FILE.
+#
+# This draft's 4-CIDR list is the version that locked every office desk and every home-ASA
+# teleworker out of all on-prem URLs for ~5 months. The live policy on op-dev and op-qa now
+# carries 22 CIDRs (PR #178 / #179 in iaac-talos-flux-platform). op-prod is NOT yet fixed.
+#
+# Source of truth: iaac-talos-flux-platform, branch op-<env>,
+#   infrastructure/istio-ingress/cnp-allow-corp-vpn-to-gateway.yaml
+# Copying this file over that one is a revert. See
+#   wip/onprem-office-access/FINDINGS-2026-10-20-office-blocked-by-our-own-cnp.md
+#
 # CiliumNetworkPolicy — restrict who can hit the istio-ingressgateway.
 #
 # Goal: only allow corp VPN clients (10.11.0.0/19 Cisco AnyConnect pool) plus
