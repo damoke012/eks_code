@@ -33,7 +33,29 @@
 **Published pages** (private until shared from each page's Share menu):
 
 * **Overview, with diagrams** — https://claude.ai/artifact/1R9Qbe1K5ex9jnZg7u3Hxc
+  ("Pricing App On-Prem Move" — opens with the plain-terms summary)
 * **Variable inventory, 70 rows** — https://claude.ai/artifact/AzVn5mJEnzaQspnKuE3UPV
+* **How on-prem delivery is set up** — https://claude.ai/artifact/KFcUymxTX3W7gw1MYfXoCt
+  ("On-Prem Delivery Setup" — the four repositories, what a new app needs, and the open
+  decision on whether each application gets its own repository)
+
+## The open repository decision
+
+Idris's Stage 1 plan names two repositories we have **not verified exist**:
+`iaac-onprem-applications` (for charts) and `iaac-argocd-onprem` (for Argo CD Applications).
+
+RisingWave grew **four** repositories of its own because there was no intake. The pricing plan
+creates **none** — a chart directory in a shared applications repository, an Application beside
+it, the namespace in the platform repo.
+
+**Recommendation: one shared applications repository, one directory per application.** The
+second and third apps are then a directory rather than a project, which is the point of having
+an intake. The blast-radius objection is answered with code owners per directory, not by
+splitting the repository.
+
+⚠️ Settle it before the first chart is written — it decides the shape every later application
+inherits.
+
 
 ## Who owns the next move
 
