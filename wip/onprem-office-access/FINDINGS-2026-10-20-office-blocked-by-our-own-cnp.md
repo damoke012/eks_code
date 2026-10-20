@@ -65,8 +65,16 @@ branch `op-<env>`. INFRA-1496 Phase 3, CIDR list decided 2026-06-01.
 
 ## Open
 
-* **Tim.** On 2026-09-08 he was on `172.17.13.100` and reported he could not reach the
-  environment; he was told nothing was rejecting him by address. The policy was live and his
-  subnet was not on it. Ask whether he was on VPN before concluding he lost days to this.
+* ✅ **ANSWERED 2026-10-20 — Tim is the same fault and he is not in the office.** He works
+  from home behind a hardware **ASA** teleworker tunnel, which puts his machine on corporate
+  space (`172.17.13.100/24`, gateway `172.17.13.254`) rather than the AnyConnect pool. AD
+  registers that space as `172.17.0.0/16`, which is **not** on the allow-list. He has been
+  blocked by this policy since 2026-06-02, including on 2026-09-08 when he was told nothing
+  was rejecting him by address.
+
+  **"Only VPN users can reach it" was the wrong generalisation.** It is only the AnyConnect
+  pool `10.11.0.0/19`. Anyone reaching corporate space by any other route — an office desk, a
+  home ASA, the DR site — is blocked. Tim is therefore the tester: blocked, technical,
+  reachable, and not dependent on anyone being at a desk.
 * **The subnet list.** Needed from Steve. Two client ranges are known from incidents
   (`10.10.72.0/24`, `172.17.13.0/24`); building the list from two laptops locks out the third.
