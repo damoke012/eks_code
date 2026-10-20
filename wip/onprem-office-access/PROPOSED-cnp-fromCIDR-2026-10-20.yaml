@@ -1,0 +1,57 @@
+# PROPOSED change to the gateway allow-list.
+# Repo:   iaac-talos-flux-platform
+# File:   infrastructure/istio-ingress/cnp-allow-corp-vpn.yaml  (confirm the name on the branch —
+#         one of our notes calls it cnp-allow-corp-vpn-to-gateway.yaml)
+# Branch: op-dev first, then op-qa, then op-prod.
+#
+# ONLY the first ingress rule's fromCIDR list changes. Leave the fromEntities (health probes)
+# and fromEndpoints (Prometheus scrape) rules exactly as they are.
+#
+# Source of the added entries: AD Sites and Services subnet registry, read 2026-10-20 from
+# CN=Subnets,CN=Sites,CN=Configuration,DC=usxpress,DC=com. This is the network team's own
+# registry, not a list assembled from laptops.
+#
+# ⚠️ ADD, NEVER RETYPE. Dropping 10.11.0.0/19 locks out every VPN user — including the
+# kubectl path you would use to undo it.
+
+  ingress:
+  - fromCIDR:
+    # --- existing, unchanged ---
+    - 10.11.0.0/19       # corp VPN pool (AD site: Jenkins)
+    - 10.10.82.0/24      # cluster worker nodes  (now a subset of 10.10.0.0/16 below; kept for clarity)
+    - 10.244.0.0/16      # pod CIDR
+    - 10.96.0.0/12       # service CIDR
+    # --- added: corporate subnets per AD Sites and Services ---
+    - 10.10.0.0/16       # HQ / Jenkins Rd — CONTAINS the office Wi-Fi 10.10.72.0/24 (the reported outage)
+    - 172.17.0.0/16      # Jenkins — contains 172.17.13.0/24 (Tim, Sept 2026)
+    - 10.11.32.0/19      # DR site
+    - 10.9.0.0/16        # DR site
+    - 10.6.0.0/16        # Jenkins
+    - 10.7.0.0/16        # Jenkins
+    - 10.8.0.0/16        # Jenkins
+    - 10.8.90.0/24       # AzureAD site (subset of 10.8.0.0/16; listed separately in AD)
+    - 10.100.0.0/16      # Jenkins
+    - 10.102.0.0/16      # Jenkins
+    - 10.107.0.0/16      # Jenkins
+    - 10.110.0.0/16      # Jenkins
+    - 192.168.12.0/24    # Jenkins
+    - 192.168.13.0/24    # Jenkins
+    - 192.168.18.0/24    # Jenkins
+    - 192.168.19.0/24    # Jenkins
+    - 192.168.21.0/24    # Jenkins
+    - 192.168.22.0/24    # Jenkins
+    - 192.168.40.0/24    # Jenkins
+    - 192.168.60.0/24    # Jenkins
+    - 192.168.63.0/24    # Jenkins
+    - 192.168.92.0/24    # Jenkins
+    - 192.168.222.0/24   # DR site
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+      - port: "4567"
+        protocol: TCP
+      - port: "5432"
+        protocol: TCP
