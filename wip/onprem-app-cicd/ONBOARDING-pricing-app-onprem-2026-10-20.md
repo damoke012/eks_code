@@ -274,3 +274,50 @@ theirs to answer** (sizing, manifests, image location, org).
   — or the first incident after a cloud fix presents as an on-prem fault.
 * **Ping KNX from on-prem before Phase 2.** The premise of the engagement is a months-old
   measurement by someone who said so himself.
+
+---
+
+## Appendix — the intake form and the discovery commands
+
+**The intake form** is a published artifact, private to its owner until shared:
+`https://claude.ai/artifact/AzVn5mJEnzaQspnKuE3UPV`
+
+It holds three things in a shared record: the application's identity facts, the **variable
+inventory** (one row per variable, with the two independent axes — owner and secret-ness —
+and the destination each combination implies), and the six questions that block the build.
+Seeded 2026-10-20 with what the two calls established: prod version 0.1.39, Matt as the
+approver, and real answers to the logs, services, KNX and sign-off questions. The variable
+table starts empty on purpose; it is filled from the scripts below, not by typing.
+
+The form refuses a `NAME=value` paste, and says why: values never belong in it.
+
+**The two discovery scripts**, both read-only:
+
+| Script | Reads | Needs |
+|---|---|---|
+| `scripts/octopus-dump-app-vars.py --project <name>` | Octopus project + library variables: names, environment scopes, sensitive flags | `~/.octopus-api-key` |
+| `scripts/discover-cloud-app.sh --context <ctx> -n <ns> --app <workload>` | the running cloud deployment | kubectl context; `--aws-profile` for the Secrets Manager half |
+
+`discover-cloud-app.sh` answers the things no repo holds: **which ECR account, region and
+repository the image actually comes from** (parsed from the running image reference, never
+assumed), the CPU/memory/replicas/probes DX generated, **every environment variable with its
+source** — literal, ConfigMap or Secret — the key names in each ConfigMap and Secret with any
+**empty** key marked, the `managedFields` record of what last wrote the object, whether the
+workload carries Entra/auth variables, whether it carries **OTEL variables**, and which
+Secrets Manager secrets exist for it.
+
+It prints secret **key names** only; values pass through `jq` and never reach stdout.
+ConfigMap values print only with `--values`, because a ConfigMap is where a leaked credential
+usually hides.
+
+Three guards worth knowing, because each one has burned a previous session:
+
+* **`--context` is required.** An empty `--context` silently selects the current context; on
+  2026-10-09 that sent four on-prem queries to a cloud cluster and the output read as a
+  finding about on-prem.
+* **Every failure says NOT MEASURED and names which fault** — context absent from the
+  kubeconfig, no session, profile not configured, RBAC. A login cannot fix a profile that
+  does not exist, and collapsing those into one message sends you to the wrong fix.
+* **An empty match is reported as a bad filter**, not as absence, with the shorter search to
+  try. `--find <substring>` lists candidate workloads so the exact name never has to be
+  guessed.
