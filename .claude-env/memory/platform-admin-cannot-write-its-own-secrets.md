@@ -26,3 +26,29 @@ Three traps, all of which produce a result that looks like something else:
    `rm -rf ~/.aws/cli/cache ~/.aws/sso/cache`.
 
 See [[adjacent-step-green-signals]], [[argocd-onprem-entra-oidc]], [[eso-secretsynced-not-content-check]].
+
+## ⚠️ 2026-10-15 — the op-qa fix was PARTIAL
+
+`op-qa-platform-admin` still cannot `secretsmanager:ListSecrets`:
+
+```
+User: arn:aws:sts::527101283767:assumed-role/AWSReservedSSO_op-qa-platform-admin_f8b5c3ff8895fdf6/
+doke@usxpress.com is not authorized to perform: secretsmanager:ListSecrets
+```
+
+So "✅ op-qa fixed 2026-08-25" above is **too strong** — whatever was granted did not include
+the list action. Do not plan a check around `list-secrets` on any of the three environments.
+
+**Work around it by asking the consumer, not the account.** The in-cluster `ExternalSecret`
+resolves through the **ESO IRSA role**, not a human identity, so it answers "does this secret
+exist and is its value usable" without any human Secrets Manager permission:
+
+```sh
+kubectl --kubeconfig=$HOME/.kube/op-usxpress-qa-sso.yaml -n app-risingwave get externalsecret -o json
+```
+
+`.spec.data[].remoteRef.key` and `.spec.dataFrom[].extract.key` give the AWS paths; the
+resulting Secret's `.data` gives the key names and whether any value is empty. Better evidence
+than a listing anyway — it measures what the workload actually gets
+([[eso-secretsynced-not-content-check]]). An AccessDenied here is a transport failure and must
+never be reported as "the secret does not exist" ([[transport-failure-not-a-verdict]]).

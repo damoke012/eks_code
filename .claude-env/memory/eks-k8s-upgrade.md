@@ -19,3 +19,18 @@ New initiative from the 2026-07-13 standup: review the AWS **EKS Kubernetes vers
 - Owner: the new team member **Mark** ramps up + drives (learning the cluster), with Rohit + Parul guiding. Set up a call depending on upgrade urgency.
 
 Filed as **INFRA-1594** (2026-07-13). Related: [[user-doke-onprem-platform]].
+
+## 2026-10-20 — measured state and the policy, stated
+
+Rohit has taken **dev, QA and staging to 1.36**; **ops and prod go the following Monday**.
+Latest available is **1.37** and the team is deliberately not taking it. **1.35** is the
+version losing support, which is what justified the move.
+
+The policy, from Doke and Mark on the call: **stay N-1 of the latest, and move when the
+support window is closing** — *"we shouldn't be chasing the latest version… it's the other
+way around"*, *"if we go to 1.37 we'll be doing a test for them."* Full note:
+[[dont-chase-the-latest-version]].
+
+⚠️ The **cluster upgrade runbook is stale** — it documents an older process than the one
+Rohit follows, and he is rewriting it. A stale runbook is worse than none, because the
+upgrade looks documented. A 10–15 minute team walkthrough was requested.

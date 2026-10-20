@@ -66,3 +66,20 @@ and neither reads as an error.
 
 Always `gh pr create --base <the branch it was built FROM> --head <topic> --fill`. Enforced
 across the repo's PR builders by `scripts/lint-pr-base-pinned.sh`.
+
+⚠️ **CORRECTED 2026-10-12 — the ETL chart is a FIFTH repo.** I twice looked for the ETL
+Helm chart and its per-environment values in `iaac-risingwave-onprem` and got a 404 both
+times. They live in **`variant-inc/risingwave-pipeline`**, path `deploy/chart`, branch
+`master`, with `values.yaml`, `values-dev.yaml`, `values-qa.yaml` — and **no
+`values-prod.yaml`**. `iaac-risingwave-onprem` holds the RisingWave cluster, the operator
+and Postgres; it holds no ETL values at all.
+
+The authority is the Argo Application, never a guess at the layout:
+
+    kubectl -n argocd get applications.argoproj.io -o json \
+      | jq -r '.items[] | select(.metadata.name|test("etl")) | .spec.source'
+
+dev's `risingwave-etl` returns repo `risingwave-pipeline`, path `deploy/chart`,
+targetRevision `master`, valueFiles `values-dev.yaml`. A `gh api …/git/trees/…` filter
+that matches nothing prints nothing and reads exactly like "the file is not there", so it
+is NOT MEASURED until the repo is confirmed from the Application.

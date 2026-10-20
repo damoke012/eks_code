@@ -138,3 +138,22 @@ detect. Another instance of [[adjacent-step-green-signals]].
 
 **How to apply:** when a Jira read is the proof of a write, never let a field name be the
 load-bearing part of it. Ask the collection that is supposed to contain the issue.
+
+## Sprint rollover, measured 2026-10-19 (UI Sprint 6 -> 7, new sprint id 6296)
+
+- **`/rest/agile/1.0/sprint/{id}/issue` LAGS a write by seconds.** Adding three issues
+  returned `HTTP 204` and the very next `total` read `10` instead of `13`. Minutes later both
+  the listing and each issue's `customfield_10010` said all 13. **A count taken immediately
+  after a 204 reads as a failed write and is not one** — re-read before concluding, and check
+  both ends ([[adjacent-step-green-signals]]).
+- **A newly created sprint is `future`, not `active`.** Looking it up with `?state=active`
+  finds nothing and leaves the id empty, which then builds the URL `/sprint/issue` and 400s.
+  UI Sprint 6 had *also* never been started, which is why it had no usable report until it was
+  closed — the API starts it first, because a `future` sprint cannot be closed.
+- **Creating a sprint does not start it.** `POST /sprint/{id}` with `{"state":"active"}` is a
+  separate call, and skipping it is how Sprint 6 ended up reporting nothing for two weeks.
+- Issues filed by API land in the **backlog**, so a successor ticket is NOT in the old sprint
+  and will not be carried by a rollover. Add it to the new sprint explicitly.
+- `scripts/jira-sprint-rollover-2026-10-19.py` is the current copy; only the two date
+  constants change per sprint.
+

@@ -1,6 +1,6 @@
 ---
 name: dx-apply-triage
-description: Triage a failed DX-Apply Octopus deployment — "The remote script failed with exit code 1" on a DX-Apply step, "no space left on device", OpenTofu "Failed to install provider", "plugin cache dir cannot be opened", a deploy that failed partway through its modules, or an app that deployed green and then broke on identity. Read the error stack from the bottom, and check the worker before the app.
+description: Triage a failed DX-Apply Octopus deployment — "The remote script failed with exit code 1" on a DX-Apply step, "no space left on device", OpenTofu "Failed to install provider", "plugin cache dir cannot be opened", a deploy that failed partway through its modules, a plan that fails READING a resource after a provider release (`ListVersionsByFunction`), or an app that deployed green and then broke on identity. Read the error stack from the bottom, and check the worker before the app.
 ---
 
 # /dx-apply-triage
@@ -17,6 +17,8 @@ smallest cache on the worker and failed because it deployed last.
 - `no space left on device`, `Failed to install provider`, or `plugin cache dir … cannot be
   opened` anywhere in the log.
 - A deploy failed after some modules already reported `Completed Apply`.
+- A plan or refresh fails **reading** an existing resource, naming an AWS API nothing in the
+  code calls — the provider was resolved fresh that day.
 - An app deployed green and then broke on authentication.
 
 ## Rule zero — read the error stack from the bottom
@@ -107,7 +109,41 @@ Anything holding the old ID — especially an on-prem copy of the same app — b
 release, with nothing in either log connecting the two. Consumers need a full release, not a
 config change. See `prod-auth-triage` for the 401 side of this.
 
-### 4. Lines that look like failures and are not
+### 4. A provider release you did not choose
+
+A repository that gitignores `.terraform.lock.hcl` resolves the provider **at init**, so a run
+takes whatever was published that morning. The failure then arrives at **read** time, with
+nothing applied, naming an AWS API that appears nowhere in our code.
+
+**Measured 2026-10-16, `ix-kafka-topics-users` dev.** `hashicorp/aws` 6.69.1, released that
+day, made the read of `aws_lambda_function` issue an internal **`ListVersionsByFunction`**
+call, which errored and blocked the deployment. Parul's own words: *"in our code we have just
+written `resource aws_lambda_function`, but in the background the provider, using AWS APIs,
+tries to call this `ListVersionsByFunction` call."* Octopus **publishes a new Lambda version on
+every deploy**, so these functions carry long version lists — that is the state being walked.
+
+```
+# which version did THIS run resolve?  (raw log, not the rendered view)
+grep -iE 'Installing hashicorp/aws|provider registry.*aws' <raw task log>
+```
+
+Read the **raw** log. The rendered Octopus view truncates the error — on the call it took
+opening the raw log and searching `list versions` to see it at all.
+
+The fix is a constraint (`< 6.69.1`) in the **shared** configuration, so one merge covers
+every environment. ⚠️ **A pin is not a fix and has no expiry**: re-test each patch release and
+revert deliberately, or the constraint is load-bearing a year later with nobody left who
+knows why. Full account:
+`wip/onprem-app-cicd/FINDINGS-2026-10-20-aws-provider-lambda-listversions.md`.
+
+Two traps specific to this class:
+
+* **Grepping our Terraform for the failing API finds nothing, and that is expected.** The
+  call is inside the provider. An empty grep is not exculpatory.
+* **"The Lambda version" and "the provider version" get used interchangeably in
+  conversation.** What is frozen is the provider's; newer Lambda runtimes are unaffected.
+
+### 5. Lines that look like failures and are not
 
 | Line | Reading |
 |---|---|

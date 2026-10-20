@@ -226,3 +226,144 @@ Useful while here: `variant-inc/risingwave-pipeline` admins are `buddy-james`,
 `buddy-james`, `higdonmatthew`, `oibrahim-usxpress`, `svivesusx`, `usx-devops` —
 and buddy-james is also on variant-inc's Engineering Leadership team, so he is
 the single person who can unblock both orgs.
+
+## 2026-10-09: app-risingwave is live, and it is a DIFFERENT namespace
+
+Dev's ETL now runs, and the earlier note that `app-risingwave` is empty is **stale**. Two
+namespaces, and confusing them wastes a round trip:
+
+* **`risingwave`** — the RisingWave cluster itself, plus `pg-postgresql` (the meta store) and
+  the `rw-bootstrap-*` Jobs. Postgres, slots and compute live here.
+* **`app-risingwave`** — the ETL application. `etl-pipeline-image` (one key, `digest`) and
+  `etl-pipeline-endpoints` (29 keys) live here, and so does the sync-hook Job while it runs.
+
+`etl-pipeline-image` in `app-risingwave` is the shortest honest answer to "what digest is dev
+running" — `values-dev.yaml`'s comment points at it by name but not by namespace. Querying it in
+`risingwave` returns NotFound, which reads exactly like "the comment is wrong" and is not
+([[ask-the-registry-not-the-resolver]] is the same shape: the lookup that looks like absence).
+
+Measured: `{"digest":"sha256:9ab35be846ca…"}`, Argo revision `e1319bbd` = PR #96's merge commit,
+sync Succeeded 22:28:44Z.
+
+**Trap:** the sync-hook Job is deleted on success, so a log line proving which *code* ran is
+unobtainable after the fact ([[hook-job-failure-destroys-its-own-log]]). The ConfigMap digest
+plus the revision match is the available evidence. If you need the log, catch it live or run the
+same digest as a plain Job — and **delete that plain Job afterwards**: a leftover
+`etl-pipeline-debug` pinned to a superseded digest was the only visible workload in the
+namespace two hours later, and misrepresents what dev is running.
+
+## 2026-10-09 evening: dev done, and what is NOT in git
+
+Dev's delivery is automated end to end: Tim pushes, his repo builds a digest to
+`risingwave/poc-pipeline`, `promote.yml` writes it into `values-dev.yaml` and merges its own
+PR, Argo syncs, the hook applies. Proven three times (pipeline #90, #92, #96).
+
+**But dev's environment is not all in code.** `secrets.tf` declares only postgres, root,
+svc-reporting, secret_store_private_key and console_license_key. Live dev also has
+**entity, mongodb, kafka, grafana** and dex_entra_client_secret. `mongodb` and `kafka` hold
+third-party credentials, so they cannot use `random_password` — they take the
+`console_license_key` pattern (secret + `ignore_changes`, value set out of band) and each
+needs **both** its secret and its version imported, or an apply rotates a live credential.
+Also drift: the ECR repository policy and an `ecr-push` IAM statement, both added by hand.
+
+Resume point with the full state, open PRs and ordered next steps:
+`wip/onprem-app-cicd/RESUME-2026-10-09.md`. QA readiness, nine gates re-asked:
+`wip/onprem-app-cicd/QA-PREFLIGHT-2026-10-09.md`.
+
+**QA is healthier than assumed** — on the Helm chart, credential synced, applying SQL.
+Its admin role `risingwave` is superuser, so the bootstrap hook needs no QA variant. Its
+`wal_level` is still `replica`, and the QA half of that change is already drafted in PR #41.
+
+## 2026-10-15 — QA joined the promotion chain, on dispatch only
+
+`promote.yml` is the single promotion engine, and `apps.json` (repo root) is its control surface:
+
+```json
+{ "key": "risingwave-etl", "ecr": "risingwave/poc-pipeline",
+  "promote": ["dev", "qa"],
+  "values": { "dev": "deploy/chart/values-dev.yaml", "qa": "...values-qa.yaml",
+              "prod": "...values-prod.yaml" } }
+```
+
+Each environment's source is the one before it — dev from ECR, QA from `values-dev.yaml`, prod
+from `values-qa.yaml` — so nothing is rebuilt between environments and QA can only receive what
+dev actually ran. **Prod opens a PR and never self-merges.**
+
+**Doke's decision 2026-10-15: QA and prod promote on explicit dispatch only.** PR #122 added
+`"qa"` to the list and gated automatic triggers to dev, because `inputs.only` is empty on every
+schedule/`workflow_run` tick:
+
+```sh
+if [ "$ONLY" != "$E" ] && { [ -n "$ONLY" ] || [ "$E" != "dev" ]; }; then  # skip
+```
+
+Promote with `gh workflow run promote.yml --repo variant-inc/risingwave-pipeline -f only=qa`.
+Proven live 13:26Z: `risingwave-etl/qa: already on sha256:4553550446f9 (from
+deploy/chart/values-dev.yaml)`.
+
+Side effect worth keeping: before this, one tick could carry an image ECR→dev→QA→**prod PR
+opened**, with QA holding the digest for seconds (`max-parallel: 1`, each job re-checking out
+master after the previous merged). A scheduled run can no longer reach prod at all.
+
+⚠️ `promote.yml` hard-fails if a target's `values-*.yaml` does not already point at the `ecr`
+repository in `apps.json`. That is why PR #119 (QA's `image.repository`) was a **prerequisite**
+for enabling QA, not just a bug fix — gate 5 of [[delivery-is-a-relay-of-nine-gates]], guarded
+here. PR #121 deleted the superseded `promote-to-qa.yml`
+([[edited-copy-is-not-the-shipped-copy]]).
+
+**Still open for QA** (all provisioning, no plumbing): Atlas database + user → `risingwave/mongodb`;
+`entities` Postgres + `rw_entity_app` + publication + `wal_level` (PR #97 drafts the hook);
+Employee Kafka topic + grant. **Prod**: the same list with nothing pre-existing, plus PR #84 for
+`values-prod.yaml`. Detail: `wip/onprem-app-cicd/FINDINGS-2026-10-14-qa-first-real-run.md`.
+
+## ⚠️ 2026-10-15 — iaac-risingwave-onprem has NEVER applied: there is no state at all
+
+Searched **every** bucket in the dev account 700736442855 (`usx-dev` profile):
+
+| Bucket | Keys | What it holds |
+|---|---|---|
+| `lazy-tf-state-65v583i6my68y6x9` | 98 | `iaac-eks/…` cloud EKS state; the 2 "risingwave" hits are `octopus/iaac/…/OnPremise.json`, config not state |
+| `op-usxpress-dev-tfstate` | 27 | the **DX app platform** — attrition-api, brands-api, geoenrichment-sync-handler, io-notifications-handler |
+| `usxpress-tf-state-8300lkoz74prn4fd` | 2083 | 4 risingwave hits, all `USXpress/risingwave/common/{kafka,replicator}` — a DIFFERENT project |
+| `risingwave-state-op-usxpress-dev` | 160 | Hummock object store, **zero** `.tf` keys |
+
+**No state for this module exists.** Confirms the 2026-08-12 PR #29 finding rather than
+superseding it: the package never contained the Terraform, so every `dpl` deploy since June
+went green without applying anything. #29 fixed the packaging; no apply has landed since.
+
+**Consequence, and it is not small.** Dev's RisingWave estate is entirely unmanaged: the S3
+bucket, the IRSA role, the five platform secrets in `secrets.tf` and the five hand-made app
+secrets. A first apply would 409 on every one. So "import the five app secrets" was the wrong
+size of problem — it is the whole module.
+
+**The resolution that is also the proof:** import dev, run `terraform plan`, and **do not
+apply**. A plan showing no changes proves the module's config matches a real environment —
+non-destructive validation. Only then is prod safe, which keeps the promotion order
+([[promotion-order-qa2-dev-qa-prod]]) intact; applying an unproven module to prod first
+inverts it.
+
+**How to apply:** before planning any Terraform work on this module, check whether state
+exists at all. `aws s3 ls s3://<bucket> --recursive` per candidate bucket, and discriminate
+DENIED from empty — `grep ... | head` returns 0 even with no input, so a `|| echo "none"`
+after `head` never fires ([[a-guard-can-measure-the-wrong-thing]]). ⚠️ `op-*-platform-admin`
+cannot `ListAllMyBuckets`, but `usx-dev` can; profile names are asymmetric and there is no
+`op-dev` ([[wsl-kubeconfig-churn]]).
+
+## 2026-10-20 — the second app, and the first one with an intake
+
+The **pricing app** (repo in `usxpressinc`, prod 0.1.39, currently DX/Octopus → EKS) is
+onboarding to on-prem, and it is the engagement that produces the reusable path —
+[[onboarding-is-the-deliverable]]. **Idris owns it end to end** with Shrikant, no approval
+gate. Notes:
+`wip/onprem-app-cicd/MEETING-2026-10-20-pricing-app-onboarding.md`.
+
+What was settled on the call: the repo **stays** in `usxpressinc`; on-prem pulls the app's
+**existing** ECR repository; sizing is **read off the live DX prod cluster**, not asked of
+the app team; `docker-compose.yml` is **not** a config source; and observability does **not**
+change — which means the OTEL endpoint variables Octopus injects must be carried into the
+on-prem values ([[observability-parity-is-clickhouse-not-loki]]).
+
+⚠️ **The premise of the engagement is stale.** The app is going on-prem because a partner
+endpoint (KNX) worked from on-prem and failed from cloud — measured once, months ago, by
+Matt, who said so himself: *"the tests worked on-prem, but I've slept since then as well."*
+Ping it from on-prem before doing the migration work, not after.

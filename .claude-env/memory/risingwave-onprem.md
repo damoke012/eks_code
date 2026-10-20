@@ -518,3 +518,16 @@ result. "Everything is behind a DNS entry" was said twice on the call and is fal
 [[adjacent-step-green-signals]].
 
 Full record: `wip/rw-upgrade/FINDINGS-2026-10-06-three-versions-one-upgrade-ask.md`
+
+## risingwave-2 version posture (Doke, 2026-10-19)
+
+`risingwave-2` on op-dev is still **v2.8.2** while every `risingwave` namespace is **v3.0.5**.
+That is **deliberate and low priority**: risingwave-2 is the platform team's own test instance,
+never promoted, and no application depends on it. It should migrate to 3.0.5 eventually so the
+test environment matches what it is testing for, but it is **not a blocker** for anything —
+including the v2.8 end-of-support date of 2026-10-11.
+
+**How to apply:** do not raise risingwave-2's version as an EOS risk or a release blocker. When
+a version question is asked, answer about the `risingwave` namespace and say risingwave-2 is
+pending separately. Related: [[rw-version-uniform-but-eos]].
+

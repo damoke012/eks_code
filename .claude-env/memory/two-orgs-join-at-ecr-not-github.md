@@ -176,3 +176,87 @@ action every app uses.
 
 ⚠️ `iaac-risingwave-cicd` has **2 critical Dependabot alerts** and is now load-bearing, and
 its open Renovate branch **deletes `publish-applier.yml`** — rebase, never merge.
+
+
+## ✅ 2026-10-09 — DELIVERED END TO END, the deploy half included
+
+The "⛔ the deploy half is unproven" above is **closed**. Tim pushed to `master` in
+`usxpressinc/risingwave-poc` (PR #5 merged, then his Employee/Brand PR), the published
+reusable workflow in `variant-inc/iaac-risingwave-cicd@v1` built and pushed
+`risingwave/poc-pipeline@sha256:ac2b1e95`, and op-dev applied it through Argo CD.
+
+**Proof, not a green check:** `brand_source_kafka`, `brand_mv_flat`, `brand_mv_raw` and
+`brand_mv_state` are live in dev's catalog. Those names come only from his `100-Brand` tree
+(ours are `kafka_brand` / `mv_brand*`), and the commits that produced them —
+*"update brand mv & source names"*, *"rename RW objects"* — are dated **2026-10-09 14:57**.
+`brand_mv_state` = 3 rows.
+
+⚠️ **Row counts could not have proven this.** `brand_mv_raw=9, brand_mv_state=3` were already
+recorded on 2026-08-28, and his SQL is drop-and-recreate, so a real apply rebuilds to the
+same numbers from the same topic. **The discriminator was a RENAMED object**, not a count —
+find something the new code names differently and check whether it exists.
+
+**Four fixes made it work**, in the order they blocked:
+1. ECR repository policy on the new repo — [[ecr-repo-policy-is-per-repository]]
+2. The seven Kafka properties from `op-usxpress-dev/risingwave/kafka` into dev's
+   ExternalSecret (the chart generates the Job env from the same list, so no second list)
+3. `KAFKA_SASL_MECHANISM=PLAIN`, `KAFKA_SECURITY_PROTOCOL=SASL_SSL` as config constants
+4. `PIPELINE_DIR` narrowed — [[validator-checks-every-value-not-the-selected-ones]]
+
+**Also proven for the first time:** `apply.sh` can create a Kafka-connected source. Dev's
+pre-existing Brand sources came from the older `pipeline.yaml` psql path, whose environment
+comes from GitHub secrets; dev's ConfigMap held no Kafka credentials at all until tonight.
+
+**Still open:** `KAFKA_TOPIC_EMPLOYEE` (only Tim can name it); the Mongo sink wants
+`MONGODB_HOST`/`MONGODB_PORT` while the dev secret holds `MONGODB_CONNECTION_STRING`; and
+Postgres CDC needs `wal_level=logical` (iaac-risingwave-onprem#41) plus a real entity
+database — `POSTGRES_SERVER` and `POSTGRES_ENTITY_DB` are empty strings in dev.
+
+
+## ✅ 2026-10-09 late — the FULL Employee pipeline runs on dev from his repo
+
+Not just delivery: the whole chain. Kafka -> RisingWave -> materialized view -> sink ->
+relational tables, from `usxpressinc/risingwave-poc`'s own image, counts agreeing at every
+stage (2 employees / 1 contact in the RW tables, in the MVs, and in Postgres
+`entities.employee.*`). Replication slot `rw_employee_slot` (`pgoutput`, **active = t**).
+
+Topic is **`dev_timmyp_cdc_employee_json`** — JSON, so no schema registry. Read from the
+Confluent REST API using `kafka__rest_endpoint` + `kafka__resource_id` from
+`op-usxpress-dev/risingwave/kafka`; never guess a topic name from a sibling's convention.
+
+**What had to exist first, none of it config:** database `entities` (the name is hardcoded
+as `\c entities` in his SQL), role `rw_entity_app` WITH `REPLICATION`, schema `employee`,
+publication `rw_employee_pub FOR ALL TABLES`, and `wal_level=logical` — which needed
+`ALTER SYSTEM` plus a restart of `postgres-postgresql`, the server that also hosts
+`risingwave_meta`. That restart cost one RW meta restart and recovered clean.
+
+⚠️ **All six of those are DRIFT**, created by psql/CLI on dev. Listed with their intended
+homes in `wip/onprem-app-cicd/STATE.md`. Until iaac-risingwave-onprem#41 merges, a PVC
+rebuild loses CDC.
+
+⛔ **The Mongo sinks cannot be fixed by configuration.** Dev's secret holds
+`mongodb+srv://…mongodb.net/` — an Atlas SRV string with **no port** — and his SQL builds
+`mongodb://%MONGODB_USERNAME%:%MONGODB_PASSWORD%@%MONGODB_HOST%:%MONGODB_PORT%/`. There is
+no host/port to extract. That is a change in HIS repo, and it is why `400-sink.rw` and
+`999-downstream_sinks.rw` stay in `EXCLUDE_RE`.
+
+**How to apply:** when a developer's pipeline "needs a secret", check whether the secret's
+SHAPE matches what the code builds. A connection string and a host+port pair are not
+interchangeable, and the gap reads as a missing credential.
+
+## 2026-10-20 — the repo-location question was answered the same way, by the app owner
+
+Asked again for the **pricing app** (the first intake onboarding): *"do you mind us moving
+that repo to variant?"* Shrikant said no, and gave the reason — *"pretty much all of our
+repos are in `usxpressinc`… you'll have to copy all the reports over, I don't think that's
+worth your time. I would suggest you go with option B: some file gets updated to reference
+the repo in US Express."*
+
+So this is now settled twice, from both directions, by two different app teams: **the
+platform adapts to where the repo lives.** Stop opening with the org question — it reads as
+a migration request and spends the goodwill of the call on the one thing that does not
+matter.
+
+The same call closed the build question the same way: the app's existing GitHub Actions
+already pushes to ECR, so on-prem pulls **that** repository —
+[[reuse-the-existing-ecr-repository]].

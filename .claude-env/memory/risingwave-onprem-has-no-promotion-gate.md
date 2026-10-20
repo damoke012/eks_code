@@ -57,3 +57,71 @@ platform — so the version they remember is the permissive one. Same shape as t
 pair in that call: RisingWave's Terraform still deploys through Octopus with the `TfApply` gate
 while the pipeline deploys through GitHub, and "just replace Octopus with GitHub" reads as
 universal.
+
+## ⚠️ CORRECTED 2026-10-12: prod does NOT track main — it tracks a TAG
+
+Measured on op-usxpress-prod: `gitrepository/iaac-risingwave-onprem` has
+`spec.ref = {"tag":"v0.5.6"}`, and both Kustomizations (`risingwave-onprem` at
+`./manifests/op-usxpress-prod`, `risingwave-operator` at `.../operator`) reconcile
+`v0.5.6@sha1:62e56b3dd6ebdd42255b3f14a6340b2071fbc82f`.
+
+**So merging to `main` cannot reach prod.** The claim above — "every cluster tracks
+`branch: main` at 5m so merging IS deploying to prod" — is false for prod. **Prod has a
+real promotion gate.** Reaching it takes two deliberate acts: cut a tag on
+`iaac-risingwave-onprem`, and point prod's GitRepository ref at it.
+
+How this surfaced: PR #46 bumped prod's operator chart 0.1.36 → 0.1.40 (operator v0.16.0 →
+v0.18.0), was merged to `main`, and after 7 minutes nothing moved — operator still v0.16.0,
+CRD still `generation=1`.
+
+**Tested and killed** on the way to the real cause: that the prod Kustomization did not
+enumerate the `operator/` subdirectory (it does — `operator/kustomization.yaml` lists
+`operator-helmrelease.yaml`); and that the live operator was applied by hand outside GitOps
+(it is not — the Deployment carries `helm.toolkit.fluxcd.io/name: risingwave-operator`,
+`meta.helm.sh/release-name`, and `helm.sh/chart: risingwave-operator-0.1.36`, and the
+HelmRelease is `Ready`). Everything is correctly managed; it simply is not looking at `main`.
+
+**A tag is a bundle, not a cherry-pick.** Cutting a new tag carries EVERY commit on `main`
+since `v0.5.6` into prod, so read `compare/v0.5.6...main` in full first (CLAUDE.md rule 7).
+
+Still unmeasured: dev's and QA's refs. Dev behaved like `main` (PR #45's `wal_level` reached
+it within minutes on 2026-10-09), so the ref model may differ per environment — which would
+make this repo's promotion story per-cluster, not global. Verify before repeating either
+claim. Related: [[rw-prod-blocked-on-manifests-path]], which repeats the same wrong premise
+and should be read with this correction.
+
+## The real promotion model, measured 2026-10-12
+
+| env | GitRepository ref | effect |
+|---|---|---|
+| dev | `branch: main`, 5m | a merge deploys immediately |
+| QA | exact `tag:` | gated |
+| prod | exact `tag:` | gated |
+
+Prod and QA are moved by **`scripts/pin-risingwave-tag.py` in `iaac-talos-flux-cluster`
+@ `master`**, editing `clusters/<cluster>/flux-system/infra.yaml`. It is a careful script:
+refuses floating tags (`v0`, `v0.5`), refuses if more than one GitRepository document matches
+the repo URL, and asserts exactly one changed line before writing. `branch: main` appears many
+times in that file for other sources, which is why it exists instead of sed.
+
+⚠️ **Its `DEFAULT_CLUSTERS` is `["op-usxpress-qa", "op-usxpress-prod"]`** — running it without
+`--clusters` moves QA as well as prod.
+
+⚠️ **It could not MOVE a tag.** Given an existing `tag:` it returned `already pinned, nothing
+to do` and exited 0, so `v0.5.6 -> v0.6.0` silently did nothing — the same shape as every other
+failure in this workstream: a true statement about the step next to the one that matters. Fixed
+2026-10-12 in `iaac-talos-flux-cluster#43`, keeping all its safety properties.
+
+Tags are minted per commit on main (`v0.5.7`, `v0.5.8`, `v0.5.9`, `v0.6.0`) plus a floating
+`v0.6`. Neither `octo.yaml` nor `manifest-lint.yaml` appears to cut them — the tagger is still
+unidentified.
+
+**So a prod release is three acts:** merge to `main`, a tag exists at that commit, then move the
+pin in the *cluster* repo. A merge alone changes nothing on prod, and PR #46 looked
+merged-and-done for 40 minutes while prod sat on `v0.5.6`.
+
+**Proven 2026-10-12:** prod operator v0.16.0 -> v0.18.0 (chart 0.1.36 -> 0.1.40) landed via
+this path; CRD `generation` moved 1 -> 2, confirming `crds: CreateReplace`; and the data plane
+did NOT move because the CR pins `spec.image` explicitly — all five RisingWave pods stayed on
+v2.8.2 with 0 restarts. A CR that leaves `spec.image` unset would have taken the operator's own
+default (v3.0.3 for v0.18.0) and collapsed two planned steps into one.

@@ -98,3 +98,8 @@ cluster's Flux `GitRepository` tracks `branch: main` at a 5-minute interval, so 
 op-usxpress-prod, #38*) added prod's `GitRepository` + `risingwave-operator` + `risingwave-onprem`
 Kustomizations and postRenderer. Prod RisingWave is live. It went straight from not-deployed to
 deployed-from-an-unpinned-branch, with no intermediate pinned state.
+
+⚠️ **CORRECTED 2026-10-12:** the line above saying "every cluster tracks `branch: main` at 5m,
+so a merge to iaac-risingwave-onprem IS a prod deploy" is **false for prod**. Prod's
+GitRepository pins `tag: v0.5.6`. Merging to `main` does not reach prod; a tag must be cut and
+the ref moved. See [[risingwave-onprem-has-no-promotion-gate]].

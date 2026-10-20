@@ -1,6 +1,6 @@
 ---
 name: onprem-app-wireup
-description: Wire an application's container image into an on-prem Argo CD environment, or find why one that "deployed" is doing nothing — a green pipeline with no data, ImagePullBackOff or a 403 on an ECR manifest HEAD, "the sync hook succeeded but the tables are empty", a developer pushing to a repo nothing deploys from, ExternalSecret green while the value is unusable, a missing-runtime-values error naming systems you do not have, or Argo never triggering after an app repo merge. Nine gates in a relay, each failing green.
+description: Onboard a new application to on-prem, or wire an application's container image into an on-prem Argo CD environment, or find why one that "deployed" is doing nothing — an app arriving with no intake, "which of these variables are secret", nobody knowing what CPU or memory to give it — a green pipeline with no data, ImagePullBackOff or a 403 on an ECR manifest HEAD, "the sync hook succeeded but the tables are empty", a developer pushing to a repo nothing deploys from, ExternalSecret green while the value is unusable, a missing-runtime-values error naming systems you do not have, or Argo never triggering after an app repo merge. Nine gates in a relay, each failing green.
 ---
 
 # Wiring an app image into an on-prem environment
@@ -12,6 +12,49 @@ broken, and every one reported success.** Eight green ticks and zero rows.
 That is the trap this skill exists for. **Judge the relay at the destination — rows in the
 target — and never at a status field.** Then walk the gates in order; each one's symptom
 mimics the next one's cause.
+
+## Gate 0 — intake, before any of the nine
+
+**RisingWave was brought into the environment with no intake, and the nine gates below are
+the bill.** From 2026-10-20 every app arriving on-prem starts with discovery, and the
+engagement has **two** deliverables: this app, and the reusable path the next one uses
+([[onboarding-is-the-deliverable]]). Start with the form, not the namespace.
+
+Six questions, and for a DX/Octopus-deployed app **the app team is not the source for four
+of them**:
+
+| Question | Ask | Not |
+|---|---|---|
+| Which variables does it read? | **Octopus project variables**, plus what **DX creates in Terraform** (pull Parul or Rohit) | `docker-compose.yml` — local dev only, "may not even work" |
+| Which are sensitive? | the **app developer**, who **approves** the split; we only propose | your own judgement alone |
+| CPU / memory / replicas | the **live DX prod cluster** — DX generates the deployment YAML | the app team; they have never set them |
+| Which image? | the **ECR repository their build already fills** | a new repository you create |
+| Which GitHub org? | wherever the repo already is — we adapt | a migration request |
+| How do they read logs today? | the **query in their Grafana dashboard** | the backend you assume |
+
+**Ask for key names, never values, and say why in the same breath** — a bare "send me the key
+names" reads as a format preference and gets helpfully over-delivered with live credentials
+([[secret-and-owner-are-two-axes]]).
+
+Four findings from the first intake that generalise:
+
+* **The inventory has two sources and they disagree.** "All of ours are in Octopus" and "we
+  have SQL passwords in sensitive variables and I'm not sure DX provisions them" were said
+  minutes apart, both honestly. Enumerate both; never accept the first *that's all of them*
+  ([[app-config-source-is-octopus-not-compose]]).
+* **Observability is not a free pass.** The app team's working pattern is aggregated search
+  across every pod from one dashboard. Argo CD's per-pod log view is **not parity**, and the
+  **OTEL endpoint variables Octopus injects** are on the non-sensitive side of the split — miss
+  them and the app runs, Argo is green, and no log arrives
+  ([[observability-parity-is-clickhouse-not-loki]]).
+* **Expiry, not secrecy, is the test for platform ownership**, and the artifact must be
+  identical across environments ([[expiring-config-is-platform-owned-iac]]).
+* **Verify the premise.** The first intake app is moving on-prem because a partner endpoint
+  worked there and failed in cloud — proven once, months earlier, by someone who said so
+  himself. Ping it from on-prem before doing the migration work, not after.
+
+`scripts/app-config-coverage.sh` turns the completed intake into a check: every declared
+variable must have a home in the environment before the first deploy.
 
 ## Walk the gates in order
 
@@ -87,6 +130,12 @@ before concluding anything about it ([[immutable-tag-blocks-base-image-rebuild]]
 
 ### 4. Can the cluster pull it?
 
+**First, do not create a repository.** If the app's existing build already pushes to ECR,
+on-prem pulls **that** repository — one build, one digest, one provenance chain, and retention
+already configured ([[reuse-the-existing-ecr-repository]]). That moves this gate rather than
+removing it: an existing repo **has** a policy, written for a consumer in its own account,
+which very likely does not include the on-prem account.
+
 **A new ECR repository has NO repository policy**, so a cross-account on-prem pull fails
 `403 Forbidden` on the manifest HEAD. The repository that works carries a policy the new one
 does not. See [[ecr-repo-policy-is-per-repository]] for the four error messages and which
@@ -138,6 +187,11 @@ The second command prints **key names only** — values go to `jq`, never to the
 Then check the shape, not the presence. A connection string and a host+port pair are not
 interchangeable, and the gap reads as a missing credential:
 [[risingwave-mongodb-sink-facts]].
+
+**Telemetry endpoints count as runtime values.** Octopus injects the OTEL endpoint variables
+in cloud; nothing injects them on-prem. Absent, the app starts, Argo CD is green, the pod logs
+to nowhere and the dashboard the team actually reads stays empty. Check the values file carries
+them, by name, against what the cloud deployment receives.
 
 Count the keys the environment actually received. ESO writes a **partial** secret on error,
 so the pod dies at container creation with `RESTARTS 0` — invisible to restart alerts:

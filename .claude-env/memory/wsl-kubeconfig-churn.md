@@ -203,3 +203,36 @@ divergence as a variable permanently. It just was not the fix today.
 
 **Same family as [[proxy-is-not-the-property]]:** I measured the guest and reported it as a
 fact about the network. The guest was downstream of the real answer the whole time.
+
+## AWS profile names are ASYMMETRIC across the three on-prem environments
+
+Measured on the WSL box 2026-10-15. Twelve profiles configured:
+
+```
+data-dev  infra-common  infra-playground  network  op-prod  op-qa
+ops-controller  playground  usx-dev  usx-mgmt  usx-prod  usx-qa
+```
+
+⚠️ **There is no `op-dev`.** QA and prod are `op-qa` / `op-prod`, but on-prem
+**dev is `usx-dev`** (account 700736442855). `aws sso login --profile op-dev` returns
+*"The config profile (op-dev) could not be found"* — and that message means the profile does
+not exist, **not** that a session expired. A login can never fix it
+([[transport-failure-not-a-verdict]]).
+
+Confirmed live that day: `op-qa` → 527101283767, `usx-mgmt` → 660075424663 (the management
+account SAML needs — see [[argocd-sso-blocked-on-management-account]]). Everything else had no
+session.
+
+**How to apply: never hand over a profile NAME. Resolve it by account number**, which is what
+actually identifies the target:
+
+```sh
+for p in $(aws configure list-profiles); do
+  A=$(aws sts get-caller-identity --profile "$p" --query Account --output text 2>/dev/null) || true
+  [ "$A" = "$WANT" ] && { echo "$p"; break; }
+done
+```
+
+`scripts/wizard-rw-qa-cutover.sh` does this (`profile_for`), and `require_profile` refuses an
+empty result — `--profile ""` is not an error to the AWS CLI, it selects whichever account was
+last used. Account map in [[onprem-app-cicd]].

@@ -55,3 +55,32 @@ create a safe place to put a value.
 
 Related: [[ccloud-registry-master-per-account]] — a credential that is a copy of an
 account-level master has no blast radius of one.
+
+## 2026-10-20 — the grid is now the agreed intake, and the developer is the approver
+
+The pricing-app onboarding call landed on exactly this model without being shown it. Idris:
+*"maybe the developer can go into the project variables, just list all the variables — not the
+credential, just the name of the variable — and categorize which are sensitive, which are
+non-sensitive. That way we know what to create in Secrets Manager, and all the non-sensitive
+can go through the code change"* — i.e. `values.yaml` / the Helm chart. Matt agreed to produce
+it.
+
+**Two things to carry forward:**
+
+1. **The application developer approves the classification; the platform only proposes.**
+   Doke: *"the application developer that understands the in and out of the application is the
+   one that approves and says, okay, yes, I'm comfortable with this. We can only propose at the
+   end of the day."* A split recorded without that approval is an unsigned change to someone
+   else's app.
+2. **"Names only" was asked for correctly this time and it still needs the reason attached.**
+   It worked here because Idris said *why* in the same breath ("not the credential, just the
+   name").
+
+⚠️ For a DX-deployed app the inventory has **two sources and they disagree** — see
+[[app-config-source-is-octopus-not-compose]]. And the non-sensitive side is not only
+application config: the **OTEL endpoint variables** Octopus injects live there, and losing
+them silently kills logging ([[observability-parity-is-clickhouse-not-loki]]).
+
+One argument for the new path worth making out loud: **Octopus sensitive variables can print
+into a deploy log** (Matt's own words). Secrets Manager + ESO is plainly better, and he wants
+it.
