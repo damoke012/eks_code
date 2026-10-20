@@ -34,6 +34,25 @@ branch `op-<env>`. INFRA-1496 Phase 3, CIDR list decided 2026-06-01.
 * The service is healthy — TLS + HTTP from the VPN to `.21` and `.180`, curl exit 0.
 * From the office (`10.10.72.227`, Wi-Fi): **ping to `10.10.82.21` succeeds at 2 ms**,
   TCP 443 to the same address fails.
+* **Confirmed from a SECOND excluded subnet, 2026-10-20.** Tim Preble, from home behind his
+  ASA teleworker tunnel, source `172.17.13.101`:
+
+  | Test | Result |
+  |---|---|
+  | Windows `Test-NetConnection 10.10.82.21 -Port 443` | PingSucceeded **True, 26 ms**, TcpTestSucceeded **False** |
+  | macOS `Test-Connection 10.10.82.21` | 4/4 success, 39-44 ms |
+  | macOS `Test-Connection -TcpPort 443` and `-TcpPort 80` | **False** on both |
+  | Firefox / Chrome on `risingwave-console.op-dev` | connection timed out / site can't be reached |
+
+  Same signature as the office desk, from a different site, a different subnet and two
+  operating systems. Ping passes, TCP dies, on both 80 and 443 — exactly the ports the policy
+  governs. Two independent locations now, both in AD-registered corporate space, both absent
+  from the allow-list.
+
+  **The Cilium drop capture was planned to rule out ASA NAT and is no longer needed:** the
+  proposed change admits every AD-registered corporate subnet, so any address the tunnel
+  could present and still route back is covered.
+
 * **The policy IS enforced on hostPort traffic.** INFRA-1496 flagged this as unverified and
   told us to stage a throwaway policy to find out. The office outage is the proof: the
   gateway runs hostPort on a DaemonSet and the policy is dropping that traffic today.
