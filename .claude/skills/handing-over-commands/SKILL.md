@@ -195,6 +195,24 @@ Get-Content "$env:USERPROFILE\.wslconfig"
 wsl --shutdown
 ```
 
+## 9b. A rollback command in the same message gets pasted too
+
+On 2026-10-21 an IAM trust policy was updated correctly, the read-back proved it, and the
+**undo command printed underneath it "in case anything looks wrong" was pasted next** — which
+reverted the change that had just succeeded. Nothing failed; the transcript shows a clean
+apply followed by a clean revert, and the only tell is the absence of a second read-back.
+
+Doke pastes blocks in the order they appear. A fenced block is an instruction to run it.
+
+**Never put the undo in the same message as the do.** Either:
+
+* say where the backup is in prose, with **no fence** — "the old policy is in
+  /tmp/trust-before.json if we need it"; or
+* hold the rollback until it is actually needed and send it then.
+
+The same applies to "only run this if X fails" blocks of any kind. The condition is in the
+prose and the fence is in the hands.
+
 ## 9. An empty variable in a flag silently selects the default target
 
 ```bash
