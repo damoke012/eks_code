@@ -130,3 +130,5 @@
 - [On-prem platform component inventory](onprem-platform-component-inventory.md) — MEASURED on op-qa: 183 pods/20 namespaces/30 Kustomizations all Ready; CNI is Cilium, Istio is ambient, Rook-Ceph live, aws-iam-authenticator is Flux-managed
 - [Prod SSO is half landed](onprem-prod-sso-is-half-landed.md) — MEASURED: op-prod already runs the authenticator 3/3 with aws-auth and all bindings; only the kube-apiserver webhook flag is missing, because that half lives in Terraform not Git
 - [SSO placeholders break two tiers](onprem-sso-placeholders-break-two-tiers.md) — MEASURED: aws-auth on BOTH clusters maps operator and reader to ARNs containing literal `<FILL>` text; only admin works, unnoticed for months
+- [Office VLAN blocked to on-prem](office-vlan-blocked-to-onprem.md) — OUR cnp allow-corp-vpn-to-ingressgateway admitted only the VPN pool; FIXED dev #178 + QA #179 2026-10-20, PROD STILL OPEN; not the network team
+- [Corp subnets live in AD](corp-subnets-live-in-ad.md) — the authoritative USX subnet list is AD Sites and Services, one PowerShell line, any domain user; 10.10.0.0/16 covers both the office Wi-Fi and our workers
