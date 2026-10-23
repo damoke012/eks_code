@@ -1,38 +1,63 @@
-# Deploying a RisingWave SQL change: dev, QA and production
+# RisingWave pipelines: change it, test it, ship it
 
-**Audience:** anyone changing SQL pipelines in `usxpressinc/risingwave`.
-**Scope:** from a feature branch to objects existing in the RisingWave catalog on-prem.
-**Last verified:** 21 October 2026, measured at each hop on a real run.
-
----
-
-## In one paragraph
-
-You work on a branch and open a pull request. The moment it merges to `master`, everything
-to dev happens without anyone watching: the image builds, it is scanned, it is pushed to
-ECR, a timer promotes it, Argo CD applies it, and your SQL runs. That took about twenty
-minutes end to end. QA and production do not move on their own. A person runs the promotion
-for QA, and production additionally needs a second person to merge a pull request.
-
-> **Insert the Lucid diagram here.** Import source is in the repo at
-> `wip/rw-deploy-doc/lucid-import.mmd` (Lucid: File → Import → Mermaid).
+**Who this is for:** anyone who writes or changes SQL in the RisingWave pipelines.
+**What it covers:** one continuous path — your laptop, then dev, then QA, then production —
+and where every variable lives along the way.
+**Last verified:** 21 October 2026. Every timing on this page was measured on a real run.
 
 ---
 
-## Before you start
+## Start here
 
-| You need | Why |
+**One sentence:** you edit SQL on a branch, and the moment it merges to `master` it is on
+dev by itself; QA and production each need a person.
+
+Everything you need to open is in this table. Nothing else on this page asks you to find a
+link.
+
+| Where you need to get to | Link | What you do there |
+|---|---|---|
+| **The pipeline repository** | `github.com/usxpressinc/risingwave` | Edit SQL, open your pull request. Branch `master`. |
+| **Your build** | same repo → **Actions** → **build-sql-image** | Watch the image build after you merge. ~1 minute. |
+| **The chart repository** | `github.com/variant-inc/iaac-risingwave-onprem` | Where the running version of each environment is recorded. You do not normally edit it. |
+| **Promote to QA or production** | chart repo → **Actions** → **promote** → **Run workflow** | The only way QA or production move. |
+| **Argo CD — dev** | `argocd.op-dev.usxpress.io` | See whether the cluster has picked your change up. App is `risingwave-etl`. |
+| **Argo CD — QA** | `argocd.op-qa.usxpress.io` | Same, for QA. |
+| **Argo CD — production** | `argocd.op-prod.usxpress.io` | Same, for production. |
+| **RisingWave dashboard — dev** | `risingwave-dashboard.op-dev.usxpress.io` | The engine itself: streaming jobs, throughput, back-pressure. |
+| **RisingWave console — dev** | `risingwave-console.op-dev.usxpress.io` | Browse the catalog — your sources, materialised views and sinks. |
+| | `…op-qa…` / `…op-prod…` | The same two addresses exist for QA and production. |
+
+**If you are in the office rather than on VPN** and these addresses do not load, that was a
+cluster network policy and it was fixed on 20 October 2026. If it happens again, tell the
+platform team — it is not your machine and not DNS.
+
+### Who owns what
+
+| | Owner |
 |---|---|
-| Write access to `usxpressinc/risingwave` | to push a branch and merge a pull request |
-| Docker locally | to test the pipeline before pushing |
-| Access to `argocd.op-dev.usxpress.io` | to watch the deploy (optional but useful) |
-| `kubectl` with the op-dev kubeconfig | to verify the result in the database (optional) |
-
-Nothing else. You never need AWS credentials, and you never put a secret in the repo.
+| The SQL, and which variables the SQL needs | You |
+| Whether a variable is secret | You decide, platform proposes |
+| The value of a secret | Platform writes it. You never send one. |
+| The build, the promotion, the cluster | Platform |
 
 ---
 
-## Part 1 — Make the change
+## The whole path at a glance
+
+> **Insert the Lucid diagram here.**
+> Import source lives in the repo at `wip/rw-deploy-doc/lucid-import.mmd`
+> (in Lucid: **File → Import → Mermaid**).
+
+Read the diagram as three different kinds of step:
+
+- **Automatic** — happens with nobody watching: the build, dev's ten-minute promotion, Argo CD applying.
+- **A person runs it** — the QA promotion, the production promotion.
+- **A second person approves it** — the production pull request.
+
+---
+
+## Part 1 — Change it on your laptop
 
 1. **Branch off master.**
 
@@ -41,102 +66,132 @@ Nothing else. You never need AWS credentials, and you never put a secret in the 
    git checkout -b your-change
    ```
 
-2. **Edit the pipeline.**
+2. **Edit the SQL.**
 
-   | What | Where |
+   | What | Where it goes |
    |---|---|
    | RisingWave SQL | `pipelines/<NNN-Entity>/*.rw` |
    | Postgres SQL | `pipelines/<NNN-Entity>/*.sql` |
-   | Non-secret config | `pipelines/config/dev.env` and `qa.env` |
-   | Anything secret | AWS Secrets Manager. Ask the platform team. Never a file. |
 
-   Files apply in filename order, which is what the number prefixes are for.
+   Files apply in **filename order**. That is what the number prefixes are for — `100-source`
+   before `400-sink`.
 
-3. **Test locally** with the docker compose stack in the repo.
+3. **Run it locally** with the docker compose stack in the repository. This is the only place
+   you can iterate in seconds, so it is worth doing properly before you push.
 
-   Set `MONGODB_CONNECTION_STRING` to your local container rather than splitting it into
-   host, port, username and password. The same variable then works on your laptop and in
-   the cluster, and the cluster target is an Atlas `mongodb+srv` endpoint that has no port
-   to split out.
-
-4. **Push the branch.**
+4. **Push and open a pull request.**
 
    ```
    git push -u origin your-change
    ```
 
-5. **Open a pull request.**
+   GitHub shows a banner on the repository page after a push. Otherwise: **Pull requests** →
+   **New pull request** → base `master`, compare your branch → **Create pull request**.
 
-   GitHub shows a banner on the repository page after a push. Otherwise: **Pull requests**
-   tab → **New pull request** → base `master`, compare your branch → **Create pull request**.
+5. **Squash and merge.**
 
-6. **Merge it.** Squash and merge. If the repository requires a review, request one.
+**A branch push builds nothing.** Only `master` builds. Two reasons, and the second one is
+absolute: dev always takes the newest image, so branch builds would mean any branch landing on
+dev; and AWS only trusts `master`, so a branch build could not get credentials even if we
+wanted it to.
 
-**Nothing builds until the change is on `master`.** A branch push does not trigger the build,
-and the AWS trust policy accepts only `master`, so a branch could not get credentials even
-if it did.
-
-> **To exercise the pipeline without merging:** **Actions** tab → **build-sql-image** →
-> **Run workflow**, on `master`.
+> **To build without merging:** **Actions** → **build-sql-image** → **Run workflow**, on `master`.
 
 ---
 
-## Part 2 — What the build does
+## Part 2 — Variables: where each one lives
 
-Starts automatically on merge. Watch it under **Actions → build-sql-image**.
+This is where most first deploys fail, so it is worth five minutes.
 
-| Step | What it does | What stops it |
+Your SQL refers to a variable by wrapping its name in percent signs — `%MONGODB_DATABASE%`.
+Something has to supply a value for every one of those, in every environment. Where it comes
+from depends on **two separate questions**, and they cross:
+
+| | **Not secret** | **Secret** |
 |---|---|---|
-| 1 | Checks `pipelines/` actually contains SQL | An empty directory. An image applying nothing would deploy green and do nothing. |
-| 2 | Gets a short-lived AWS session over OIDC | Nothing is stored, so there is nothing to leak or rotate. |
-| 3 | Builds the image: the platform's applier base with your `pipelines/` copied in | You need no Dockerfile. |
-| 4 | Scans for critical vulnerabilities | A critical finding, while the image is still local. |
-| 5 | Pushes to ECR, identified by digest | A digest names content, so it cannot be moved underneath you. |
+| **You own it** | `pipelines/config/dev.env`, `qa.env`, `prod.env` — in Git, your pull request | AWS Secrets Manager. You give platform the **key name**; they write the value once. |
+| **Platform owns it** | In Git, platform's pull request | AWS Secrets Manager, platform writes the value |
 
-The build takes about a minute.
+Two rules fall out of that grid and save a lot of argument:
+
+- **Who owns it** decides who raises the pull request.
+- **Whether it is secret** decides the destination. "Platform owns it" never means we hold the
+  value; "you own it" never means it goes in Git.
+
+### Locally versus on-prem
+
+| | On your laptop | On dev, QA and production |
+|---|---|---|
+| Non-secret values | your local `.env` for docker compose | `pipelines/config/<env>.env`, committed |
+| Secrets | your own local credentials, never committed | AWS Secrets Manager, pulled into the cluster automatically and handed to the job as environment variables |
+| Who wires it up | you | automatic, once the key exists |
+
+The important part: **the variable name is identical in both places.** If your SQL says
+`%MONGODB_CONNECTION_STRING%`, that is the name locally and the name in Secrets Manager. That
+is the whole point of the percent-sign tokens — the same SQL file runs in both places.
+
+### Three mistakes that cost real days
+
+1. **Do not split a connection string into parts.** Use one variable holding the whole string.
+   The on-prem MongoDB target is an Atlas `mongodb+srv` address, which **has no port at all** —
+   so SQL referring to `%MONGODB_HOST%` and `%MONGODB_PORT%` can never be given a working
+   value. This is exactly what stopped the pipeline on 21 October. One variable, whole string.
+2. **Send key names, never values.** A credential pasted into Teams or email is in a system we
+   do not control, and these credentials are usually shared copies — so one paste is everyone's
+   problem, not just yours.
+3. **`LIKE '%ABC%'` in your SQL will be read as a variable** called `ABC` and stop the run. Any
+   capitalised word between percent signs is treated as a variable name. Write the pattern a
+   different way.
+
+### What happens if a value is missing
+
+The apply job checks every variable your SQL asks for **before** it applies anything, and stops
+if one is missing or empty:
+
+```
+ERROR: required runtime values are missing or empty: MONGODB_HOST, MONGODB_PASSWORD
+```
+
+That is the message you want. It names them. The alternative — substituting a blank, writing to
+nowhere and reporting success — is what this check exists to prevent.
 
 ---
 
-## Part 3 — How dev picks it up
+## Part 3 — How it reaches dev
 
-Two mechanisms, running independently.
+Automatic. Roughly twenty minutes, and the only reason it is not two is a ten-minute timer.
 
-1. **The promotion job runs every ten minutes.** It reads the ECR repository, takes the most
-   recently pushed image, and compares that digest with the one `values-dev.yaml` names.
+| # | What happens | Notes |
+|---|---|---|
+| 1 | **The build starts** on your merge | **Actions → build-sql-image**, about a minute |
+| 2 | It refuses an empty `pipelines/` directory | An image applying nothing would deploy green and do nothing |
+| 3 | It takes a short-lived AWS session | Nothing is stored, so nothing can leak or expire |
+| 4 | It builds the image — platform's applier base with your `pipelines/` copied in | You write no Dockerfile |
+| 5 | It scans for critical vulnerabilities | A critical finding stops it while the image is still local |
+| 6 | It pushes to ECR, named by **digest** | A digest names content, so nothing can be swapped underneath you |
+| 7 | **A job runs every ten minutes**, takes the newest image, and writes that digest into `values-dev.yaml` | You will see a commit reading `promote: dev to sha256:…` |
+| 8 | **Argo CD sees the commit** and replaces the apply job | The digest changed, so the job changed; Kubernetes cannot edit a job in place, so Argo deletes and recreates it. **This is also why a previously failed job never blocks the next attempt.** |
+| 9 | **The job runs your SQL** — loads `config/dev.env`, checks the values, applies in filename order | |
+| 10 | **The job deletes itself on success**, and the log goes with it | If you want the log, read it while the pod still exists |
 
-2. **If they differ it edits the file and merges itself.** You will see a commit on the chart
-   repository reading `promote: dev to sha256:…`. It verifies its own edit landed before
-   committing, so a silent miss cannot report success.
-
-3. **Argo CD notices the commit.** It polls the chart repository and compares what Git says
-   against what is running. The Application is `risingwave-etl`.
-
-4. **Argo replaces the apply job.** The digest changed, so the job's pod template changed,
-   and a Kubernetes job's template cannot be edited in place. Argo deletes the old job and
-   creates a new one. **This is also why a previously failed job does not block the next
-   attempt.**
-
-5. **The job runs your SQL.** It loads `pipelines/config/dev.env`, checks every required
-   value is present and non-empty, then applies your files in filename order.
-
-6. **The job deletes itself on success,** and the log goes with it. If you want the log,
-   read it while the pod still exists.
-
-**Measured on 21 October 2026**
+**Measured 21 October 2026**
 
 | Event | Time (UTC) |
 |---|---|
-| Pushed to master | 23:24 |
+| Merged to `master` | 23:24 |
 | Image in ECR | 23:24:53 |
-| Promotion committed the digest | 23:36:22 |
-| Apply job completed | 13 seconds after it started |
+| Promotion wrote the digest | 23:36:22 |
+| Apply job finished | 13 seconds after it started |
 
 ---
 
-## Part 4 — Proving it worked
+## Part 4 — Prove it actually worked
 
-A green job means the script exited zero. What proves your change is the objects existing in
-the database.
+A green job means the script exited zero. What proves your change is **the objects existing in
+the database.** Easiest check is the console — `risingwave-console.op-dev.usxpress.io` — which
+lists sources, materialised views and sinks.
+
+If you prefer the command line:
 
 ```
 kubectl -n risingwave exec postgres-postgresql-0 -- \
@@ -146,50 +201,66 @@ kubectl -n risingwave exec postgres-postgresql-0 -- \
 
 Swap `rw_sinks` for `rw_sources` or `rw_materialized_views`.
 
-Two details that catch people: the frontend listens on **4567**, not RisingWave's default
-4566; and the frontend container has no `psql` client, which is why this runs from the
-postgres pod in the same namespace.
+Two details that catch everyone: the frontend listens on **4567**, not RisingWave's documented
+4566; and the frontend container has no `psql`, which is why this runs from the postgres pod
+next door. The database is called `dev` **in every environment** — it is not the environment
+name.
 
 ---
 
-## Part 5 — Promoting to QA
+## Part 5 — Promote to QA
 
 QA does not move on a timer. A person moves it.
 
-1. Go to the **chart repository** → **Actions** → **promote** → **Run workflow**.
-2. Type `qa` in the **only** box.
-3. Run it.
+1. Chart repository → **Actions** → **promote** → **Run workflow**
+2. Type `qa` in the **only** box
+3. Run it
 
-QA takes **the digest dev is currently running**, not the newest image in ECR. Nothing is
-rebuilt between environments, so what QA runs is exactly what dev ran. That is what makes
-dev a real gate rather than a label.
+QA takes **the digest dev is currently running** — not the newest image in ECR. Nothing is
+rebuilt between environments, so QA runs exactly the bytes dev ran. That is what makes dev a
+real gate rather than a label.
 
-The QA promotion merges itself once it runs.
+The QA promotion merges itself once it runs. Then check `argocd.op-qa.usxpress.io` and the QA
+console, the same way you checked dev.
 
 ---
 
-## Part 6 — Promoting to production
+## Part 6 — Promote to production
 
 Same workflow, with `prod` in the **only** box.
 
-Production takes **the digest QA is running**, and the workflow **opens a pull request rather
-than merging it**. Someone else merges that pull request. This is deliberate.
+Production takes **the digest QA is running**, and the workflow **opens a pull request instead
+of merging it.** Somebody else merges that pull request — two people, deliberately.
 
-A scheduled run carries no inputs, so the timer can only ever move dev. One tick can never
-carry an image from ECR all the way to a production pull request.
+The timer can only ever move dev: a scheduled run carries no inputs. One tick can never carry
+an image from ECR all the way to a production pull request.
 
 ---
 
-## Troubleshooting
+## When something goes wrong
 
 | Where | What you see | What it actually means |
 |---|---|---|
-| Build, OIDC step | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The repository or branch is not on the AWS trust list. Platform fixes it. The wording points at IAM permissions, but the cause is the claim not matching. |
+| Apply job | `required runtime values are missing or empty: …` | Your SQL asks for variables nothing supplies. The message names them. Non-secret ones go in `config/<env>.env`; ask platform for anything secret. |
+| Apply job | Job `Failed`, pod shows `Error` | Read the pod log now. A successful job deletes itself, so a job you can still see either failed or is still running. |
+| Argo CD | `Synced` and `Healthy`, but nothing changed | The promotion has not run yet. Look for a recent `promote:` commit in the chart repository before looking anywhere else. |
+| Argo CD | Application red, repository error | A deploy key is missing or wrong. Platform fixes it. |
+| Build, OIDC step | `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The repository or branch is not on the AWS trust list. Platform fixes it. The wording blames permissions; the cause is the branch. |
 | Build, first step | `Refuse to build an empty pipeline` | Nothing under `pipelines/`. Usually a path typo. |
-| Apply job | `required runtime values are missing or empty: …` | Your SQL references variables nothing supplies. The message names them. Non-secret ones go in `config/dev.env`; ask platform for anything secret. |
-| Apply job | Job is `Failed`, pods show `Error` | Read the pod log before it is garbage collected. The job itself is removed on success, so a job you can still see either failed or is running. |
-| Argo CD | `Synced` and `Healthy`, but nothing changed | The promotion has not run yet. Check the chart repository for a recent `promote:` commit before looking anywhere else. |
-| Argo CD | Application red, repository error | The deploy key for that repository is missing or wrong. Platform fixes it. |
+| Browser | The dev or QA address does not load from the office | Cluster network policy, fixed 20 October 2026. Tell platform if it returns. |
+
+---
+
+## What is deliberately not automatic
+
+A plainly honest list — each of these is slower on purpose.
+
+| | Why |
+|---|---|
+| Branches do not build | Dev takes the newest image, so branch builds would mean every branch push landing on dev |
+| QA needs a person | So QA receives something dev has actually run |
+| Production needs two | One to start it, one to merge the pull request |
+| The applier refuses an empty value | It stops rather than substituting a blank. A pipeline that writes nowhere while reporting success is worse than one that fails. |
 
 ---
 
@@ -198,39 +269,44 @@ carry an image from ECR all the way to a production pull request.
 | Thing | Value |
 |---|---|
 | Pipeline repository | `usxpressinc/risingwave`, branch `master` |
+| Chart repository | `variant-inc/iaac-risingwave-onprem` |
 | Build workflow | `.github/workflows/build-sql-image.yml` |
-| Triggers on | pushes to `master` touching `pipelines/**` |
-| Image repository | ECR, identified by digest, tagged with the commit SHA |
-| Argo CD Application | `risingwave-etl` |
-| Namespace (apply job) | `app-risingwave` |
-| Namespace (RisingWave itself) | `risingwave` |
+| Builds on | pushes to `master` touching `pipelines/**` |
+| Image | ECR, named by digest, tagged with the commit SHA |
+| Argo CD application | `risingwave-etl` |
+| Namespace — apply job | `app-risingwave` |
+| Namespace — RisingWave | `risingwave` |
 | Apply job | `etl-pipeline-apply` |
-| Argo CD, dev | `argocd.op-dev.usxpress.io` |
+| Database name, every environment | `dev` |
+| RisingWave frontend port | 4567 |
 
 ---
 
-## What is deliberately not automatic
+## Words used on this page
 
-| | Why |
-|---|---|
-| Branches do not build | Promotion takes the newest image in ECR. If branches built, any branch push would land on dev and dev would stop meaning anything. |
-| QA needs a person | So that QA receives something dev has actually run. |
-| Production needs two people | One to start it, one to merge the pull request. |
-| The applier refuses empty values | It aborts rather than substituting a blank. A pipeline that writes nowhere while reporting success is worse than one that fails. |
-
----
-
-## Glossary
-
-**Digest** — a hash naming an image by its content. Unlike a tag, it cannot be repointed, so
-"the digest QA is running" is an exact statement.
+**Digest** — a hash naming an image by its content. Unlike a tag it cannot be repointed, so
+"the digest QA is running" is an exact statement about exact bytes.
 
 **Promotion** — copying a digest from one environment's values file to the next. No build, no
 rebuild, no new image.
 
 **Apply job** — the Kubernetes job that connects to RisingWave and runs your SQL files in
-order. It is created by Argo CD and removed when it succeeds.
+order. Argo CD creates it; it removes itself when it succeeds.
 
-**Applier image** — the platform-maintained base containing `psql` and the apply script. Your
-SQL is copied into it at build time, so a fix to the script reaches every pipeline on its
-next build.
+**Applier image** — the platform-maintained base holding `psql` and the apply script. Your SQL
+is copied into it at build time, so a fix to the script reaches every pipeline on its next
+build.
+
+**Secrets Manager** — where AWS holds credentials. The cluster pulls them in and hands them to
+your job as environment variables. You never see a value and never put one in Git.
+
+---
+
+## Next
+
+| You want to | Do this |
+|---|---|
+| Add a pipeline | Part 1, then send platform the **key names** your SQL needs and which are secret |
+| Get your change to QA | Part 5 — you can run it yourself |
+| Get your change to production | Part 6, then ask someone to merge the pull request |
+| Report something broken | Platform team, with the Argo CD application name and the pod log |
