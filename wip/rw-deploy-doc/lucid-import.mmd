@@ -1,0 +1,40 @@
+%% Paste into Lucidchart: File > Import > Mermaid  (or the "Diagram as code" panel)
+%% RisingWave SQL pipeline: feature branch to dev, QA and production.
+flowchart TD
+    A["Create a feature branch<br/>from master"] --> B["Edit pipelines/*.rw, *.sql<br/>and pipelines/config/dev.env"]
+    B --> C["Test locally<br/>docker compose"]
+    C --> D["Push the branch"]
+    D --> E["Open a pull request<br/>base: master"]
+    E --> F{"Review"}
+    F -->|changes requested| B
+    F -->|approved| G["Squash and merge to master"]
+
+    G --> H["build-sql-image runs automatically<br/>triggered by push to master on pipelines/**"]
+    H --> I{"pipelines/ has SQL?"}
+    I -->|no| X1["Build stops"]
+    I -->|yes| J["Get AWS access via OIDC<br/>no stored secret"]
+    J --> K["Build image<br/>applier base + your SQL"]
+    K --> L{"Critical vulnerabilities?"}
+    L -->|yes| X2["Build stops before publishing"]
+    L -->|no| M["Push to ECR<br/>identified by digest"]
+
+    M --> N["promote workflow, every 10 minutes<br/>finds the newest digest"]
+    N --> O["Commits the digest into values-dev.yaml<br/>and merges itself"]
+    O --> P["Argo CD detects the commit<br/>polls the chart repo"]
+    P --> Q["Argo replaces etl-pipeline-apply<br/>the pod template changed"]
+    Q --> R{"All required values present?"}
+    R -->|no| X3["Job fails with the missing names"]
+    R -->|yes| S["apply.sh runs your SQL<br/>in filename order"]
+    S --> T["Sources, views and sinks<br/>exist in the RisingWave catalog"]
+
+    T --> U["Promote to QA<br/>a person runs promote with only=qa"]
+    U --> V["QA takes the digest dev is running<br/>nothing is rebuilt"]
+    V --> W["Promote to production<br/>a person runs promote with only=prod"]
+    W --> Y["Opens a pull request<br/>a second person merges it"]
+
+    classDef auto fill:#d7f0ec,stroke:#0f766e,color:#07332f
+    classDef human fill:#fdf0d8,stroke:#b45309,color:#4a2708
+    classDef stop fill:#fde2e4,stroke:#9f1239,color:#4a0a1c
+    class H,J,K,M,N,O,P,Q,S,T auto
+    class A,B,C,D,E,F,G,U,V,W,Y human
+    class X1,X2,X3 stop
