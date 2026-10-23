@@ -19,7 +19,7 @@ link.
 |---|---|---|
 | **The pipeline repository** | `github.com/usxpressinc/risingwave` | Edit SQL, open your pull request. Branch `master`. |
 | **Your build** | same repo → **Actions** → **build-sql-image** | Watch the image build after you merge. ~1 minute. |
-| **The chart repository** | `github.com/variant-inc/iaac-risingwave-onprem` | Where the running version of each environment is recorded. You do not normally edit it. |
+| **The chart repository** | `github.com/variant-inc/risingwave-pipeline` | Where the running version of each environment is recorded. You do not normally edit it. |
 | **Promote to QA or production** | chart repo → **Actions** → **promote** → **Run workflow** | The only way QA or production move. |
 | **Argo CD — dev** | `argocd.op-dev.usxpress.io` | See whether the cluster has picked your change up. App is `risingwave-etl`. |
 | **Argo CD — QA** | `argocd.op-qa.usxpress.io` | Same, for QA. |
@@ -269,7 +269,7 @@ A plainly honest list — each of these is slower on purpose.
 | Thing | Value |
 |---|---|
 | Pipeline repository | `usxpressinc/risingwave`, branch `master` |
-| Chart repository | `variant-inc/iaac-risingwave-onprem` |
+| Chart repository | `variant-inc/risingwave-pipeline`, chart at `deploy/chart` |
 | Build workflow | `.github/workflows/build-sql-image.yml` |
 | Builds on | pushes to `master` touching `pipelines/**` |
 | Image | ECR, named by digest, tagged with the commit SHA |
