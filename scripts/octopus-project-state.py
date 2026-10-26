@@ -97,6 +97,58 @@ if items:
 else:
     print("latest release: none")
 
+# --- who changed what, and when ----------------------------------------------
+# A disabled project is a DECISION with an author. The audit log is the only
+# place that records it, and the same trail dates the variable, which decides
+# whether "the variable was never scoped to production" was ever true.
+EVENTS = int(arg("--events", "0"))
+if EVENTS:
+    users = {}
+
+    def whom(ev):
+        n = ev.get("Username") or ev.get("UserName")
+        if n:
+            return n
+        uid = ev.get("UserId")
+        if not uid:
+            return "?"
+        if uid not in users:
+            try:
+                users[uid] = api(f"/api/users/{uid}").get("DisplayName", uid)
+            except SystemExit:
+                users[uid] = uid
+        return users[uid]
+
+    # The parameter name for "events about this document" has changed across
+    # Octopus versions. Try each and SAY which one answered, so an empty result
+    # is distinguishable from a query the server ignored.
+    for doc, label in ((project["Id"], "project"),
+                       (project["VariableSetId"], "variable set")):
+        print(f"\n-- audit trail for the {label} ({doc})")
+        got = None
+        for param in ("regarding", "documents", "regardingAny"):
+            try:
+                r = session.get(f"{OCTO_URL}/api/{SPACE_ID}/events",
+                                params={param: doc, "take": EVENTS})
+            except Exception as e:
+                print(f"   {param}: request failed: {e}")
+                continue
+            if not r.ok:
+                print(f"   {param}: HTTP {r.status_code}")
+                continue
+            items = (r.json() or {}).get("Items", [])
+            print(f"   {param}: HTTP 200, {len(items)} events")
+            if items:
+                got = items
+                break
+        if got is None:
+            print("   NOT MEASURED - no parameter spelling returned events.")
+            print("   This is the API, not the history: read the audit log in the UI.")
+            continue
+        for ev in got:
+            msg = " ".join((ev.get("Message") or "").split())
+            print(f"   {ev.get('Occurred','?')[:19]}  {whom(ev):22.22}  {msg[:110]}")
+
 print()
 if disabled:
     print("BLOCKED - the project is DISABLED. No release can be created and no")
