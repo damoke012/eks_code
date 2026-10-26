@@ -116,7 +116,9 @@ if not found:
 
 if not APPLY:
     print("\nDRY RUN. Nothing was written.")
-    print("To enable:  python3 " + os.path.basename(__file__) +
+    # The absolute path, not the basename: a bare filename is read against
+    # whatever directory the operator happens to be in and resolves nowhere.
+    print("To enable:  python3 " + os.path.abspath(__file__) +
           f" --project {PROJECT_SLUG} --apply")
     sys.exit(0)
 
