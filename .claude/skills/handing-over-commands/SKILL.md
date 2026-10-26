@@ -104,6 +104,16 @@ fence because it looked like command output. It was pasted and ran:
 `sg-0c8f8db29b16a1477: command not found`. A finding is prose however much it looks like
 a terminal line. Only lines meant to be executed go in the fence.
 
+⚠️ **Recurred again 2026-10-26, in a session with this skill already loaded.** The
+instruction to interrupt a running wizard was written as a fenced block containing
+`Ctrl-C`. It was pasted, and ran: `Ctrl-C: command not found`. **A keystroke is not a
+command**, and a key name is not a line. Write it in prose — "press Ctrl-C" — never in
+a fence.
+
+Three instances now: quoted output, a measured value, and a keystroke. The shape they
+share is *something that belongs on a terminal without being a line to execute*. Before
+any fence, ask of every line: is this something the shell should run? If not, it is prose.
+
 ## 6. A guard is a measurement, and it can measure the wrong thing
 
 ```bash
