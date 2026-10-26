@@ -147,6 +147,14 @@ if EVENTS:
             print("   NOT MEASURED - no parameter spelling returned events.")
             print("   This is the API, not the history: read the audit log in the UI.")
             continue
+        # Free: the list response is already here. Print what an event actually
+        # carries, and its Links, rather than guessing another URL -- four
+        # spellings were guessed before this and all four returned NOT MEASURED.
+        if got:
+            print(f"   event fields: {sorted(got[0].keys())}")
+            lk = got[0].get("Links") or {}
+            if lk:
+                print(f"   event links:  {lk}")
         for ev in got:
             msg = " ".join((ev.get("Message") or "").split())
             print(f"   {ev.get('Occurred','?')[:19]}  {whom(ev):22.22}  {msg[:110]}")
@@ -167,6 +175,7 @@ if EVENTS:
                     except Exception:
                         continue
                     if not r0.ok:
+                        print(f"        raw {path}: HTTP {r0.status_code}")
                         continue
                     doc0 = r0.json() or {}
                     print(f"        keys: {sorted(doc0.keys())}")

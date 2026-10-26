@@ -183,6 +183,34 @@ project and when, and when that variable was added. Same place, same filter.
 So the remaining work on INFRA-1661 is no longer technical: **enable the project,
 re-snapshot or cut a release, deploy, verify.** Everything before that is proven.
 
+### Who disabled iaac-talos — narrowed, 2026-10-26
+
+**Settled: the variable was added today.** The variable set's audit trail shows
+`2026-10-26T20:53:27 doke@usxpress.com` and nothing before it since **2026-09-17**.
+So §1's diagnosis — the flag is enabled by an Octopus variable that was never scoped
+to production — **was correct**, and prod's flag is absent for the recorded reason.
+
+**The disable: last project modification is `2026-10-22T13:00:29` by `lazy`**, a service
+account. `lazy` also modified this project at **13:00** on 10-03 and 10-14, separate from
+the Renovate release pairs at other times of day. That cadence is a scheduled job, not a
+person at a keyboard.
+
+⛔ **Eliminated: it is not declared in `variant-inc/iaac-octopus-config`.** The complete
+file tree is `spaces`, `environments`, `feeds`, `lifecycles`, `script_modules`,
+`worker_pools`, `vars` — **no projects**, and no path mentions talos. This extends
+[[octopus-config-builds-the-stage-not-the-play]]: that repo manages no project variables
+*and no projects*. Measured from a full tree listing, not a code search — `gh search code`
+returned nothing at all on GHE, which is not an answer.
+
+⚠️ **The API will not give up the diff.** Four endpoint spellings
+(`/events/{id}/details`, `/api/events/{id}/details`, and the event document by id in both
+space-scoped and global form) all failed. The audit UI has it:
+**Configuration → Audit**, filter project `iaac-talos`, expand `2026-10-22 13:00:29`.
+
+⚠️ **`TfApply` is now `true` for `qa`, `qa2` AND `production`** — `false` only at the
+`(all)` default. The recorded note that dev and QA inherit `false` is **stale**: dev is
+the only environment left that does not apply for real.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
