@@ -267,7 +267,44 @@ deployed is not a feature that failed**, and this is the same shape as
 `(all)` default. The recorded note that dev and QA inherit `false` is **stale**: dev is
 the only environment left that does not apply for real.
 
-## ⛔ 1d. STOPPED at stage 6 — Octopus has never deployed to Production
+## 1d. ⛔ WITHDRAWN — Production HAS been deployed. The stop was wrong.
+
+**Measured 2026-10-26 from `/api/Spaces-2/progression`:**
+
+| Environment | Release | When | State |
+|---|---|---|---|
+| development | `0.5.0` | 2026-09-17T17:25 | Success |
+| **production** | **`0.1.3-fix-drop-duplicate-risingwave-irsa.1.2`** | **2026-09-14T15:45** | **Success** |
+| qa | `0.2.0-feat-INFRA-1661-apiserver-authenticator` | 2026-09-14T16:37 | Success |
+| qa2 | `0.5.0` | 2026-09-17T21:30 | Failed |
+| dpl | `0.1.0-feature-op-usxpress-dev.1.51` | 2026-03-30 | Failed |
+
+**The Dashboard shows the ten most recent releases. Prod's release is older than all
+ten**, so its Production column was blank — which I read as "never deployed". An absent
+row in a paginated view is not an absence. That is CLAUDE.md rule 5, made twice in one
+evening by the same person who had just written it into two other notes.
+
+✅ **The delivery path to production exists and has succeeded.** Production carries **29**
+`TF_VAR_*`, against QA's 29 — it is configured, not neglected. And `iaac-talos` having no
+file naming prod is **expected**: the module is environment-generic and Octopus injects
+`TF_VAR_*` as `env.auto.tfvars`.
+
+⚠️ **INFRA-1663 needs re-reading in that light.** "No Talos machine config in iaac-talos"
+may describe the generic-module design rather than a gap. Do not plan around it until
+someone reads the ticket against this measurement.
+
+### 🔴 The real gap: prod's CODE predates the feature
+
+QA runs `0.2.0-feat-INFRA-1661-apiserver-authenticator` — the branch that did this work.
+**Production runs `0.1.3`, which is older.** So the variable alone may change nothing:
+if prod's deployed module has no `enable_aws_iam_authenticator` support, `TF_VAR_*` for it
+is read and discarded, and the deploy reports Success.
+
+**This is why the earlier "minimal delta, don't cut a new release" advice was also wrong
+for this case.** Prod needs a code bump regardless — from `0.1.3` to a release that
+contains the authenticator module code.
+
+
 
 **2026-10-26, from the project Dashboard.** Every Production cell on `iaac-talos` is a
 `Deploy...` button, not a deployed release. So is QA. So is Staging.
