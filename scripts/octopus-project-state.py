@@ -157,6 +157,28 @@ if EVENTS:
                 continue
             eid = ev.get("Id")
             shown = False
+            # First ask the event itself what it carries. Guessing endpoint
+            # spellings produced four NOT MEASUREDs; printing the document's
+            # own keys says what exists instead of what we hoped for.
+            if "--raw" in sys.argv:
+                for path in (f"/api/{SPACE_ID}/events/{eid}", f"/api/events/{eid}"):
+                    try:
+                        r0 = session.get(f"{OCTO_URL}{path}")
+                    except Exception:
+                        continue
+                    if not r0.ok:
+                        continue
+                    doc0 = r0.json() or {}
+                    print(f"        keys: {sorted(doc0.keys())}")
+                    cd = doc0.get("ChangeDetails") or {}
+                    if cd:
+                        print(f"        ChangeDetails keys: {sorted(cd.keys())}")
+                        for df in (cd.get("Differences") or [])[:12]:
+                            print(f"          {df}")
+                        shown = True
+                    break
+            if shown:
+                continue
             for path in (f"/api/{SPACE_ID}/events/{eid}/details",
                          f"/api/events/{eid}/details"):
                 try:
