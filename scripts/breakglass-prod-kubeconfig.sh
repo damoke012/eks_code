@@ -33,23 +33,49 @@ trap 'rm -f "$TC"' EXIT
 command -v talosctl >/dev/null || { echo "!! talosctl not on PATH" >&2; exit 2; }
 command -v aws      >/dev/null || { echo "!! aws not on PATH" >&2; exit 2; }
 
-# --- resolve the profile by account, not by name -----------------------------
-PROFILE=""
+# --- resolve the profile by CAPABILITY, not by name or by account ------------
+# Measured 2026-10-26: THREE profiles are configured for 937464026810
+# (ops-controller, usx-prod, op-prod) and they are different permission sets,
+# not aliases. op-prod is op-prod-platform-admin, which holds only
+# sts:GetCallerIdentity -- it authenticates and is then refused the secret. So
+# "first profile that resolves to the account" is a coin toss that fails
+# mid-script on an AccessDenied. Take the first that can do the actual job.
+CONFIGURED=""
 for P in $(aws configure list-profiles); do
-  ID=$(aws --profile "$P" sts get-caller-identity --query Account --output text 2>/dev/null || true)
-  if [ "$ID" = "$ACCOUNT" ]; then PROFILE="$P"; break; fi
+  W=$(aws configure get sso_account_id --profile "$P" 2>/dev/null || true)
+  [ "$W" = "$ACCOUNT" ] && CONFIGURED="${CONFIGURED}${CONFIGURED:+ }$P"
 done
-if [ -z "$PROFILE" ]; then
-  echo "!! no configured AWS profile currently resolves to account $ACCOUNT." >&2
-  echo "   Run 'aws sso login --profile <the prod profile>' first, then re-run." >&2
+if [ -z "$CONFIGURED" ]; then
+  echo "!! NO profile in ~/.aws/config is configured for account $ACCOUNT." >&2
+  echo "   A login cannot fix this; the profile has to be added first." >&2
   exit 2
 fi
-echo "profile:  $PROFILE  (account $ACCOUNT)"
+echo "profiles for $ACCOUNT: $CONFIGURED"
 
-# --- fetch the talosconfig ---------------------------------------------------
-aws --profile "$PROFILE" --region "$REGION" secretsmanager get-secret-value \
-    --secret-id "$SECRET" --query SecretString --output text > "$TC"
 chmod 600 "$TC"
+PROFILE=""; LIVE=""
+for P in $CONFIGURED; do
+  ID=$(aws --profile "$P" sts get-caller-identity --query Account --output text 2>/dev/null || true)
+  [ "$ID" = "$ACCOUNT" ] || continue
+  LIVE="${LIVE}${LIVE:+ }$P"
+  if aws --profile "$P" --region "$REGION" secretsmanager get-secret-value \
+       --secret-id "$SECRET" --query SecretString --output text > "$TC" 2>/dev/null; then
+    PROFILE="$P"; break
+  fi
+done
+if [ -z "$LIVE" ]; then
+  echo "!! none of [$CONFIGURED] has a live session." >&2
+  echo "   Run: aws sso login --profile ${CONFIGURED%% *}" >&2
+  exit 2
+fi
+if [ -z "$PROFILE" ]; then
+  echo "!! signed in as [$LIVE] but none of them may read $SECRET." >&2
+  echo "   This is the platform-admin grant, not a missing secret. Either run" >&2
+  echo "   scripts/idc-grant-secretsmanager.sh op-prod, or sign in to another" >&2
+  echo "   profile from: $CONFIGURED" >&2
+  exit 2
+fi
+echo "profile:  $PROFILE  (account $ACCOUNT, and it could read the secret)"
 
 # A green fetch is not a usable value: prod stood up with a literal
 # PLACEHOLDER_POPULATED_BY_TERRAFORM_ON_FIRST_APPLY in this secret, and
