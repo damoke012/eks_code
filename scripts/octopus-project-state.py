@@ -179,6 +179,12 @@ if EVENTS:
                         continue
                     doc0 = r0.json() or {}
                     print(f"        keys: {sorted(doc0.keys())}")
+                    # Who is not enough: a service account is a credential, not
+                    # an actor. The caller's fingerprint says WHAT used it.
+                    print(f"        service={doc0.get('IsService')} "
+                          f"ip={doc0.get('IpAddress')} "
+                          f"auth={doc0.get('IdentityEstablishedWith')}")
+                    print(f"        agent={str(doc0.get('UserAgent'))[:120]}")
                     cd = doc0.get("ChangeDetails") or {}
                     if cd:
                         print(f"        ChangeDetails keys: {sorted(cd.keys())}")

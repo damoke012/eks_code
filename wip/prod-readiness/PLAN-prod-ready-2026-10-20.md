@@ -202,10 +202,26 @@ file tree is `spaces`, `environments`, `feeds`, `lifecycles`, `script_modules`,
 *and no projects*. Measured from a full tree listing, not a code search — `gh search code`
 returned nothing at all on GHE, which is not an answer.
 
-⚠️ **The API will not give up the diff.** Four endpoint spellings
-(`/events/{id}/details`, `/api/events/{id}/details`, and the event document by id in both
-space-scoped and global form) all failed. The audit UI has it:
-**Configuration → Audit**, filter project `iaac-talos`, expand `2026-10-22 13:00:29`.
+### ✅ ANSWERED — `lazy` disabled it on 2026-10-22 at 13:00:29
+
+```
+2026-10-22T13:00:29  lazy  Project iaac-talos was modified
+  ChangeDetails.Differences: {'path': '/IsDisabled', 'op': 'replace', 'value': True}
+```
+
+Not inference — the audit event's own diff. A single-path `replace` op, which is the
+shape of a programmatic PATCH rather than a UI save of the whole document.
+
+⚠️ **"Who" is answered; "what" is not.** `lazy` is a service account — a credential, not
+an actor. The same account creates the Renovate releases. The event carries `IpAddress`,
+`UserAgent`, `IsService` and `IdentityEstablishedWith`, and those name the caller.
+
+⚠️ **Earlier claim corrected:** "the API will not give up the diff, four endpoint
+spellings failed." Wrong. The run that produced those NOT MEASUREDs used the copy on
+disk, which predated the `--raw` code — the script had not been re-pulled. The endpoint
+worked on the first try once the feature was actually present. **A feature that was never
+deployed is not a feature that failed**, and this is the same shape as
+[[edited-copy-is-not-the-shipped-copy]].
 
 ⚠️ **`TfApply` is now `true` for `qa`, `qa2` AND `production`** — `false` only at the
 `(all)` default. The recorded note that dev and QA inherit `false` is **stale**: dev is
