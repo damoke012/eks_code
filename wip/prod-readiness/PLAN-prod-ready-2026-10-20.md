@@ -157,6 +157,32 @@ configured profile resolves to the account"), which cannot distinguish an unconf
 profile from an expired session — and only one of those is fixed by logging in. Fixed
 by reading `sso_account_id` from `~/.aws/config`, which needs no session.
 
+### Cutover state at the end of 2026-10-26
+
+| Stage | State |
+|---|---|
+| Webhook file on all 3 prod control-plane nodes | ✅ PROVEN, 1909 bytes each |
+| Break-glass | ✅ works, via the `ops-controller` profile |
+| `op-prod-platform-admin` grant | ⚪ N/A — **no permission set by that name exists** |
+| `TF_VAR_enable_aws_iam_authenticator=true` scope production | ✅ **PRESENT** |
+| Re-snapshot a release | ⛔ **the Octopus project is DISABLED** |
+| Deploy to Production | ⛔ same |
+
+⚠️ **The variable's provenance is unknown, and it matters.** It reads
+`Already present for production`, but whether it was added during the 2026-10-26
+wizard run or predates today was not captured. **If it predates today, then §1's
+diagnosis — "enabled by an Octopus variable that was never scoped to
+production" — is WRONG**, and the flag is absent for a different reason: no
+deploy has carried it. The last release is `0.5.1-renovate-all-minor-patch.1.261`
+from 2026-10-21 and every visible release is a Renovate bump, which fits a
+project that was parked rather than one that is deploying.
+
+**One Octopus audit-log query settles both questions** — who disabled the
+project and when, and when that variable was added. Same place, same filter.
+
+So the remaining work on INFRA-1661 is no longer technical: **enable the project,
+re-snapshot or cut a release, deploy, verify.** Everything before that is proven.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
