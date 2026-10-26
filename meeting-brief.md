@@ -44,7 +44,8 @@ Last refreshed: 2026-10-26 (evening, after measuring op-prod for SSO readiness).
 - The service CIDR overlaps four registered corporate subnets. Open, ticketed in Sprint 7.
 - Pricing app: MongoDB Atlas is reached over AWS PrivateLink (10.16.x.x). The on-prem route to it goes via the transit gateway; one firewall rule and one /24 are needed.
 - RisingWave on-prem has no promotion gate: every cluster tracks main, so merging is deploying to prod.
-- Alerts on-prem reach nobody: no Alertmanager receivers wired on dev; prod pending.
+- Alerts on-prem reach nobody, on all three clusters. Measured 2026-10-05: zero Alertmanager and zero Flux notification Providers/Alerts on dev, QA and prod (INFRA-1659). Separately, INFRA-1657 made the Flux rules able to fire on dev and QA; prod is still pending that. The design input for delivery arrived in the 2026-10-26 sync, so 1659 is now build work, not a decision.
+- QA's etcd backups are failing (EtcdSnapshotJobFailing, in etcd-backup), undetected because nothing delivers alerts. Live data-loss exposure on the cluster running RisingWave. Prod's snapshot state is unmeasured.
 - onprem-build.yml NuGet failure: open, ticketed.
 - RisingWave on dev is reachable as superuser with NO password from any corporate machine (NodePort 32567, user root, plaintext). QA and prod declare the identical NodePort; whether their root has a password is UNMEASURED. Raised 2026-10-26.
 - Tim's team cannot use DBeaver with their own identity yet. The only known login is shared root credentials, which Tim wants replaced.

@@ -180,9 +180,24 @@ Grouped by the question each answers. Every row is **recorded, not re-measured**
 
 | | State | Work |
 |---|---|---|
-| Alerting actually delivered | ⚠️ dev and QA fixed 2026-08-24, **prod pending**. Rules fire into nothing | land the same fix on `op-prod` |
+| Alerting actually delivered | ⛔ **CORRECTED 2026-10-26 — this row conflated two tickets.** What was fixed on dev+QA is **INFRA-1657**, making the Flux rules *able to fire*; prod is pending and that half IS a copy (PRs #114-#122). **Delivery itself — INFRA-1659 — is open on ALL THREE clusters**: measured 2026-10-05, zero Alertmanager and zero Flux notification Providers/Alerts on dev, QA and prod. There is no proven fix to copy | copy INFRA-1657 to `op-prod`; **build** INFRA-1659 |
 | Dashboards | ✅ Grafana runs | confirm the prod data sources resolve |
 | Log retention | ⚠️ unknown on-prem, and unknown in cloud too | decide it; nobody owns it today |
+
+✅ **INFRA-1659's missing input arrived on 2026-10-26.** It was recorded as "a design
+decision, not a values change", and the RisingWave sync made that decision: dedicated Teams
+channels for prod and non-prod, filtered by namespace in Grafana, SLO defined first and
+low-noise by design, app and platform sharing one channel until QA and prod then splitting.
+So the blocker on 1659 is no longer a decision — it is build work.
+
+⚠️ **And triage the backlog before switching delivery on.** 22 alerts are firing on QA, eight
+for over a week, and several are Talos static-pod false positives. Delivering two months of
+unreviewed backlog on day one teaches everyone to mute the channel.
+
+🔴 **Found inside that record and still open: QA's etcd backups are failing** —
+`EtcdSnapshotJobFailing` x5 and `KubeJobFailed` x5 in `etcd-backup`, undetected purely
+because nothing delivers. That is a live data-loss exposure on the cluster running
+RisingWave, and it outranks prod's alerting work. **Prod's snapshot state is unmeasured.**
 
 ### Can we recover it?
 
