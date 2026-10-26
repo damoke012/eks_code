@@ -129,6 +129,35 @@ if latest_per_env:
 else:
     print("   NOT MEASURED - progression returned no deployments")
 
+# Does a given release's variable SNAPSHOT contain the flag? This is the step
+# that fails silently: a release pins its variables at creation, so clicking
+# Update Variables is what carries a later change -- and a deploy without it
+# reports Success having changed nothing.
+REL = arg("--release", "")
+if REL:
+    items = api(f"/api/{SPACE_ID}/projects/{project['Id']}/releases?take=100").get("Items", [])
+    match = next((x for x in items if x.get("Version") == REL), None)
+    if not match:
+        print(f"\nNOT MEASURED - no release '{REL}' in the last 100 of this project")
+    else:
+        snap = match.get("ProjectVariableSetSnapshotId")
+        print(f"\nrelease {REL}  ({match['Id']}, assembled {match.get('Assembled','?')[:19]})")
+        print(f"   variable snapshot: {snap}")
+        if not snap:
+            print("   NOT MEASURED - the release carries no snapshot id")
+        else:
+            vs = api(f"/api/{SPACE_ID}/variables/{snap}")
+            want = "TF_VAR_enable_aws_iam_authenticator"
+            hits = [v for v in vs.get("Variables", []) if v["Name"] == want]
+            if not hits:
+                print(f"   ⛔ {want} is NOT in this snapshot.")
+                print("      Click 'Update Variables' on the release, then re-run this.")
+                print("      Deploying now would report Success and change nothing.")
+            for v in hits:
+                sc = [envs.get(i, i) for i in (v.get("Scope") or {}).get("Environment", [])]
+                mark = "✅" if "production" in sc else "  "
+                print(f"   {mark} {want} = {v.get('Value')!r}  scope={sc or '(all)'}")
+
 rel = api(f"/api/{SPACE_ID}/projects/{project['Id']}/releases?take=1")
 items = rel.get("Items") or []
 if items:
