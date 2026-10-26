@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Copilot</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ee; --dim:#8b93a7;
+          --accent:#5aa9ff; --ok:#3ecf8e; --warn:#f5a524; --rec:#ff5c5c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px 16px;
+           border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+  h1 { font-size:16px; margin:0 12px 0 0; }
+  .pill { font-size:12px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:2px 10px; }
+  .pill.rec { color:var(--rec); border-color:var(--rec); }
+  button, select, input { font:inherit; color:var(--text); background:var(--panel);
+           border:1px solid var(--line); border-radius:8px; padding:7px 12px; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#06121f; border-color:var(--accent); font-weight:600; }
+  button.stop { background:var(--rec); color:#fff; border-color:var(--rec); }
+  .controls { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px; border-bottom:1px solid var(--line); }
+  main { display:grid; grid-template-columns: 1fr 1fr; gap:0; height:calc(100vh - 170px); }
+  section { overflow:auto; padding:12px 16px; }
+  section + section { border-left:1px solid var(--line); }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 8px; }
+  .line { padding:4px 0; border-bottom:1px dashed var(--line); }
+  .line time { color:var(--dim); font-size:12px; margin-right:8px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
+  .card .q { color:var(--warn); font-size:13px; margin-bottom:8px; }
+  .card .say { font-size:17px; font-weight:600; margin-bottom:6px; }
+  .card pre { white-space:pre-wrap; margin:0; font:inherit; color:var(--text); }
+  .card .meta { color:var(--dim); font-size:12px; margin-top:6px; }
+  .thinking { color:var(--dim); font-style:italic; }
+  .card .deep:not(:empty) { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+  .card .label { color:var(--accent); font-size:12px; margin-bottom:4px; }
+  .card .stream { font-size:16px; }
+  .card .deeper { font-size:12px; padding:2px 8px; margin-left:6px; }
+  .askbar { display:flex; gap:8px; flex:1; min-width:260px; }
+  .askbar input { flex:1; }
+  #err { color:var(--rec); padding:0 16px; font-size:13px; }
+  #note { color:var(--ok); padding:0 16px; font-size:13px; }
+  .card .refine { display:flex; gap:6px; margin-top:8px; }
+  .card .refine input { flex:1; font-size:13px; padding:5px 8px; }
+  .card .refine button { font-size:12px; padding:4px 10px; }
+  .card .extra { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+  .card .needs { color:var(--warn); font-size:13px; margin:4px 0; }
+  .line .spk { color:var(--dim); font-weight:600; }
+  .line.me .spk { color:var(--ok); }
+  .line.me { color:#b9f5d8; }
+  .line.fixed .txt::after { content:' ✓'; color:var(--ok); font-size:11px; }
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; height:auto; }
+    section + section { border-left:none; border-top:1px solid var(--line); }
+    #answersSec { order:-1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Meeting Copilot</h1>
+  <span class="pill" id="project">project: …</span>
+  <span class="pill" id="rec">idle</span>
+  <span class="pill" id="engine">…</span>
+  <span class="pill" id="conn">connecting…</span>
+</header>
+
+<div class="controls">
+  <button class="primary" id="btnTab" title="Teams/Zoom/Meet running in a browser tab">Capture meeting tab</button>
+  <select id="devices" title="BlackHole / VB-Cable / Stereo Mix for desktop meeting apps"><option value="">Audio input…</option></select>
+  <button id="btnDev">Capture input</button>
+  <label class="pill" title="Your mic is sent separately and labelled Dare. Use headphones."><input type="checkbox" id="withMic" checked> + my mic (Dare)</label>
+  <button class="stop" id="btnStop" disabled>Stop</button>
+  <select id="mode" title="When to answer automatically">
+    <option value="addressed">Auto: when I'm addressed</option>
+    <option value="all">Auto: every question</option>
+    <option value="manual">Manual only</option>
+  </select>
+  <div class="askbar">
+    <input id="askText" placeholder="Type a question, or leave empty to ask about the last thing said">
+    <button id="btnAsk">Ask</button>
+  </div>
+</div>
+<div id="err"></div>
+<div id="note"></div>
+
+<main>
+  <section id="answersSec"><h2>Answers</h2><div id="answers"></div></section>
+  <section><h2>Live transcript</h2><div id="transcript"></div></section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const wsBase = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+let events, ctx, streams = [], audioSockets = [], nodes = [];
+let lastTranscript = null;
+const myLabel = 'Dare';
+function setNote(msg) { $('note').textContent = msg || ''; }
+
+function setErr(msg) { $('err').textContent = msg || ''; }
+
+// ---------- events channel (transcript + answers) ----------
+function connectEvents() {
+  events = new WebSocket(wsBase + '/ws/events');
+  events.onopen = () => { $('conn').textContent = 'connected'; };
+  events.onclose = () => { $('conn').textContent = 'reconnecting…'; setTimeout(connectEvents, 1500); };
+  events.onmessage = (e) => handle(JSON.parse(e.data));
+}
+
+function handle(m) {
+  if (m.type === 'status') {
+    $('project').textContent = 'project: ' + m.project;
+    $('engine').textContent = m.transcriber + ' → ' + m.answerer;
+    $('rec').textContent = m.recording ? '● recording' : 'idle';
+    $('rec').classList.toggle('rec', m.recording);
+    $('mode').value = m.mode;
+    if (m.transcript) lastTranscript = m.transcript;
+  } else if (m.type === 'transcript') {
+    const d = document.createElement('div'); d.className = 'line' + (m.me ? ' me' : '');
+    d.innerHTML = `<time>${m.time}</time>`;
+    if (m.speaker) { const b = document.createElement('b'); b.className = 'spk'; b.textContent = m.speaker + ': '; d.append(b); }
+    const tx = document.createElement('span'); tx.className = 'txt'; tx.textContent = m.text; d.append(tx);
+    if (m.sid) d.dataset.sid = m.sid;
+    const t = $('transcript'); t.append(d);
+    while (t.children.length > 300) t.firstChild.remove();
+    t.parentElement.scrollTop = t.parentElement.scrollHeight;
+  } else if (m.type === 'transcript_fix') {
+    // Local change 2026-10-26: the stronger model corrected this line in place
+    const d = document.querySelector(`.line[data-sid="${m.sid}"]`); if (!d) return;
+    const tx = d.querySelector('.txt'); tx.textContent = m.text;
+    d.classList.add('fixed'); d.title = 'Corrected by the high-accuracy pass';
+  } else if (m.type === 'warn') {
+    setErr(m.text);
+  } else if (m.type === 'question') {
+    const c = document.createElement('div'); c.className = 'card'; c.id = 'q' + m.id;
+    c.innerHTML = `<div class="q"></div><div class="body"><pre class="stream thinking">thinking…</pre></div><div class="deep"></div><div class="more"></div>
+      <div class="meta"><span class="stats"></span> <button class="deeper" title="Ask the full repo-aware session">Dig deeper</button></div>
+      <div class="refine"><input class="ctx" placeholder="Add context to sharpen it (e.g. RHEL 8.6, Windows Server 2016)">
+        <button class="btnRefine" title="Re-answer from the repo using your context">Refine</button>
+        <button class="btnResearch" title="Go beyond the repo: vendor docs and the web (slower, up to 4 min)">Research</button></div>`;
+    c.querySelector('.q').textContent = (m.auto ? 'Heard: ' : 'Asked: ') + (m.clean || m.text);
+    if (m.words) c.querySelector('.stats').textContent = `prompt ${m.words[0]}→${m.words[1]} words`;
+    c.querySelector('.deeper').onclick = () => events.send(JSON.stringify({ type: 'deeper', id: m.id }));
+    const send = (type) => events.send(JSON.stringify({ type, id: m.id, text: c.querySelector('.ctx').value }));
+    c.querySelector('.btnRefine').onclick = () => send('refine');
+    c.querySelector('.btnResearch').onclick = () => send('research');
+    c.querySelector('.ctx').onkeydown = (e) => { if (e.key === 'Enter') send('refine'); };
+    $('answers').prepend(c);
+  } else if (m.type === 'answer_delta') {
+    const c = $('q' + m.id); if (!c) return;
+    const p = c.querySelector('.stream'); if (!p) return;
+    if (p.classList.contains('thinking')) { p.classList.remove('thinking'); p.textContent = ''; }
+    p.textContent += m.text;
+  } else if (m.type === 'deep_start') {
+    const c = $('q' + m.id); if (!c) return;
+    c.querySelector('.deep').innerHTML = '<div class="thinking">checking the repo…</div>';
+  } else if (m.type === 'more_start') {
+    const c = $('q' + m.id); if (!c) return;
+    const w = document.createElement('div'); w.className = 'extra thinking';
+    w.textContent = m.stage === 'research' ? 'researching (repo + web, up to 4 min)…' : 'refining with your context…';
+    c.querySelector('.more').append(w);
+  } else if (m.type === 'answer') {
+    const c = $('q' + m.id); if (!c) return;
+    const LABELS = { deep: 'From the repo', refine: 'Refined with your context', research: 'Research (repo + web)' };
+    let target;
+    if (m.stage === 'refine' || m.stage === 'research') {
+      target = c.querySelector('.more .extra.thinking') || document.createElement('div');
+      target.className = 'extra'; c.querySelector('.more').append(target);
+    } else {
+      target = m.stage === 'deep' ? c.querySelector('.deep') : c.querySelector('.body');
+    }
+    target.innerHTML = LABELS[m.stage] ? `<div class="label">${LABELS[m.stage]}</div>` : '';
+    const research = m.text.match(/RESEARCH_NEEDED:\s*(.*)/);
+    if (research) {
+      const b = document.createElement('div'); b.className = 'needs';
+      b.textContent = '⚠ Needs research: ' + research[1].trim() + ' — click Research';
+      target.append(b); c.querySelector('.btnResearch').classList.add('primary');
+    }
+    const text = m.text.replace(/\n?NEED_LOOKUP:[\s\S]*$/, '').replace(/\n?RESEARCH_NEEDED:.*$/m, '').trim();
+    const say = text.match(/SAY:\s*([\s\S]*?)(?:\n\s*DETAIL:|$)/i);
+    const detail = text.match(/DETAIL:\s*([\s\S]*)$/i);
+    if (say) {
+      const s = document.createElement('div'); s.className = 'say'; s.textContent = say[1].trim();
+      target.append(s);
+      if (detail) { const p = document.createElement('pre'); p.textContent = detail[1].trim(); target.append(p); }
+    } else {
+      const p = document.createElement('pre'); p.textContent = text; target.append(p);
+    }
+    const st = c.querySelector('.stats');
+    const t = (m.stage === 'fast' ? 'first words ' + ((m.first_ms ?? m.ms) / 1000).toFixed(1) + 's · done ' : m.stage + ' ') + (m.ms / 1000).toFixed(1) + 's';
+    st.textContent = (st.textContent ? st.textContent + ' · ' : '') + t;
+  }
+}
+
+// ---------- audio capture ----------
+async function listDevices() {
+  try {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+    const sel = $('devices'); const cur = sel.value;
+    sel.innerHTML = '<option value="">Audio input…</option>';
+    for (const d of devs) {
+      const o = document.createElement('option'); o.value = d.deviceId;
+      o.textContent = d.label || ('input ' + d.deviceId.slice(0, 6)); sel.append(o);
+    }
+    sel.value = cur;
+  } catch (e) { /* ignore */ }
+}
+
+const rawAudio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+
+async function start(primaryStreamFn) {
+  setErr('');
+  try {
+    const primary = await primaryStreamFn();
+    if (!primary.getAudioTracks().length) {
+      primary.getTracks().forEach(t => t.stop());
+      throw new Error('No audio in that capture. When sharing, pick the meeting TAB and tick "Share tab audio".');
+    }
+    primary.getVideoTracks().forEach(t => t.stop()); // we only need audio
+    // Local change 2026-10-25: the meeting and the user's mic go to the server as SEPARATE
+    // streams (src=them / src=me), so every transcript line knows who said it.
+    // Echo cancellation on the mic removes the meeting audio playing from the speakers.
+    const sources = [[primary, 'them']];
+    if ($('withMic').checked) {
+      const mic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      sources.push([mic, 'me']);
+    }
+    streams = sources.map(([s]) => s);
+
+    ctx = new AudioContext();
+    await ctx.audioWorklet.addModule('/static/pcm-worklet.js');
+    const mute = ctx.createGain(); mute.gain.value = 0; mute.connect(ctx.destination);
+    for (const [stream, src] of sources) {
+      const n = new AudioWorkletNode(ctx, 'pcm-downsampler');
+      ctx.createMediaStreamSource(stream).connect(n);
+      n.connect(mute); // keep the graph pulling audio without playing it back
+      const ws = new WebSocket(wsBase + '/ws/audio?src=' + src);
+      ws.binaryType = 'arraybuffer';
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('audio socket failed')); });
+      n.port.onmessage = (e) => { if (ws.readyState === 1) ws.send(e.data); };
+      ws.onclose = () => stop();
+      audioSockets.push(ws); nodes.push(n);
+    }
+    primary.getAudioTracks()[0].onended = () => stop();
+    setNote(sources.length > 1 ? 'Listening to the meeting (Them) and your mic (' + myLabel + ').'
+                               : 'Listening to the meeting only. Tick "+ my mic" before capturing to include your voice.');
+    $('btnStop').disabled = false; $('btnTab').disabled = true; $('btnDev').disabled = true;
+  } catch (e) {
+    setErr(e.message || String(e)); stop();
+  }
+}
+
+function stop() {
+  const wasRecording = audioSockets.length > 0;
+  audioSockets.forEach(ws => { try { ws.readyState <= 1 && ws.close(); } catch (e) {} });
+  try { ctx && ctx.close(); } catch (e) {}
+  streams.forEach(s => s.getTracks().forEach(t => t.stop()));
+  streams = []; audioSockets = []; nodes = []; ctx = null;
+  $('btnStop').disabled = true; $('btnTab').disabled = false; $('btnDev').disabled = false;
+  if (wasRecording) setNote('Meeting saved' + (lastTranscript ? ' as ' + lastTranscript : '') +
+    '. In the Codespace, tell Claude: "process the last meeting".');
+}
+
+$('btnTab').onclick = () => start(() => navigator.mediaDevices.getDisplayMedia({
+  video: true, audio: rawAudio, preferCurrentTab: false, systemAudio: 'include' }));
+
+$('btnDev').onclick = async () => {
+  const id = $('devices').value;
+  if (!id) {  // first click: ask permission so device labels appear
+    try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } catch (e) {}
+    await listDevices();
+    setErr('Pick your loopback device (BlackHole / VB-Cable / Stereo Mix) in the list, then click Capture input again.');
+    return;
+  }
+  start(() => navigator.mediaDevices.getUserMedia({ audio: { ...rawAudio, deviceId: { exact: id } } }));
+};
+
+$('btnStop').onclick = stop;
+$('mode').onchange = () => events.send(JSON.stringify({ type: 'mode', mode: $('mode').value }));
+function ask() { events.send(JSON.stringify({ type: 'ask', text: $('askText').value })); $('askText').value = ''; }
+$('btnAsk').onclick = ask;
+$('askText').onkeydown = (e) => { if (e.key === 'Enter') ask(); };
+
+navigator.mediaDevices?.addEventListener?.('devicechange', listDevices);
+listDevices();
+connectEvents();
+</script>
+</body>
+</html>
