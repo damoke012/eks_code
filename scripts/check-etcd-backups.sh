@@ -68,7 +68,7 @@ if [ -z "$CJ" ]; then
 fi
 say "-- etcd CronJob(s): $(echo "$CJ" | tr '\n' ' ')"
 
-RC=0
+RC=0; BUCKET_OK=no; BUCKET_SEEN=no
 for NSNAME in $CJ; do
   NS=${NSNAME%%/*}; NAME=${NSNAME##*/}
   say ""
@@ -121,6 +121,45 @@ for NSNAME in $CJ; do
   # The pod's own log is the closest thing to the property short of the bucket:
   # a snapshot script that writes nothing can still exit zero (this repo has an
   # `rm -rf` with no operand and an empty value rendering as an empty string).
+  # --- and finally the property: objects in the bucket -----------------------
+  # A Job exiting zero says a script ran. This says a snapshot is THERE, and how
+  # many there are -- which is also the only honest answer to "how far back can
+  # we restore", a question lastSuccessfulTime cannot touch.
+  BUCKET=$(kubectl --kubeconfig="$K" -n "$NS" get cronjob "$NAME" \
+    -o jsonpath='{range .spec.jobTemplate.spec.template.spec.containers[*]}{range .env[*]}{.name}{"="}{.value}{"\n"}{end}{end}' \
+    2>/dev/null | awk -F= '$1=="S3_BUCKET"{print $2; exit}')
+  if [ -z "$BUCKET" ]; then
+    say "   -- no S3_BUCKET in the container env; destination unknown from here"
+  elif ! command -v aws >/dev/null 2>&1; then
+    say "   -- NOT MEASURED: aws absent on this box. Not a missing snapshot."
+  else
+    BUCKET_SEEN=yes
+    say "   -- the bucket: s3://$BUCKET"
+    PROF=""
+    for P in $(aws configure list-profiles 2>/dev/null); do
+      [ "$(aws configure get sso_account_id --profile "$P" 2>/dev/null)" = "$ACCOUNT" ] || continue
+      aws --profile "$P" --region "$REGION" s3 ls "s3://$BUCKET/" >/dev/null 2>&1 \
+        && { PROF="$P"; break; }
+    done
+    if [ -z "$PROF" ]; then
+      say "      NOT MEASURED: no profile for $ACCOUNT can list it (session or grant)."
+      say "      This says nothing about whether snapshots are being written."
+    else
+      OUT=$(aws --profile "$PROF" --region "$REGION" s3 ls "s3://$BUCKET" \
+            --recursive 2>/dev/null | grep 'snapshot.db' || true)
+      N=$(printf '%s' "$OUT" | grep -c 'snapshot.db' || true)
+      say "      profile $PROF -- snapshot objects: $N"
+      if [ "$N" -gt 0 ]; then
+        say "      oldest: $(printf '%s\n' "$OUT" | head -1 | tr -s ' ')"
+        say "      newest: $(printf '%s\n' "$OUT" | tail -1 | tr -s ' ')"
+        BUCKET_OK=yes
+      else
+        say "      ** the bucket is READABLE and EMPTY -- the upload is not landing"
+        RC=1
+      fi
+    fi
+  fi
+
   LASTPOD=$(kubectl --kubeconfig="$K" -n "$NS" get pods --sort-by=.metadata.creationTimestamp \
             -o name 2>/dev/null | grep -F "$NAME" | tail -1)
   if [ -n "$LASTPOD" ]; then
@@ -133,9 +172,18 @@ for NSNAME in $CJ; do
 done
 
 say ""
-say "-- the proxy above is lastSuccessfulTime. The PROPERTY is an object in the"
-say "   bucket with a recent timestamp. To settle it, list the bucket with a"
-say "   profile for account $ACCOUNT in $REGION and read the newest key's date."
+if [ "$BUCKET_OK" = "yes" ]; then
+  say "-- objects in the bucket, so this is the property and not a proxy."
+elif [ "$BUCKET_SEEN" = "yes" ]; then
+  say "-- the bucket was named but could not be read. That is NOT MEASURED:"
+  say "   a session or a grant, never evidence that nothing is being written."
+else
+  say "-- no S3_BUCKET in the CronJob env, so the destination is unknown from here."
+fi
+if [ "$RC" = 0 ] && [ "$BUCKET_OK" = "yes" ]; then
+  say "VERDICT: PROVEN on op-usxpress-$ENV -- the Job succeeds AND objects exist."
+  exit 0
+fi
 if [ "$RC" = 0 ]; then
   say "VERDICT: the CronJob reports success and recently. Bucket UNVERIFIED."
   exit 0
