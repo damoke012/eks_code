@@ -229,8 +229,18 @@ if SCAN:
     # it off the list items and reported "no IsDisabled changes" across 300
     # events, including the one we had already seen with our own eyes. A check
     # that cannot detect the case we know about is not a check.
-    r = session.get(f"{OCTO_URL}/api/{SPACE_ID}/events",
-                    params={"take": SCAN, "documentTypes": "Projects"})
+    # 400 events covered 7.5 hours on 2026-10-26: this space does ~1300 project
+    # events a day, so walking back four days by `take` alone is thousands of
+    # rows. Ask the server for a date window instead -- and then CHECK that it
+    # honoured it, because an ignored filter returns today's rows and looks
+    # exactly like "nothing happened back then".
+    FROM, TO = arg("--from", ""), arg("--to", "")
+    params = {"take": SCAN, "documentTypes": "Projects"}
+    if FROM:
+        params["from"] = f"{FROM}T00:00:00.000Z"
+    if TO:
+        params["to"] = f"{TO}T23:59:59.000Z"
+    r = session.get(f"{OCTO_URL}/api/{SPACE_ID}/events", params=params)
     if not r.ok:
         print(f"   NOT MEASURED - HTTP {r.status_code}")
     else:
@@ -240,6 +250,10 @@ if SCAN:
         else:
             occ = [i.get("Occurred", "")[:19] for i in items if i.get("Occurred")]
             print(f"   {len(items)} events, {min(occ)} .. {max(occ)}")
+            if FROM and min(occ)[:10] > FROM:
+                print(f"   ⚠️  asked from {FROM} but the oldest row is {min(occ)[:10]}.")
+                print("      Either the filter was ignored, or take is too small.")
+                print("      Raise --scan-disables before reading anything below.")
             mods = [i for i in items
                     if "was modified" in (i.get("Message") or "").lower()]
             cap = min(len(mods), 150)
