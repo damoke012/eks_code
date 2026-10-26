@@ -39,36 +39,50 @@ say "== op-usxpress-$ENV   endpoint $ENDPOINT   account $ACCOUNT"
 command -v talosctl >/dev/null 2>&1 || nm "talosctl absent on this box; not a missing file"
 command -v aws      >/dev/null 2>&1 || nm "aws absent on this box; not a missing file"
 
-# --- the AWS profile, resolved by account id and never by name ---------------
-# Three faults hide behind "no profile works", and they have different fixes:
-# the profile is not configured (a login cannot help), its session has expired
-# (a login is the whole fix), or it resolves somewhere else. sso_account_id is
-# readable WITHOUT a session, so configured-ness and liveness are separable.
-PROFILE=""; CONFIGURED=""
+# --- the profile, resolved by CAPABILITY ------------------------------------
+# Several profiles can point at the SAME account with different permission
+# sets, so "it authenticated" is not "it can read the secret" -- and the first
+# in iteration order is an accident, not a choice. Three faults hide here, with
+# three different fixes: no profile configured (a login cannot help), none
+# signed in (a login is the whole fix), or signed in without the grant (an IAM
+# change). sso_account_id is readable WITHOUT a session, so configured-ness and
+# liveness are separable; the grant is only knowable by trying the read.
+CONFIGURED=""
 for P in $(aws configure list-profiles 2>/dev/null); do
-  WANTED=$(aws configure get sso_account_id --profile "$P" 2>/dev/null || true)
-  [ "$WANTED" = "$ACCOUNT" ] && CONFIGURED="${CONFIGURED}${CONFIGURED:+ }$P"
-  ID=$(aws --profile "$P" sts get-caller-identity --query Account --output text 2>/dev/null || true)
-  if [ "$ID" = "$ACCOUNT" ]; then PROFILE="$P"; break; fi
+  W=$(aws configure get sso_account_id --profile "$P" 2>/dev/null || true)
+  [ "$W" = "$ACCOUNT" ] && CONFIGURED="${CONFIGURED}${CONFIGURED:+ }$P"
 done
-if [ -z "$PROFILE" ] && [ -n "$CONFIGURED" ]; then
-  nm "a profile for account $ACCOUNT exists but has no live session.
-   Run:  aws sso login --profile ${CONFIGURED%% *}
-   (profiles configured for this account: $CONFIGURED)"
-elif [ -z "$PROFILE" ]; then
-  nm "NO profile in ~/.aws/config is configured for account $ACCOUNT.
+[ -n "$CONFIGURED" ] || nm "NO profile in ~/.aws/config is configured for account $ACCOUNT.
    A login cannot fix this -- the profile has to be added first.
    Profiles on this box: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')"
-fi
-say "profile: $PROFILE"
+say "profiles for $ACCOUNT: $CONFIGURED"
 
-# --- the talosconfig ---------------------------------------------------------
 TC=$(mktemp -t talosconfig.XXXXXX) || nm "cannot create a temp file"
 trap 'rm -f "$TC"' EXIT
 chmod 600 "$TC"
-aws --profile "$PROFILE" --region "$REGION" secretsmanager get-secret-value \
-    --secret-id "$SECRET" --query SecretString --output text > "$TC" 2>/dev/null \
-  || nm "cannot read secret $SECRET in account $ACCOUNT"
+
+PROFILE=""; LIVE=""
+for P in $CONFIGURED; do
+  A=$(aws --profile "$P" sts get-caller-identity --query Account --output text 2>/dev/null || true)
+  [ "$A" = "$ACCOUNT" ] || continue
+  LIVE="${LIVE}${LIVE:+ }$P"
+  if aws --profile "$P" --region "$REGION" secretsmanager get-secret-value \
+       --secret-id "$SECRET" --query SecretString --output text > "$TC" 2>/dev/null; then
+    PROFILE="$P"; break
+  fi
+done
+if [ -z "$LIVE" ]; then
+  nm "a profile for account $ACCOUNT exists but NONE has a live session.
+   Run:  aws sso login --profile ${CONFIGURED%% *}
+   (any of these would do: $CONFIGURED)"
+elif [ -z "$PROFILE" ]; then
+  nm "signed in as [$LIVE] but none of them may read $SECRET.
+   This is the platform-admin gap, not a missing file: op-$ENV-platform-admin
+   holds only sts:GetCallerIdentity. Either grant it first --
+     scripts/idc-grant-secretsmanager.sh op-$ENV
+   -- or sign in to a profile with broader rights from: $CONFIGURED"
+fi
+say "profile: $PROFILE  (it could read $SECRET)"
 # A green fetch is not a usable value: this secret held a literal placeholder
 # for weeks while everything downstream reported success.
 head -c 8 "$TC" | grep -q '^context' \
