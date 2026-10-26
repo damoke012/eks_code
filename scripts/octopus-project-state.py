@@ -91,6 +91,28 @@ for v in varset.get("Variables", []):
 if not found:
     print("   not defined on this project")
 
+# What is actually deployed where. The Releases page lists what EXISTS; this is
+# what each environment is RUNNING, which is the only safe basis for choosing a
+# release to redeploy with refreshed variables.
+prog = api(f"/api/{SPACE_ID}/progression/{project['Id']}")
+envnames = {e["Id"]: e["Name"] for e in (prog.get("Environments") or [])}
+print("deployed now:")
+latest_per_env = {}
+for item in (prog.get("Releases") or []):
+    ver = (item.get("Release") or {}).get("Version", "?")
+    for env_id, deps in (item.get("Deployments") or {}).items():
+        for d in deps:
+            key = envnames.get(env_id, env_id)
+            when = d.get("Created", "")[:19]
+            if key not in latest_per_env or when > latest_per_env[key][1]:
+                latest_per_env[key] = (ver, when, d.get("State", "?"))
+if latest_per_env:
+    for env in sorted(latest_per_env):
+        ver, when, st = latest_per_env[env]
+        print(f"   {env:16.16} {ver:44.44} {when}  {st}")
+else:
+    print("   NOT MEASURED - progression returned no deployments")
+
 rel = api(f"/api/{SPACE_ID}/projects/{project['Id']}/releases?take=1")
 items = rel.get("Items") or []
 if items:
