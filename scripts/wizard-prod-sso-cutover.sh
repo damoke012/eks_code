@@ -203,7 +203,7 @@ finish() {
 # them to a control-plane change. Stage 8 names them so they are not lost.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=8
+TOTAL_STAGES=9
 
 REPO="${REPO:-$HOME/eks_code}"
 PROD_ACCOUNT=937464026810
@@ -323,6 +323,31 @@ fi
 pause
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
+stage "Can Octopus deploy this project at all?"
+say "Measured 2026-10-26: the iaac-talos project was DISABLED, so the release"
+say "page says 'releases cannot be created' and Create Release is greyed out."
+say "Stages 5 and 6 are the two that carry the change, and neither can run on a"
+say "disabled project. Five seconds here beats finding out two stages in."
+pause "Press Enter to read the project state (read-only)"
+if python3 "$REPO/scripts/octopus-project-state.py"; then
+  say ""
+  say "${GREEN}Deployable.${RESET} Carry on."
+else
+  say ""
+  say "${RED}The Octopus half cannot proceed.${RESET}"
+  say ""
+  say "If it is DISABLED, that is a decision and not a defect to route around."
+  say "TfApply is true for production on this project, so disabling it is a"
+  say "plausible deliberate safety catch -- re-enabling makes every future prod"
+  say "deploy apply for real, not just this one."
+  say ""
+  say "Find out who disabled it and why before re-enabling. Everything landed so"
+  say "far keeps: the file is proven on all three nodes and break-glass works."
+  exit 1
+fi
+confirm "Continue to the variable?" || { say "Stopped."; exit 0; }
+
+# ── 5 ─────────────────────────────────────────────────────────────────────
 stage "Add the Octopus variable, scoped to production"
 say "Octopus injects TF_VAR_* as env.auto.tfvars and never uses -var-file. So"
 say "enable_aws_iam_authenticator = true in deploy/terraform/envs/prod.tfvars"
@@ -349,7 +374,7 @@ else
 fi
 pause
 
-# ── 5 ─────────────────────────────────────────────────────────────────────
+# ── 6 ─────────────────────────────────────────────────────────────────────
 stage "Re-snapshot the release (this is not bookkeeping)"
 say "A release pins the variable snapshot taken when it was CREATED. The"
 say "variable you just added does not reach an existing release, and deploying"
@@ -366,7 +391,7 @@ say "Release recorded: $REL"
 confirm "Have you clicked Update Variables, or cut a new release?" \
   || { say "Do that first. Stopped before the deploy."; exit 0; }
 
-# ── 6 ─────────────────────────────────────────────────────────────────────
+# ── 7 ─────────────────────────────────────────────────────────────────────
 stage "Deploy to Production, and watch the control plane roll"
 say "${RED}${BOLD}This is the step that can take prod down.${RESET}"
 say ""
@@ -403,7 +428,7 @@ say "A still-absent flag after a Success almost always means the release was"
 say "not re-snapshotted. Go back to stage 5; do not re-deploy blindly."
 pause
 
-# ── 7 ─────────────────────────────────────────────────────────────────────
+# ── 8 ─────────────────────────────────────────────────────────────────────
 stage "Prove a human can log in with SSO"
 say "The flag being present is the mechanism. This is the property."
 say ""
@@ -427,7 +452,7 @@ say "${BOLD}Only now close the break-glass terminal.${RESET}"
 say "When you no longer need the file:  shred -u $BREAKGLASS"
 pause
 
-# ── 8 ─────────────────────────────────────────────────────────────────────
+# ── 9 ─────────────────────────────────────────────────────────────────────
 stage "Record it, and name what is still open"
 say "Close on INFRA-1661 with the measured values, not 'done':"
 step "the flag present on all three control-plane nodes"
