@@ -57,7 +57,7 @@ Last refreshed: 2026-10-26 (evening, after measuring op-prod for SSO readiness).
 
 ## Next milestones
 - Create the operator and reader SSO roles, then fix the aws-auth placeholders on QA and prod.
-- Land the kube-apiserver webhook flag on prod (INFRA-1661). The prerequisite is PROVEN as of 2026-10-26: the webhook kubeconfig is present on all three prod control-plane nodes at 1909 bytes, the same size as QA's. BLOCKED on Octopus: the iaac-talos project is DISABLED, so no release can be created and no deploy can run.
+- Land the kube-apiserver webhook flag on prod (INFRA-1661). The cluster-side prerequisite is PROVEN as of 2026-10-26: the webhook kubeconfig is on all three prod control-plane nodes at 1909 bytes, matching QA. But the delivery path does not exist: the iaac-talos Octopus project has NEVER deployed to Production, QA or Staging, and INFRA-1663 says prod has no Talos machine config in iaac-talos. So INFRA-1663 blocks INFRA-1661 and neither ticket records the dependency. The most recent release, 0.5.0, FAILED in QA2 on 2026-09-17.
 - Pricing app Stage 1 onboarding to on-prem (Idris).
 - Kubernetes upgrade plan for on-prem 1.32. Date: unknown — confirm.
 

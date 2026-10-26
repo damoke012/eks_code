@@ -267,6 +267,47 @@ deployed is not a feature that failed**, and this is the same shape as
 `(all)` default. The recorded note that dev and QA inherit `false` is **stale**: dev is
 the only environment left that does not apply for real.
 
+## ⛔ 1d. STOPPED at stage 6 — Octopus has never deployed to Production
+
+**2026-10-26, from the project Dashboard.** Every Production cell on `iaac-talos` is a
+`Deploy...` button, not a deployed release. So is QA. So is Staging.
+
+| Release | Development | QA | QA2 | Staging | Production |
+|---|---|---|---|---|---|
+| 0.5.0 | ✅ Sep 17 13:26 | not deployed | ❌ **FAILED** Sep 17 17:45 | not deployed | **never** |
+| 0.4.0 | ✅ Sep 17 12:55 | not deployed | not deployed | not deployed | **never** |
+| 0.3.0 | ❌ failed | blocked by lifecycle | blocked | blocked | blocked |
+
+**So stage 6 was never a variable refresh.** Updating variables on "the release Production
+runs" presumes Production runs one. It does not. Deploying would be the **first-ever
+Terraform apply to production from this project**, with `TfApply` true — a full plan
+against a cluster that was built another way — and the most recent release **failed in
+QA2**, the environment that is supposed to prove things first.
+
+### 🔗 INFRA-1663 blocks INFRA-1661, and neither ticket says so
+
+`INFRA-1663 — op-usxpress-prod has no Talos machine config in iaac-talos` (In Progress).
+
+That is the same fact from the repository side. The apiserver flag is a Terraform change
+in `iaac-talos`, delivered by Octopus. If prod has no machine config there, **there is
+nothing for a prod deploy to apply the flag to**, and the Octopus half of INFRA-1661
+cannot be done at all until 1663 lands.
+
+⚠️ **Verify 1663 before planning around it** — it is an open ticket's claim, not a
+measurement taken today. But it matches the Dashboard exactly, from an independent angle.
+
+### What this costs, and what it does not
+
+**Nothing proven today is lost.** The webhook kubeconfig is on all three prod
+control-plane nodes, break-glass works, the Octopus variable is set and will be waiting,
+and the project is enabled again.
+
+**What changes is the shape of the work.** "Scope one variable to production and deploy"
+was never the remaining task. The real sequence is: give prod a machine config in
+`iaac-talos` (1663) → fix whatever failed QA2 on 0.5.0 → prove the path QA2 → dev → QA →
+**then** prod. That is CLAUDE.md rule 10, and the Dashboard shows the project has never
+completed it even once.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
