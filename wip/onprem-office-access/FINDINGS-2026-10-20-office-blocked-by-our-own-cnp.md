@@ -12,7 +12,14 @@ command:
 | `Test-NetConnection 10.10.82.21 -Port 443` | TcpTestSucceeded **False** | TcpTestSucceeded **True** |
 
 ✅ **op-qa done the same evening** — PR #179 (`4005c6e`), 22 CIDRs live, all Kustomizations
-Ready. **op-prod is the only one left.**
+Ready. ~~**op-prod is the only one left.**~~ **CORRECTED 2026-10-26.**
+
+✅ **op-prod is done too** — measured 2026-10-26 from the live object:
+`cnp/allow-corp-vpn-to-ingressgateway` carries **22 CIDRs**, the same count as dev and
+QA (4 original + 18 AD-registered). All three clusters now admit corporate space.
+⚠️ The prod PR number is **not recorded** — it landed between 2026-10-20 and 2026-10-26
+and nobody wrote it down. Find it before closing INFRA-1730, or the change has no
+provenance.
 
 ⚠️ **The verification nearly produced a false negative.** The first two reads of the live
 object after the merge returned the OLD four CIDRs: annotating the Kustomization re-applies

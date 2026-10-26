@@ -2,13 +2,13 @@
 
 Owner of this repo: Dare Oke (Doke), cloud/platform engineer, owns the on-prem Talos clusters.
 This repo is the operator's notes, drafts and automation. Nothing is deployed from it.
-Last refreshed: 2026-10-26 (evening, after the RisingWave sync).
+Last refreshed: 2026-10-26 (evening, after measuring op-prod for SSO readiness).
 
 ## Current status
 - Sprint 7 (Jira board 322, sprint id 6296) opened 2026-10-19 with 13 issues; Sprint 6 closed 8 of 8.
 - Sprint 7 headline ask: make on-prem prod (op-usxpress-prod) production-ready, starting with AWS SSO.
 - Prod SSO is about three-quarters landed: authenticator 3/3, aws-auth and role bindings are live. Only the kube-apiserver webhook flag is missing (it lives in Terraform via Octopus, never scoped to prod).
-- Office access to on-prem apps: blocked by our own Cilium ingress policy. Fixed on dev and QA 2026-10-20. Prod still open.
+- Office access to on-prem apps: was blocked by our own Cilium ingress policy. Fixed on dev and QA 2026-10-20, and prod measured 22 CIDRs 2026-10-26 — all three clusters now admit corporate space. The prod PR reference is not recorded.
 - RisingWave: new canonical repo usxpressinc/risingwave (branch master) proven end to end to the cluster 2026-10-21. Runbook published to Confluence 2026-10-23.
 - Pricing app (pricing-rfp-handler) is the prototype for onboarding cloud apps to on-prem; Idris owns it. INFRA-1719 to 1724 assigned to Idris.
 - Argo CD with Entra SSO is live on all three on-prem clusters (dev, QA, prod) since 2026-08-25.
@@ -40,7 +40,7 @@ Last refreshed: 2026-10-26 (evening, after the RisingWave sync).
 ## Risks and blockers
 - On-prem Kubernetes 1.32.0 is out of support and was never patched past .0. Upgrade plan: unknown — confirm.
 - aws-auth on QA and prod maps the operator and reader tiers to ARNs with literal FILL placeholders. Only admins can log in usefully. The roles themselves do not exist yet.
-- Office access to prod is still blocked until the Cilium allow-list fix is promoted.
+- op-prod SSO: the kube-apiserver webhook flag is confirmed ABSENT (measured 2026-10-26). The authenticator DaemonSet is 3/3 and 62 days old, but whether it has written the webhook kubeconfig to each control-plane node is UNMEASURED — the container has no shell, so the usual check cannot run.
 - The service CIDR overlaps four registered corporate subnets. Open, ticketed in Sprint 7.
 - Pricing app: MongoDB Atlas is reached over AWS PrivateLink (10.16.x.x). The on-prem route to it goes via the transit gateway; one firewall rule and one /24 are needed.
 - RisingWave on-prem has no promotion gate: every cluster tracks main, so merging is deploying to prod.
@@ -50,9 +50,8 @@ Last refreshed: 2026-10-26 (evening, after the RisingWave sync).
 - Tim's team cannot use DBeaver with their own identity yet. The only known login is shared root credentials, which Tim wants replaced.
 
 ## Next milestones
-- Land the kube-apiserver webhook flag on prod through Octopus (after QA2/dev proof). Date: unknown — confirm.
 - Create the operator and reader SSO roles, then fix the aws-auth placeholders on QA and prod.
-- Promote the office-access Cilium fix to prod.
+- Land the kube-apiserver webhook flag on prod (INFRA-1661), after proving the webhook file exists on all three control-plane nodes.
 - Pricing app Stage 1 onboarding to on-prem (Idris).
 - Kubernetes upgrade plan for on-prem 1.32. Date: unknown — confirm.
 

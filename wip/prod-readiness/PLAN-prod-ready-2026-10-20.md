@@ -80,6 +80,36 @@ and all. **Prod admin sign-in works the moment the API server flag is on, with n
 
 ---
 
+## 1c. Re-measured on op-prod 2026-10-26 — the gap narrowed to one flag
+
+Read live from `op-usxpress-prod` (10.10.82.52:6443), read-only:
+
+| Check | Result | Reading |
+|---|---|---|
+| `aws-iam-authenticator` DaemonSet | **3/3 ready, 62 days old**, nodeSelector `control-plane` | prerequisite's writer is in place |
+| kube-apiserver `--authentication-token-webhook-*` | **ABSENT** | the gap is real, as recorded |
+| `cnp/allow-corp-vpn-to-ingressgateway` ingress[0] | **22 CIDRs** | ✅ office access on prod is **already fixed** |
+| webhook kubeconfig on each control-plane node | **NOT MEASURED** | the container has no `ls` |
+
+✅ **One row of §2 closes itself.** Prod carries the same 22 CIDRs as dev and QA, so the
+office-access promotion is done. The PR reference was never recorded — find it before
+closing INFRA-1730.
+
+⛔ **And the prerequisite check failed as an instrument, not as a finding.** `kubectl exec`
+into all three authenticator pods returned:
+
+    exec: "ls": executable file not found in $PATH
+
+The image is distroless. **This is not evidence the file is missing** — it is evidence the
+check cannot run this way ([[transport-failure-not-a-verdict]], and the fourth instance of
+an absent binary reading as a system fault in one week: `wget` in the RisingWave console,
+`kustomize`/`dig`/`flux` on WSL, now `ls` here).
+
+`kubectl debug` would answer it and is **forbidden on prod** (CLAUDE.md rule 3). The
+remaining routes are `talosctl list` against each control-plane node — Talos's own
+read-only API — or the authenticator's own log line `writing webhook kubeconfig file`,
+which is a proxy for the write and not for the file's presence now.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
