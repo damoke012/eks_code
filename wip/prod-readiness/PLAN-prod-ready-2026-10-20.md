@@ -195,12 +195,29 @@ account. `lazy` also modified this project at **13:00** on 10-03 and 10-14, sepa
 the Renovate release pairs at other times of day. That cadence is a scheduled job, not a
 person at a keyboard.
 
-⛔ **Eliminated: it is not declared in `variant-inc/iaac-octopus-config`.** The complete
-file tree is `spaces`, `environments`, `feeds`, `lifecycles`, `script_modules`,
-`worker_pools`, `vars` — **no projects**, and no path mentions talos. This extends
-[[octopus-config-builds-the-stage-not-the-play]]: that repo manages no project variables
-*and no projects*. Measured from a full tree listing, not a code search — `gh search code`
-returned nothing at all on GHE, which is not an answer.
+~~⛔ **Eliminated: it is not declared in `variant-inc/iaac-octopus-config`.**~~
+⚠️ **WITHDRAWN — that grep searched PATH NAMES, not file contents.** No path contains
+"talos", which says nothing about what is inside `deploy/config/*.yaml` or the Terraform
+under `deploy/spaces/` and `deploy/variables/`. A project can be declared in a file whose
+name never mentions it. This is CLAUDE.md rule 5 — an empty grep is not evidence of
+absence — committed inside a note that quotes the rule.
+
+✅ **And the caller says it IS Terraform.** The event's own fingerprint:
+
+```
+agent = go-octopusdeploy/v2.105.0 (linux; amd64) go/go1.26.2
+auth  = API key 'octopus' created Tue, 26 Jan 2021 00:35:37 GMT
+ip    = ::ffff:172.19.75.84      (private -- a CI runner, not a laptop)
+```
+
+`go-octopusdeploy` is the SDK the **Terraform provider for Octopus Deploy** is built on.
+So `IsDisabled = true` was **applied by a Terraform run**, which means it is declared as
+state somewhere — and **re-enabling it by hand will be reverted on the next apply.**
+
+Two consequences that matter more than the original question:
+1. The fix is a code change in whatever repo declares this project, not a UI click.
+2. An API key created **2021-01-26** — five and a half years old — can disable production
+   delivery for three clusters. That is its own finding.
 
 ### ✅ ANSWERED — `lazy` disabled it on 2026-10-22 at 13:00:29
 
