@@ -127,8 +127,30 @@ there. It is, at identical size on all three nodes, timestamped within 67 second
 each other on **the day QA's SSO went live**. So the method reads the real host
 filesystem — and prod's answer, whatever it is, can be believed.
 
-Prod is still unmeasured: no live AWS session for account 937464026810 at the time of
-the run. That is a session, not a finding.
+### ✅ AND PROD PASSES — 2026-10-26
+
+| Node | File | Size | Written |
+|---|---|---|---|
+| 10.10.82.187 | `kubeconfig.yaml` | 1909 | Aug 24 16:20:52 |
+| 10.10.82.186 | `kubeconfig.yaml` | 1909 | Aug 24 16:20:52 |
+| 10.10.82.188 | `kubeconfig.yaml` | 1909 | Aug 24 16:20:51 |
+
+**Six nodes across two clusters, all 1909 bytes.** Prod's timestamps match the
+DaemonSet's 62-day age. **The prerequisite for the apiserver flag is MET** and the
+dangerous step is safe to attempt. INFRA-1661 is now only the Octopus variable, the
+release snapshot and a watched node-by-node rollout.
+
+⚠️ **THREE profiles are configured for account 937464026810** — `ops-controller`,
+`usx-prod`, `op-prod` — and they are different permission sets, not aliases.
+`op-prod` is `op-prod-platform-admin`, which holds only `sts:GetCallerIdentity`: it
+authenticates and is then refused the talosconfig. **`ops-controller` is the one that
+can read it.**
+
+So "the first profile that resolves to the account" is a coin toss decided by the
+order of `~/.aws/config`, and `breakglass-prod-kubeconfig.sh` had exactly that bug —
+it would have died on a bare AccessDeniedException partway through stage 2. Both
+scripts now resolve by **capability**: the first profile that can perform the read.
+Authentication is not authorisation.
 
 ⚠️ **The check's own first version collapsed three faults into one message** ("no
 configured profile resolves to the account"), which cannot distinguish an unconfigured
