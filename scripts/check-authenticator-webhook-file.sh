@@ -40,14 +40,26 @@ command -v talosctl >/dev/null 2>&1 || nm "talosctl absent on this box; not a mi
 command -v aws      >/dev/null 2>&1 || nm "aws absent on this box; not a missing file"
 
 # --- the AWS profile, resolved by account id and never by name ---------------
-PROFILE=""
+# Three faults hide behind "no profile works", and they have different fixes:
+# the profile is not configured (a login cannot help), its session has expired
+# (a login is the whole fix), or it resolves somewhere else. sso_account_id is
+# readable WITHOUT a session, so configured-ness and liveness are separable.
+PROFILE=""; CONFIGURED=""
 for P in $(aws configure list-profiles 2>/dev/null); do
+  WANTED=$(aws configure get sso_account_id --profile "$P" 2>/dev/null || true)
+  [ "$WANTED" = "$ACCOUNT" ] && CONFIGURED="${CONFIGURED}${CONFIGURED:+ }$P"
   ID=$(aws --profile "$P" sts get-caller-identity --query Account --output text 2>/dev/null || true)
   if [ "$ID" = "$ACCOUNT" ]; then PROFILE="$P"; break; fi
 done
-[ -n "$PROFILE" ] || nm "no configured profile resolves to account $ACCOUNT right now.
-   If a profile for it exists, its session has expired: aws sso login --profile <it>.
-   If none exists, a login cannot help -- it must be added to ~/.aws/config."
+if [ -z "$PROFILE" ] && [ -n "$CONFIGURED" ]; then
+  nm "a profile for account $ACCOUNT exists but has no live session.
+   Run:  aws sso login --profile ${CONFIGURED%% *}
+   (profiles configured for this account: $CONFIGURED)"
+elif [ -z "$PROFILE" ]; then
+  nm "NO profile in ~/.aws/config is configured for account $ACCOUNT.
+   A login cannot fix this -- the profile has to be added first.
+   Profiles on this box: $(aws configure list-profiles 2>/dev/null | tr '\n' ' ')"
+fi
 say "profile: $PROFILE"
 
 # --- the talosconfig ---------------------------------------------------------
