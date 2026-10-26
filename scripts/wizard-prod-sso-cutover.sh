@@ -301,11 +301,19 @@ say ""
 say "The trap this guards: put-inline-policy-to-permission-set REPLACES the whole"
 say "inline policy. The script reads the current one and merges."
 pause "Press Enter for the DRY RUN (writes nothing)"
-bash "$REPO/scripts/idc-grant-secretsmanager.sh" op-prod || true
+DRY_OK=yes
+bash "$REPO/scripts/idc-grant-secretsmanager.sh" op-prod || DRY_OK=no
 say ""
-say "Read the merged policy above. It must still contain everything the"
-say "permission set granted before, plus the Secrets Manager statement."
-if confirm "Does the merged policy look right, and should I apply it?"; then
+if [ "$DRY_OK" = "no" ]; then
+  say "${YELLOW}The dry run failed, so there is no merged policy to approve.${RESET}"
+  say "Offering an apply here would ask you to confirm something you were never"
+  say "shown. Read the error above: 'no permission set named ...' means the"
+  say "permission set does not exist, which is a different problem from a"
+  say "missing grant and is not fixed by this script."
+  say ""
+  say "Skipping stage 3. It is independent of the rest, so the cutover can go on."
+  pause
+elif confirm "Does the merged policy look right, and should I apply it?"; then
   ALLOW_PROD_WRITE=yes bash "$REPO/scripts/idc-grant-secretsmanager.sh" op-prod --apply
   say ""
   say "${GREEN}Applied.${RESET}"

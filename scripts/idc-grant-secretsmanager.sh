@@ -23,7 +23,7 @@ REGION="us-east-1"          # Identity Center lives here; the SECRETS are us-eas
 case "$BR" in
   op-qa)   PS_NAME="op-qa-platform-admin";   ACCOUNT=527101283767; SM_REGION=us-east-2 ;;
   op-dev)  PS_NAME="op-dev-platform-admin";  ACCOUNT=700736442855; SM_REGION=us-east-2 ;;
-  op-prod) PS_NAME="op-prod-platform-admin"; ACCOUNT=937464026810; SM_REGION=us-east-2
+  op-prod) PS_NAME="${PS_NAME:-op-prod-platform-admin}"; ACCOUNT=937464026810; SM_REGION=us-east-2
            if [ "$APPLY" = "--apply" ] && [ "${ALLOW_PROD_WRITE:-}" != "yes" ]; then
              echo "!! op-prod is PRODUCTION. Re-run as:" >&2
              echo "   ALLOW_PROD_WRITE=yes $0 op-prod --apply" >&2; exit 3
@@ -42,6 +42,7 @@ esac
 echo "== management account $ACCT (profile $PROFILE), permission set $PS_NAME"
 
 PS_ARN=""
+SEEN=""
 NEXT=""
 while : ; do
   if [ -z "$NEXT" ]; then
@@ -55,13 +56,26 @@ while : ; do
     n=$(aws sso-admin describe-permission-set --profile "$PROFILE" --region "$REGION" \
           --instance-arn "$INSTANCE_ARN" --permission-set-arn "$arn" \
           --query 'PermissionSet.Name' --output text 2>/dev/null)
+    SEEN="${SEEN}${SEEN:+ }$n"
     [ "$n" = "$PS_NAME" ] && { PS_ARN="$arn"; break; }
   done
   [ -n "$PS_ARN" ] && break
   NEXT=$(printf '%s' "$OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("NextToken",""))')
   [ -n "$NEXT" ] || break
 done
-[ -n "$PS_ARN" ] || { echo "!! no permission set named $PS_NAME" >&2; exit 1; }
+if [ -z "$PS_ARN" ]; then
+  # An empty lookup is not evidence the grant is missing -- it can mean the
+  # permission set was never created under that name. Prod and QA do not share
+  # a naming scheme: QA carries BOTH op-qa-platform-admin and usx-on-prem-admins,
+  # prod carries only usx-on-prem-admins. Name what IS there so the next step is
+  # a choice rather than another guess.
+  echo "!! no permission set named $PS_NAME" >&2
+  echo "   This is NOT 'the grant is missing' -- the permission set does not exist." >&2
+  echo "   Permission sets in this Identity Center instance:" >&2
+  printf '%s\n' $SEEN | sort | sed 's/^/     /' >&2
+  echo "   Re-run with PS_NAME=<one of those> if a different name owns this tier." >&2
+  exit 1
+fi
 echo "   $PS_ARN"
 
 CURRENT=$(aws sso-admin get-inline-policy-for-permission-set --profile "$PROFILE" --region "$REGION" \
