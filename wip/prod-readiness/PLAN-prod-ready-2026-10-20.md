@@ -267,10 +267,26 @@ So the blocker on 1659 is no longer a decision — it is build work.
 for over a week, and several are Talos static-pod false positives. Delivering two months of
 unreviewed backlog on day one teaches everyone to mute the channel.
 
-🔴 **Found inside that record and still open: QA's etcd backups are failing** —
-`EtcdSnapshotJobFailing` x5 and `KubeJobFailed` x5 in `etcd-backup`, undetected purely
-because nothing delivers. That is a live data-loss exposure on the cluster running
-RisingWave, and it outranks prod's alerting work. **Prod's snapshot state is unmeasured.**
+~~🔴 **Found inside that record and still open: QA's etcd backups are failing**~~
+⛔ **DISPROVEN 2026-10-26.** The `EtcdSnapshotJobFailing` x5 reading came from the
+2026-09-18 QA sweep and was quoted today as if current. Measured on **all three
+clusters** today:
+
+| Cluster | CronJob | Schedule | Suspended | Failed Jobs | Last success |
+|---|---|---|---|---|---|
+| op-dev | `etcd-backup/etcd-snapshot-to-s3` | `17 * * * *` | false | 0 | 2026-10-26T21:17:35Z |
+| op-qa | same | `17 * * * *` | false | 0 | 2026-10-26T21:17:17Z |
+| op-prod | same | `17 * * * *` | false | 0 | 2026-10-26T21:17:13Z |
+
+**The alerts are resolved, and prod is measured for the first time.** An alert state is
+a reading with a timestamp, not a standing fact — a five-week-old firing alert says what
+was true five weeks ago.
+
+⚠️ **Still unproven: the bucket.** A Job exiting zero is not an object in S3, and this
+repo has both an `rm -rf` that ran with no operand and an empty value that rendered as an
+empty string, each reporting success. The destination is **not** in the CronJob spec —
+the first pass grepped for `s3://` and found only the namespace name, which is not a
+destination.
 
 ### Can we recover it?
 

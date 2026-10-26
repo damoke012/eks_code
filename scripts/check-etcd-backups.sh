@@ -91,20 +91,45 @@ for NSNAME in $CJ; do
     [ "$AGE" -gt "$STALE_HOURS" ] && { say "   ** STALE"; RC=1; }
   fi
 
-  say "   -- its Jobs, newest last"
-  kubectl --kubeconfig="$K" -n "$NS" get jobs --no-headers 2>/dev/null \
-    | grep -F "$NAME" | tail -6 | awk '{print "      "$1"  completions="$2"  age="$4}'
+  # Name the columns. Positional awk on `get jobs` printed DURATION under the
+  # heading "age" on 2026-10-26, so three Jobs an hour apart all read 17s and
+  # looked like one burst. A column's meaning is not its position.
+  say "   -- its Jobs, newest last (age is real age, not duration)"
+  kubectl --kubeconfig="$K" -n "$NS" get jobs \
+    -o custom-columns=NAME:.metadata.name,SUCCEEDED:.status.succeeded,FAILED:.status.failed,START:.status.startTime,FINISH:.status.completionTime \
+    --no-headers 2>/dev/null | grep -F "$NAME" | tail -6 | sed 's/^/      /'
   FAILED=$(kubectl --kubeconfig="$K" -n "$NS" get jobs \
            -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.failed}{"\n"}{end}' \
            2>/dev/null | grep -F "$NAME" | awk '$2 != "" && $2 > 0' | wc -l)
   say "   jobs with failures: $FAILED"
   [ "$FAILED" -gt 0 ] && RC=1
 
-  # --- the destination, read from the spec rather than assumed ---------------
-  DEST=$(kubectl --kubeconfig="$K" -n "$NS" get cronjob "$NAME" -o json 2>/dev/null \
-         | grep -oE 's3://[A-Za-z0-9._/-]+|[A-Za-z0-9.-]*etcd[A-Za-z0-9.-]*backup[A-Za-z0-9.-]*' \
-         | sort -u | head -5)
-  say "   destination strings in the spec: ${DEST:-none found}"
+  # --- where does it write? Read the spec, then the pod's own log ------------
+  # The first version grepped for s3:// or an etcd-ish word and found only the
+  # namespace name, which is not a destination. Print the env and the command
+  # instead: a bucket passed as BACKUP_BUCKET or an argument is invisible to a
+  # pattern that only knows one shape. Names only for anything secret-backed.
+  say "   -- container env (literal values; secret-backed keys show as a ref)"
+  kubectl --kubeconfig="$K" -n "$NS" get cronjob "$NAME" \
+    -o jsonpath='{range .spec.jobTemplate.spec.template.spec.containers[*]}{range .env[*]}{"      "}{.name}{"="}{.value}{.valueFrom.secretKeyRef.name}{.valueFrom.configMapKeyRef.name}{"\n"}{end}{end}' \
+    2>/dev/null | head -20
+  say "   -- command and args"
+  kubectl --kubeconfig="$K" -n "$NS" get cronjob "$NAME" \
+    -o jsonpath='{range .spec.jobTemplate.spec.template.spec.containers[*]}{.command}{" "}{.args}{"\n"}{end}' \
+    2>/dev/null | head -c 600 | sed 's/^/      /'
+  say ""
+  # The pod's own log is the closest thing to the property short of the bucket:
+  # a snapshot script that writes nothing can still exit zero (this repo has an
+  # `rm -rf` with no operand and an empty value rendering as an empty string).
+  LASTPOD=$(kubectl --kubeconfig="$K" -n "$NS" get pods --sort-by=.metadata.creationTimestamp \
+            -o name 2>/dev/null | grep -F "$NAME" | tail -1)
+  if [ -n "$LASTPOD" ]; then
+    say "   -- last snapshot pod log (tail)"
+    kubectl --kubeconfig="$K" -n "$NS" logs "$LASTPOD" --all-containers --tail=12 \
+      2>/dev/null | sed 's/^/      /' || say "      (log already gone)"
+  else
+    say "   -- no snapshot pod still present to read a log from"
+  fi
 done
 
 say ""
