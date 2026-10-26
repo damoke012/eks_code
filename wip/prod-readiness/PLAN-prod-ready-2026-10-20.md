@@ -110,6 +110,31 @@ remaining routes are `talosctl list` against each control-plane node — Talos's
 read-only API — or the authenticator's own log line `writing webhook kubeconfig file`,
 which is a proxy for the write and not for the file's presence now.
 
+### ✅ The prerequisite check is PROVEN on QA — 2026-10-26
+
+`scripts/check-authenticator-webhook-file.sh qa` returned PASS on all three
+control-plane nodes:
+
+| Node | File | Size | Written |
+|---|---|---|---|
+| 10.10.82.25 | `kubeconfig.yaml` | 1909 | Jul 28 22:47:32 |
+| 10.10.82.24 | `kubeconfig.yaml` | 1909 | Jul 28 22:46:25 |
+| 10.10.82.177 | `kubeconfig.yaml` | 1909 | Jul 28 22:46:59 |
+
+**Why this matters more than the result itself.** QA is the positive control: it
+already carries the apiserver flag with a healthy API server, so the file MUST be
+there. It is, at identical size on all three nodes, timestamped within 67 seconds of
+each other on **the day QA's SSO went live**. So the method reads the real host
+filesystem — and prod's answer, whatever it is, can be believed.
+
+Prod is still unmeasured: no live AWS session for account 937464026810 at the time of
+the run. That is a session, not a finding.
+
+⚠️ **The check's own first version collapsed three faults into one message** ("no
+configured profile resolves to the account"), which cannot distinguish an unconfigured
+profile from an expired session — and only one of those is fixed by logging in. Fixed
+by reading `sso_account_id` from `~/.aws/config`, which needs no session.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
