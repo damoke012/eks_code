@@ -350,6 +350,34 @@ was never the remaining task. The real sequence is: give prod a machine config i
 playground. The Dashboard shows this project has never deployed to QA, Staging or
 Production from any release it still holds.
 
+### ✅ 1e. Everything for INFRA-1661 is in place — 2026-10-26
+
+| Piece | State |
+|---|---|
+| Webhook kubeconfig on all 3 prod control-plane nodes | ✅ 1909 bytes each |
+| Module code for the flag | ✅ `8c732fce` merged **2026-09-14T16:28Z**, untouched since |
+| `0.5.0` contains it | ✅ created 2026-09-17T17:25Z, three days later |
+| `TF_VAR_enable_aws_iam_authenticator=true` | ✅ scoped to **qa** AND **production** |
+| Octopus project | ✅ re-enabled 2026-10-26 |
+| Break-glass | ✅ works via `ops-controller` |
+
+**Prod runs `0.1.3-fix-drop-duplicate-risingwave-irsa.1.2`, deployed 2026-09-14T15:45 —
+43 minutes BEFORE the authenticator merged.** So the gap is three days of commits, not
+three months; release numbers on this project do not track dates.
+
+The eight commits between prod's deploy and `0.5.0`: the authenticator, a tfstate-bucket
+bootstrap change, the `envs/<env>.tfvars` opt-in, three `new-environment.sh` edits, and
+the qa2 addition.
+
+⚠️ **One of them changes a rule this repo has relied on**:
+[[tfvars-override-is-opt-in-per-env]]. `TF_USE_VARFILE` makes `envs/<env>.tfvars` outrank
+every Octopus `TF_VAR_*`. Only dev/qa/qa2 tfvars exist. **Check `TF_USE_VARFILE` for
+production before deploying** — if it is true, prod needs a `prod.tfvars` first, and if it
+is unset the Octopus variable rules as expected.
+
+**Sequence:** Update Variables on `0.5.0` → deploy to **QA** (the gate; QA has working SSO
+so a regression is visible) → deploy to **Production** with break-glass open.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
