@@ -231,6 +231,17 @@ Two things that matter regardless of which tool it was:
 2. An API key created **2021-01-26**, five and a half years old, can disable delivery to
    three clusters. That is its own finding and its own ticket.
 
+### ✅ RE-ENABLED 2026-10-26 — the cutover is unblocked
+
+`scripts/octopus-enable-project.py --apply`, read back from the server:
+`read-back disabled: False`. Releases can be created and deploys can run again,
+on all three clusters.
+
+⚠️ **Re-run that script read-only in a day.** Something set `IsDisabled` once, by
+API, from automation. If it reports disabled again, whatever ran on 2026-10-22 is
+still running — and that is then a conversation with a timestamp, an account, an IP
+and a user agent rather than a question.
+
 ### ✅ ANSWERED — `lazy` disabled it on 2026-10-22 at 13:00:29
 
 ```

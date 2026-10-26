@@ -38,7 +38,8 @@ Last refreshed: 2026-10-26 (evening, after measuring op-prod for SSO readiness).
 - RisingWave alerts go to dedicated Teams channels, prod and non-prod, filtered by namespace in Grafana. Low-noise by design: define the SLO first, alert only on what matters. App and platform share a channel until QA and prod, then split.
 
 ## Risks and blockers
-- The iaac-talos Octopus project is DISABLED (seen 2026-10-26). Releases cannot be created and deploys cannot run, which blocks the prod SSO cutover and any other Terraform change to the on-prem clusters. Who disabled it and why is unknown. TfApply is true for production on this project, so disabling it is a plausible deliberate safety catch — re-enabling makes every future prod deploy apply for real.
+- The iaac-talos Octopus project was found DISABLED on 2026-10-26, set by the lazy account on 2026-10-22 at 13:00:29 via the API (go-octopusdeploy SDK, runner 172.19.75.84, API key created 2021-01-26). It had silently blocked every Terraform change to all three on-prem clusters for four days. Re-enabled 2026-10-26 and read back as enabled. Still unknown: what runs as lazy against Octopus, and whether it will disable it again — check daily for now.
+- An Octopus API key created 2021-01-26, five and a half years old, can disable delivery to all three on-prem clusters. Needs its own ticket.
 - There is no permission set named op-prod-platform-admin. The belief that it exists and holds only sts:GetCallerIdentity was measured on QA and assumed symmetric; prod uses the usx-on-prem-* naming instead. Three profiles point at the prod account — ops-controller, usx-prod, op-prod — and only ops-controller can read prod's Secrets Manager.
 - On-prem Kubernetes 1.32.0 is out of support and was never patched past .0. Upgrade plan: unknown — confirm.
 - aws-auth on QA and prod maps the operator and reader tiers to ARNs with literal FILL placeholders. Only admins can log in usefully. The roles themselves do not exist yet.
