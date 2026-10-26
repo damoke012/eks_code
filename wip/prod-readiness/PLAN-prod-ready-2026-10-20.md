@@ -371,9 +371,19 @@ the qa2 addition.
 
 ⚠️ **One of them changes a rule this repo has relied on**:
 [[tfvars-override-is-opt-in-per-env]]. `TF_USE_VARFILE` makes `envs/<env>.tfvars` outrank
-every Octopus `TF_VAR_*`. Only dev/qa/qa2 tfvars exist. **Check `TF_USE_VARFILE` for
-production before deploying** — if it is true, prod needs a `prod.tfvars` first, and if it
-is unset the Octopus variable rules as expected.
+every Octopus `TF_VAR_*`. Only dev/qa/qa2 tfvars exist.
+
+✅ **CHECKED 2026-10-26: `TF_USE_VARFILE` exists only scoped to `qa2 = 'false'`.** It is
+unset for production, dev and qa — the feature is dormant everywhere. So production reads
+`TF_VAR_*`, and the flag set tonight will be honoured. Clear to deploy.
+
+⛔ **Hazard in how that was checked.** The answer came from
+`add-octopus-var.py --name TF_USE_VARFILE --value true --env production`, used as a READ.
+Its dry run ends `DRY-RUN. Re-run with --apply to write.` — and applying it would opt
+production **into** the tfvars path with no `prod.tfvars` present, failing the next prod
+deploy. A write tool used for a query ends by inviting the wrong write. It needs a
+`--check` mode, or this becomes [[a-guard-can-measure-the-wrong-thing]] in reverse: a
+correct measurement whose own output recommends the damage.
 
 **Sequence:** Update Variables on `0.5.0` → deploy to **QA** (the gate; QA has working SSO
 so a regression is visible) → deploy to **Production** with break-glass open.
