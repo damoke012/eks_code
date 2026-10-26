@@ -102,6 +102,8 @@ else:
 # place that records it, and the same trail dates the variable, which decides
 # whether "the variable was never scoped to production" was ever true.
 EVENTS = int(arg("--events", "0"))
+# Only fetch diffs when asked: it is one extra request per modified event.
+DETAIL = "--detail" in sys.argv
 if EVENTS:
     users = {}
 
@@ -148,6 +150,36 @@ if EVENTS:
         for ev in got:
             msg = " ".join((ev.get("Message") or "").split())
             print(f"   {ev.get('Occurred','?')[:19]}  {whom(ev):22.22}  {msg[:110]}")
+            # "Project X was modified" does not say WHAT changed, and that is
+            # the whole question when a project turns up disabled. Pull the
+            # diff for those, and only those.
+            if not DETAIL or "was modified" not in msg.lower():
+                continue
+            eid = ev.get("Id")
+            shown = False
+            for path in (f"/api/{SPACE_ID}/events/{eid}/details",
+                         f"/api/events/{eid}/details"):
+                try:
+                    r2 = session.get(f"{OCTO_URL}{path}")
+                except Exception:
+                    continue
+                if not r2.ok:
+                    continue
+                d = r2.json() or {}
+                diffs = (d.get("ChangeDetails") or {}).get("Differences") or []
+                if not diffs:
+                    txt = json.dumps(d)[:400]
+                    print(f"        detail: {txt}")
+                    shown = True
+                    break
+                for df in diffs[:12]:
+                    print(f"        {df.get('Name','?')}: "
+                          f"{str(df.get('OldValue'))[:40]!r} -> "
+                          f"{str(df.get('NewValue'))[:40]!r}")
+                shown = True
+                break
+            if not shown:
+                print("        detail: NOT MEASURED - no detail endpoint answered")
 
 print()
 if disabled:
