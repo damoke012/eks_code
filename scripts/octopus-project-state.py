@@ -223,39 +223,58 @@ if EVENTS:
 # One project disabled is a decision about that project. Twenty is a hygiene
 # job, and the difference decides whether to argue the case or just opt out.
 if SCAN:
-    print(f"\n== scanning the last {SCAN} space events for IsDisabled changes")
-    rows, seen_any = [], 0
-    for params in ({"take": SCAN, "documentTypes": "Projects"}, {"take": SCAN}):
-        r = session.get(f"{OCTO_URL}/api/{SPACE_ID}/events", params=params)
-        if not r.ok:
-            print(f"   HTTP {r.status_code} with {sorted(params)}")
-            continue
-        items = (r.json() or {}).get("Items", [])
-        print(f"   {sorted(params)}: {len(items)} events")
-        if not items:
-            continue
-        seen_any = len(items)
-        for ev in items:
-            msg = " ".join((ev.get("Message") or "").split())
-            if "was modified" not in msg.lower():
-                continue
-            cd = ev.get("ChangeDetails") or {}
-            for df in (cd.get("Differences") or []):
-                if "isdisabled" not in str(df.get("path", "")).lower():
-                    continue
-                rows.append((ev.get("Occurred", "?")[:19],
-                             ev.get("Username") or ev.get("UserId") or "?",
-                             msg[:60], df.get("value")))
-        break
-    if not seen_any:
-        print("   NOT MEASURED - no events returned; this is the query, not the history")
-    elif not rows:
-        print(f"   no IsDisabled change in those {seen_any} events.")
-        print("   Raise --scan-disables to look further back before concluding.")
+    print(f"\n== scanning the last {SCAN} project events for IsDisabled changes")
+    # ⚠️ The LIST response has a ChangeDetails key but does not populate it --
+    # the diff only arrives when an event is fetched BY ID. A first version read
+    # it off the list items and reported "no IsDisabled changes" across 300
+    # events, including the one we had already seen with our own eyes. A check
+    # that cannot detect the case we know about is not a check.
+    r = session.get(f"{OCTO_URL}/api/{SPACE_ID}/events",
+                    params={"take": SCAN, "documentTypes": "Projects"})
+    if not r.ok:
+        print(f"   NOT MEASURED - HTTP {r.status_code}")
     else:
-        print(f"   {len(rows)} IsDisabled change(s) in {seen_any} events:")
-        for occ, who, msg, val in rows:
-            print(f"   {occ}  {who:20.20}  -> {val}   {msg}")
+        items = (r.json() or {}).get("Items", [])
+        if not items:
+            print("   NOT MEASURED - the query returned nothing; not a history")
+        else:
+            occ = [i.get("Occurred", "")[:19] for i in items if i.get("Occurred")]
+            print(f"   {len(items)} events, {min(occ)} .. {max(occ)}")
+            mods = [i for i in items
+                    if "was modified" in (i.get("Message") or "").lower()]
+            cap = min(len(mods), 150)
+            print(f"   {len(mods)} 'was modified'; fetching the diff for {cap}")
+            rows, control = [], False
+            for ev in mods[:cap]:
+                rr = session.get(f"{OCTO_URL}/api/events/{ev.get('Id')}")
+                if not rr.ok:
+                    continue
+                doc = rr.json() or {}
+                for df in ((doc.get("ChangeDetails") or {}).get("Differences") or []):
+                    if "isdisabled" not in str(df.get("path", "")).lower():
+                        continue
+                    when = doc.get("Occurred", "?")[:19]
+                    who = doc.get("Username") or doc.get("UserId") or "?"
+                    msg = " ".join((doc.get("Message") or "").split())
+                    rows.append((when, who, msg[:58], df.get("value")))
+                    if when.startswith("2026-10-22T13:00"):
+                        control = True
+            # The control: the iaac-talos disable is a known event. If the window
+            # covers it and we did not find it, the method is wrong, not the data.
+            covered = min(occ) <= "2026-10-22T13:00:29" <= max(occ)
+            if covered and not control:
+                print("   ⛔ CONTROL FAILED - the window covers 2026-10-22T13:00:29")
+                print("      and this did not find it. Do not trust the list below.")
+            elif not covered:
+                print("   (window does not reach 2026-10-22; raise --scan-disables)")
+            else:
+                print("   control OK - it found the known iaac-talos disable")
+            if rows:
+                print(f"   {len(rows)} IsDisabled change(s):")
+                for when, who, msg, val in sorted(rows):
+                    print(f"   {when}  {who:20.20} -> {val}   {msg}")
+            else:
+                print("   no IsDisabled change found in the window above")
 
 print()
 if disabled:
