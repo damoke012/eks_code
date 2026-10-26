@@ -91,6 +91,22 @@ for v in varset.get("Variables", []):
 if not found:
     print("   not defined on this project")
 
+# Is the project CONFIGURED for production, or only for the environments it has
+# actually deployed to? 142 TF_VAR_* exist; what matters is how many of them are
+# scoped to production, because a deploy reads TF_VAR_* and nothing else.
+print("TF_VAR_* by environment scope:")
+byenv = {}
+for v in varset.get("Variables", []):
+    if not v["Name"].startswith("TF_VAR_"):
+        continue
+    sc = (v.get("Scope") or {}).get("Environment", [])
+    key = ", ".join(sorted(envs.get(i, i) for i in sc)) or "(all)"
+    byenv[key] = byenv.get(key, 0) + 1
+for k in sorted(byenv, key=lambda x: -byenv[x]):
+    print(f"   {byenv[k]:4}  {k}")
+if not byenv:
+    print("   none")
+
 # What is actually deployed where. The Releases page lists what EXISTS; this is
 # what each environment is RUNNING, which is the only safe basis for choosing a
 # release to redeploy with refreshed variables.

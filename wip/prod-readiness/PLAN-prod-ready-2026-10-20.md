@@ -280,9 +280,14 @@ the only environment left that does not apply for real.
 
 **So stage 6 was never a variable refresh.** Updating variables on "the release Production
 runs" presumes Production runs one. It does not. Deploying would be the **first-ever
-Terraform apply to production from this project**, with `TfApply` true — a full plan
-against a cluster that was built another way — and the most recent release **failed in
-QA2**, the environment that is supposed to prove things first.
+Terraform apply to production from this project**, with `TfApply` true, against a cluster
+that was built another way.
+
+⚠️ **QA2 is NOT a gate — corrected by Doke 2026-10-26.** QA2 is a playground; **QA is the
+pre-prod environment**. So 0.5.0's QA2 failure is not a blocker and should not be read as
+one. ⚠️ This contradicts CLAUDE.md rule 10 and [[promotion-order-qa2-dev-qa-prod]], which
+both state QA2 → dev → QA → prod. **Fix the rule, not just this note**, or the next
+session re-derives the wrong gate.
 
 ### 🔗 INFRA-1663 blocks INFRA-1661, and neither ticket says so
 
@@ -304,9 +309,9 @@ and the project is enabled again.
 
 **What changes is the shape of the work.** "Scope one variable to production and deploy"
 was never the remaining task. The real sequence is: give prod a machine config in
-`iaac-talos` (1663) → fix whatever failed QA2 on 0.5.0 → prove the path QA2 → dev → QA →
-**then** prod. That is CLAUDE.md rule 10, and the Dashboard shows the project has never
-completed it even once.
+`iaac-talos` (1663) → prove the path on **QA** → then prod. QA2 does not feature; it is a
+playground. The Dashboard shows this project has never deployed to QA, Staging or
+Production from any release it still holds.
 
 ## 1b. The original delta, for reference
 
