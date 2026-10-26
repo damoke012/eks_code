@@ -210,14 +210,26 @@ auth  = API key 'octopus' created Tue, 26 Jan 2021 00:35:37 GMT
 ip    = ::ffff:172.19.75.84      (private -- a CI runner, not a laptop)
 ```
 
-`go-octopusdeploy` is the SDK the **Terraform provider for Octopus Deploy** is built on.
-So `IsDisabled = true` was **applied by a Terraform run**, which means it is declared as
-state somewhere — and **re-enabling it by hand will be reverted on the next apply.**
+⚠️ **"Terraform did it" was overstated — read the last token.** `go-octopusdeploy` is the
+SDK, used by the Terraform provider AND by the Octopus CLI AND by any Go program. Its user
+agent ends with the *requesting tool*, and here that is **`NoneOrUnknown`** — the default
+when the caller never set it. The Terraform provider does set it. So the honest reading is
+**a Go program using the Octopus SDK that did not identify itself**, and `NoneOrUnknown`
+is weak evidence *against* the provider rather than for it.
 
-Two consequences that matter more than the original question:
-1. The fix is a code change in whatever repo declares this project, not a UI click.
-2. An API key created **2021-01-26** — five and a half years old — can disable production
-   delivery for three clusters. That is its own finding.
+What is actually established: a Go SDK caller, on Linux, from a private IP
+(`172.19.75.84` — a CI runner or a pod, not a laptop), using an API key created
+**2021-01-26**.
+
+✅ **And `iaac-octopus-config` is now genuinely eliminated** — cloned, 53 files, and
+`talos`, `octopusdeploy_project` and `is_disabled` all absent from the *contents*. The
+earlier elimination was right by luck; this one is right by measurement.
+
+Two things that matter regardless of which tool it was:
+1. If it is declared as state anywhere, re-enabling by hand is reverted on the next run —
+   so **check for a repeat before trusting a manual fix**, rather than assuming either way.
+2. An API key created **2021-01-26**, five and a half years old, can disable delivery to
+   three clusters. That is its own finding and its own ticket.
 
 ### ✅ ANSWERED — `lazy` disabled it on 2026-10-22 at 13:00:29
 

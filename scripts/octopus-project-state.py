@@ -38,6 +38,7 @@ def arg(flag, default):
 
 
 PROJECT_SLUG = arg("--project", "iaac-talos")
+SCAN = int(arg("--scan-disables", "0"))
 
 
 def load_api_key():
@@ -217,6 +218,44 @@ if EVENTS:
                 break
             if not shown:
                 print("        detail: NOT MEASURED - no detail endpoint answered")
+
+# --- is this project special, or is something disabling projects generally? --
+# One project disabled is a decision about that project. Twenty is a hygiene
+# job, and the difference decides whether to argue the case or just opt out.
+if SCAN:
+    print(f"\n== scanning the last {SCAN} space events for IsDisabled changes")
+    rows, seen_any = [], 0
+    for params in ({"take": SCAN, "documentTypes": "Projects"}, {"take": SCAN}):
+        r = session.get(f"{OCTO_URL}/api/{SPACE_ID}/events", params=params)
+        if not r.ok:
+            print(f"   HTTP {r.status_code} with {sorted(params)}")
+            continue
+        items = (r.json() or {}).get("Items", [])
+        print(f"   {sorted(params)}: {len(items)} events")
+        if not items:
+            continue
+        seen_any = len(items)
+        for ev in items:
+            msg = " ".join((ev.get("Message") or "").split())
+            if "was modified" not in msg.lower():
+                continue
+            cd = ev.get("ChangeDetails") or {}
+            for df in (cd.get("Differences") or []):
+                if "isdisabled" not in str(df.get("path", "")).lower():
+                    continue
+                rows.append((ev.get("Occurred", "?")[:19],
+                             ev.get("Username") or ev.get("UserId") or "?",
+                             msg[:60], df.get("value")))
+        break
+    if not seen_any:
+        print("   NOT MEASURED - no events returned; this is the query, not the history")
+    elif not rows:
+        print(f"   no IsDisabled change in those {seen_any} events.")
+        print("   Raise --scan-disables to look further back before concluding.")
+    else:
+        print(f"   {len(rows)} IsDisabled change(s) in {seen_any} events:")
+        for occ, who, msg, val in rows:
+            print(f"   {occ}  {who:20.20}  -> {val}   {msg}")
 
 print()
 if disabled:
