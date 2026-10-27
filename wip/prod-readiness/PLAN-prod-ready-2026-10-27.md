@@ -237,3 +237,50 @@ repair only holds once the pin already carries the fix. Recorded in
   warning today, a scheduling failure if that policy ever enforces
 * **`argocd-apps`** on QA, absent on prod
 * **No alert delivery anywhere** — the thread running through every item above
+
+---
+
+## Velero on prod, measured 2026-10-27 evening
+
+**The RisingWave backups were never broken.** `rw-prod-status.sh` gate 7 reported "no COMPLETED
+risingwave backup yet" while 29 days of six-hourly backups sat there `Completed` with zero
+errors. The gate ran `awk '$2=="Completed"'` over `kubectl get backups --no-headers`, which on
+these clusters prints only NAME and AGE — so it was comparing `13h`, `93m` and `29d` against
+`Completed`. It could never have passed on any cluster. Fixed to read `.status.phase` by name.
+
+**The real finding, which that gate never looked at:** `velero-daily-full` has been
+**PartiallyFailed every night since at least 2026-10-14** — 14 consecutive days.
+
+```
+phase: PartiallyFailed   errors: 3   warnings: 101   items: 4549/4549
+error="daemonset pod not found in running state in node talos-cp-op-prod-{1,2,3}"
+name=ztunnel-{p6wwp,jh2cb,97lsc}
+```
+
+Three errors, three control planes, one `ztunnel` pod each. Velero's node-agent DaemonSet does
+not run on control-plane nodes (deliberately — see the Wiz CP exclusion), so there is no agent
+to file-system-backup the ztunnel pods scheduled there.
+
+**Not data loss.** ztunnel is Istio's stateless node proxy; it is recreated on restore. All
+4549 items are backed up.
+
+**The consequence is the problem.** `PartiallyFailed` is now the normal nightly state of
+prod's whole-cluster backup, so a genuine failure is indistinguishable from the standing one.
+Fix by excluding those volumes from the backup so `Completed` means something again.
+
+⚠️ Note what made this findable: the RisingWave namespace backup completes four times a day.
+Any dashboard showing "RisingWave backups: healthy" was true and irrelevant. The broken thing
+was one row above it. [[adjacent-step-green-signals]]
+
+## Four permanently-failing signals found today
+
+Each one trains a reader to ignore it, and each hides whatever fails next:
+
+| signal | state | since |
+|---|---|---|
+| `velero-daily-full` | PartiallyFailed nightly | ≥ 2026-10-14 |
+| `Terraform Validate` (iaac-risingwave-onprem) | fails on every PR — wrong working-directory | unknown |
+| `dpl` Octopus deploy | fails on every PR; also Failed in iaac-talos since 2026-03-30 | ≥ 7 months |
+| `rw-prod-status.sh` gate 7 | could never pass — tested the AGE column | since written |
+
+The last one was ours. The other three are not, and all four have the same effect.

@@ -134,3 +134,29 @@ answer you already know and confirm it says so. It costs one line.
 Chained `sed` expressions, stacked `case` branches without `break`, successive `.replace()`
 calls: order them so the specific match wins and stops, or evaluate each input once and
 emit a single decision. Never let the fallback rule run over the output of the precise one.
+
+## 2026-10-27 — the inverse: a signal that is permanently RED
+
+The family above is a true green about the wrong step. The mirror image costs just as much: a
+check that fails every single time, so its failure carries no information and hides the real
+one behind it. Four found on op-usxpress-prod in a single day:
+
+| signal | state | since |
+|---|---|---|
+| `velero-daily-full` | PartiallyFailed nightly — 3 ztunnel pods on control planes with no node-agent | ≥ 2026-10-14 |
+| `Terraform Validate` | every PR — the job's working-directory is `terraform/`, the code is in `deploy/terraform/` | unknown |
+| `dpl` Octopus deploy | every PR, and Failed in `iaac-talos` since 2026-03-30 | ≥ 7 months |
+| `rw-prod-status.sh` gate 7 | `awk '$2=="Completed"'` over output whose column 2 is the AGE | since written |
+
+**Why it is the same disease:** both make the signal independent of the thing it watches. A
+permanent red is arguably worse, because somebody once read it, concluded "that one is always
+like that", and that judgement is now load-bearing and undocumented.
+
+**How to apply:**
+* A check that has never passed is **not** a check. Before trusting any red as information,
+  ask when it last went green — `gh run list`, the Velero backup list, the deployment history.
+* Fix or delete. A known-benign failure that is left in place converts into "we ignore that
+  dashboard" within weeks.
+* When you find one, look at what sits NEXT to it: on 2026-10-27 the RisingWave namespace
+  backup completed four times a day, one row below the whole-cluster backup that had failed
+  for a fortnight. The healthy neighbour is what makes the broken one survivable.
