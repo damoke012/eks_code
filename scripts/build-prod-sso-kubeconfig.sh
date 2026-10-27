@@ -51,19 +51,38 @@ say "role in aws-auth:  $ROLENAME"
 # --- 2. the profile, by which one assumes that role --------------------------
 # Three profiles point at this account with different permission sets. Name and
 # iteration order are both accidents; the ARN that comes back is the fact.
-PROFILE=""
+# sso_role_name is readable from ~/.aws/config WITHOUT a session, so the
+# profile that WOULD work can be named even when nobody is signed in to it.
+# The first version of this loop did `|| continue` on a failed
+# get-caller-identity, which silently dropped exactly that profile -- it
+# reported the two signed-in profiles as the wrong role and never mentioned
+# the un-signed-in one whose name matched. A skipped candidate is information.
+PROFILE=""; WANTLOGIN=""
+WANTROLE=$(printf '%s' "$ROLENAME" | sed -E 's/^AWSReservedSSO_//; s/_[0-9a-f]{16}$//')
 for P in $(aws configure list-profiles 2>/dev/null); do
   [ "$(aws configure get sso_account_id --profile "$P" 2>/dev/null)" = "$ACCOUNT" ] || continue
-  ARN=$(aws --profile "$P" sts get-caller-identity --query Arn --output text 2>/dev/null) || continue
-  case "$ARN" in
-    *"$ROLENAME"*) PROFILE="$P"; say "profile:           $P  (assumes $ROLENAME)"; break ;;
-    *) say "   $P  signed in, but as ${ARN##*:} -- not this role" ;;
-  esac
+  CFGROLE=$(aws configure get sso_role_name --profile "$P" 2>/dev/null)
+  if ARN=$(aws --profile "$P" sts get-caller-identity --query Arn --output text 2>/dev/null); then
+    case "$ARN" in
+      *"$ROLENAME"*) PROFILE="$P"; say "profile:           $P  (assumes $ROLENAME)"; break ;;
+      *) say "   $P  signed in as ${ARN##*/}@${CFGROLE:-?} -- not $WANTROLE" ;;
+    esac
+  else
+    say "   $P  configured for ${CFGROLE:-an unknown role}, NOT SIGNED IN"
+    [ "$CFGROLE" = "$WANTROLE" ] && WANTLOGIN="$P"
+  fi
 done
-[ -n "$PROFILE" ] || die "no signed-in profile assumes $ROLENAME.
-   This is a permission-set question, not a missing file: you need the
-   usx-on-prem-admins set in account $ACCOUNT. Try 'aws sso login' on a profile
-   that has it, then re-run."
+if [ -z "$PROFILE" ] && [ -n "$WANTLOGIN" ]; then
+  die "profile '$WANTLOGIN' is configured for $WANTROLE but has no live session.
+   That is a login, not a permissions problem:
+     aws sso login --profile $WANTLOGIN
+   then re-run this script."
+fi
+[ -n "$PROFILE" ] || die "no profile for account $ACCOUNT assumes $ROLENAME.
+   This is a permission-set question, not a missing file: the $WANTROLE set has
+   to be assigned to you in account $ACCOUNT. The profiles above show what you
+   do have -- AWSAdministratorAccess is NOT a substitute, because aws-auth maps
+   this one specific role ARN and nothing else."
 
 # --- 3. the cluster ID, from the authenticator's own config ------------------
 CID=$(kubectl --kubeconfig="$BG" -n kube-system get cm -o jsonpath='{range .items[*]}{.data.config\.yaml}{"\n"}{end}' 2>/dev/null \
