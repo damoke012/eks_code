@@ -284,3 +284,31 @@ Each one trains a reader to ignore it, and each hides whatever fails next:
 | `rw-prod-status.sh` gate 7 | could never pass — tested the AGE column | since written |
 
 The last one was ours. The other three are not, and all four have the same effect.
+
+---
+
+## The security finding, found and closed the same day
+
+**RisingWave answered `psql -U root` with an empty password on every node of all three
+clusters** — 106 node/port pairs. Raised by Idris Fagbemi from dev and QA; confirmed on
+op-usxpress-prod once the SSO kubeconfig from INFRA-1661 existed to test it.
+
+Closed by `v0.13.4` (PR #62, the `-ext` services → ClusterIP) plus the pin promotion
+(PR #51), verified by probe at 20:35Z on dev, QA, two prod workers and a prod control plane:
+all `Connection refused`. Full detail in [[risingwave-nodeport-unauthenticated]].
+
+**Two things this changes about the rest of this document.**
+
+The prod-readiness list above is hygiene — floating charts, a cosmetic backup failure, a
+missing hostname. None of it was the most serious thing on the estate, and none of it would
+ever have surfaced this. It took someone outside the list looking at something nobody had
+asked about.
+
+And it is the same shape as everything else found today: **a control that was never wrong,
+guarding a door the traffic did not use.** The CiliumNetworkPolicy restricting corp VLANs to
+the ingressgateway works exactly as designed. A NodePort does not pass through the
+ingressgateway.
+
+**The access work paid for itself within hours.** Idris could not confirm prod because he had
+no prod kubeconfig. The SSO login delivered that morning is what turned "likely prod" into a
+measurement — and then into a fix.

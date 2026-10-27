@@ -146,3 +146,4 @@
 - [RWO volume + RollingUpdate deadlocks](rwo-volume-plus-rollingupdate-deadlocks.md) — a ReadWriteOnce PVC needs strategy: Recreate; the default deadlocks while Available=True
 - [A cluster can be behind its own repo](cluster-can-be-behind-its-own-repo.md) — a tag pin means merging ships nothing until someone edits it, and every object stays green
 - [SSO grant is group membership](sso-grant-is-group-membership.md) — the permission set can exist, be assigned and be mapped, and still fail because it is granted to a GROUP
+- [RisingWave NodePort is unauthenticated](risingwave-nodeport-unauthenticated.md) — psql -U root with no password connects on all three clusters; NodePort bypasses the gateway
