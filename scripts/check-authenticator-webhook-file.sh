@@ -92,19 +92,40 @@ say "talosconfig: fetched, starts with 'context:'"
 # --- which nodes are control planes -----------------------------------------
 # Taken from the live cluster, not from a list in this file: the IPs differ per
 # environment and a hardcoded one would silently measure the wrong host.
-KC=""
+# Resolve by CAPABILITY, not by the first name that matches -- the same rule
+# this script already applies to AWS profiles, and for the same reason. On
+# 2026-10-27 op-usxpress-qa-sso.yaml and op-usxpress-qa.yaml both served
+# 10.10.82.51:6443. The loop below used to stop at the first match, and `-`
+# sorts before `.`, so it always chose the SSO file -- whose exec plugin needs
+# an AWS_PROFILE=op-qa session, a SECOND session independent of usx-qa. With
+# that session expired the node list came back empty, while the cert-based file
+# sitting beside it needed no AWS at all and would have answered. Alphabetical
+# order was silently deciding the authentication path.
+CANDIDATES=""
 for f in "$HOME"/.kube/*.yaml "$HOME"/.kube/*.yml; do
   [ -f "$f" ] || continue
   S=$(kubectl --kubeconfig="$f" config view -o jsonpath='{.clusters[*].cluster.server}' 2>/dev/null)
+  # One server only: a merged multi-cluster file leaves the cluster to its
+  # current-context, so --kubeconfig on it is not a statement of which cluster.
   [ "$(echo "$S" | wc -w)" = "1" ] || continue
-  case "$S" in *"$ENDPOINT:6443"*) KC="$f"; break ;; esac
+  case "$S" in *"$ENDPOINT:6443"*) CANDIDATES="${CANDIDATES}${CANDIDATES:+ }$f" ;; esac
 done
+[ -n "$CANDIDATES" ] && say "kubeconfigs for $ENDPOINT:6443: $(echo "$CANDIDATES" | tr ' ' '\n' | xargs -r -n1 basename | tr '\n' ' ')"
 
-IPS=""
-if [ -n "$KC" ]; then
-  IPS=$(kubectl --kubeconfig="$KC" get nodes -l node-role.kubernetes.io/control-plane \
-        -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{" "}{end}' 2>/dev/null)
-fi
+KC=""; IPS=""; KCERR=""
+for f in $CANDIDATES; do
+  OUT=$(kubectl --kubeconfig="$f" get nodes -l node-role.kubernetes.io/control-plane \
+        -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{" "}{end}' 2>&1)
+  if [ $? = 0 ] && [ "$(echo "$OUT" | wc -w)" -ge 1 ]; then
+    KC="$f"; IPS="$OUT"
+    say "   $(basename "$f")  answered with $(echo "$OUT" | wc -w) control-plane node(s)"
+    break
+  fi
+  # Keep the reason. Discarding stderr here is what made the previous failure
+  # read as "could not be read from the cluster" with no cause to act on.
+  say "   $(basename "$f")  no: $(printf '%s' "$OUT" | tr -s ' \n' ' ' | head -c 110)"
+  KCERR="$OUT"
+done
 N=$(echo "$IPS" | wc -w)
 # GUESSED records that the node list is the endpoint alone rather than the
 # cluster's own answer. It is kept out of the verdict's way until the end: a
@@ -114,9 +135,22 @@ N=$(echo "$IPS" | wc -w)
 # nobody is obliged to read.
 GUESSED=no
 if [ "$N" -lt 1 ]; then
-  say "no control-plane IPs from a kubeconfig; falling back to the endpoint alone"
-  say "   This usually means kubectl cannot reach $ENDPOINT:6443 either --"
-  say "   check the VPN before reading anything below as a fact about the file."
+  say "no control-plane IPs from any kubeconfig; falling back to the endpoint alone"
+  if [ -z "$CANDIDATES" ]; then
+    say "   No single-cluster kubeconfig on this box serves $ENDPOINT:6443 at all."
+    say "   That is a missing file, not a login: derive one before re-running."
+  elif printf '%s' "$KCERR" | grep -qiE 'sso|token has expired|exec plugin|credentials'; then
+    say "   Every candidate failed on CREDENTIALS, not on the network. A cluster"
+    say "   kubeconfig can authenticate through its own AWS profile, separate from"
+    say "   the one that reads Secrets Manager -- so the talosconfig fetch above"
+    say "   succeeding tells you nothing about this. Log in to the profile named"
+    say "   in the exec block:"
+    say "     kubectl --kubeconfig=<the file above> config view --raw \\"
+    say "       -o jsonpath='{.users[*].user.exec.env}'"
+  elif printf '%s' "$KCERR" | grep -qiE 'timeout|no route|refused|unreachable|dial'; then
+    say "   Every candidate failed on the NETWORK. Check the VPN before reading"
+    say "   anything below as a fact about the file."
+  fi
   IPS="$ENDPOINT"; N=1; GUESSED=yes
 fi
 say "control-plane nodes: $N -> $IPS${GUESSED:+}"
