@@ -1,5 +1,5 @@
 {
-  "lastUpdated": 1793017828245,
+  "lastUpdated": 1793124230879,
   "skills": [
     {
       "skillId": "morning",
@@ -91,6 +91,13 @@
       "description": "Read this skill before the first step of any request to do something in an app on the person's own computer (Notes, Finder, System Settings, any desktop app), to look at their screen, or for \"computer use\". Computer use (desktop control) lets Claude take screenshots of the person's desktop and control it with clicks, typing and scrolling through the Claude desktop app; its tools are named mcp__computer-use__* when the session runs in the desktop app and mcp__remote-devices__computer_* when a cloud session is linked to the person's computer; before computer use is turned on for a conversation there may be no such tools, only an enable__mcp__remote-devices__computer tool, which turns it on. It covers turning it on, picking the right tool, the access flow, and the safety rules for tiered apps, links and financial actions. It is not for websites, which go through Claude in Chrome or the built-in browser and their own skills.",
       "source": "anthropic-example",
       "updatedAt": "2026-10-08T17:34:24.164396Z"
+    },
+    {
+      "skillId": "artifact-emulator",
+      "name": "artifact-emulator",
+      "description": "See a page, slide deck or design canvas artifact you made, close to how a person will see it: open its files in the real artifact viewer inside this cloud session, then screenshot it and read its console errors with a short Python Playwright script. Use it when the person asks to see or check how it looks, or when the artifact type's own instructions tell you to check. Where a type's instructions say not to check unless asked, they win. Never a step before saving or publishing, nor a routine after every save. Not for web apps or pages that are not artifacts. Cloud sessions only (built for cloud Cowork): elsewhere its script stops with a one-line reason. Only you see the result.",
+      "source": "anthropic-example",
+      "updatedAt": "2026-10-19T20:08:47.184180Z"
     }
   ]
 }

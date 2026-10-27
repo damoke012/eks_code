@@ -199,3 +199,41 @@ That is why merging PR #61 looked like it should have fixed prod and did not.
 * **Prod is NOT to be made identical to QA** on two counts: QA pins Helm charts where prod
   floats (prod is worse), and QA grants cluster access to named users where prod uses a group
   (QA is worse). Copying either direction blindly degrades something.
+
+---
+
+## Outcome, same day
+
+**`risingwave-onprem` on op-usxpress-prod: `v0.13.3@299c64f` Ready=True at 18:34:59Z.**
+First time Ready since early September.
+
+Delivered, in order:
+
+| | |
+|---|---|
+| PR #61 `iaac-risingwave-onprem` | `strategy: {type: Recreate}` on dev and prod consoles; tagged `v0.13.3` |
+| dev | live field repaired, applied `299c64f`, all pods healthy |
+| PR #49 `iaac-talos-flux-cluster` | QA pin `v0.11.3` → `v0.13.3`; no pod disturbed, as predicted |
+| PR #50 `iaac-talos-flux-cluster` | prod pin `v0.11.3` → `v0.13.3` |
+| prod | live field repaired AFTER the pin moved; console rolled, Kustomization Ready |
+
+All three clusters now on the same tag for the first time since 2026-10-13.
+
+**The ordering correction is the finding worth keeping.** The first prod repair was reverted
+within minutes by a reconcile of the old pinned manifest — `managedFields` showed
+`kustomize-controller Apply` and `kube-controller-manager Update` in the same second. The
+repair only holds once the pin already carries the fix. Recorded in
+[[server-side-apply-keeps-dropped-fields]].
+
+## Still open after today
+
+* **prod SSO login** — Identity Center group membership, not a cluster problem
+* **prod's Helm charts float** on `.x` while QA pins exact versions
+* **`Terraform Validate`** in `iaac-risingwave-onprem` points at `terraform/`; the code is in
+  `deploy/terraform/`. It has never passed on any PR — a permanently red required check
+* **`dpl`** Octopus environment fails every PR and has been Failed in `iaac-talos` since March
+* **QA's console has 18 restarts**, last 12 days ago, noticed by nobody
+* **`fix-data-dir` violates PodSecurity restricted** (runAsUser=0) on every cluster — a
+  warning today, a scheduling failure if that policy ever enforces
+* **`argocd-apps`** on QA, absent on prod
+* **No alert delivery anywhere** — the thread running through every item above

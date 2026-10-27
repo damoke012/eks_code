@@ -48,3 +48,42 @@ Alertmanager, so it would fail unattended. Order matters: clear the live field F
 strategy patch alone restarts nothing), then merge. I had earlier said prod would apply clean
 because its manifests did not exist — wrong, and it came from reading a ticket note instead of
 the cluster.
+
+## ⚠️ 2026-10-27 — the recorded ORDER is wrong when the cluster is pinned behind
+
+The 2026-09-15 note above says *"clear the live field FIRST, then merge."* On op-usxpress-prod
+that is **backwards**, and following it cost two repairs and an hour.
+
+Measured, with timestamps:
+
+| | |
+|---|---|
+| 17:5x | patched the live Deployment: `{"type":"Recreate"}`, no `rollingUpdate`. The 14-day deadlocked rollout completed, console `2/2 Running` |
+| 18:02:49 | `kustomize-controller  Apply` + `kube-controller-manager  Update`, same second |
+| after | live object back to `{"rollingUpdate":{...},"type":"RollingUpdate"}` |
+
+**Flux reconciled the OLD pinned manifest (`v0.11.3`), which declares no `strategy` at all,
+so the API server re-defaulted `RollingUpdate` and the repair was gone within the interval.**
+`metadata.managedFields` names both writers and is how to see this; the console pod is
+untouched throughout, so nothing looks wrong.
+
+**The correct order, when the source is a pinned tag:**
+
+1. Merge the fix and cut the tag.
+2. **Move the cluster's pin to that tag** (for us: `iaac-talos-flux-cluster`,
+   `clusters/op-usxpress-<env>/flux-system/infra.yaml` — see
+   [[cluster-can-be-behind-its-own-repo]]).
+3. **Only then** clear the live field. Now the manifest declares `Recreate` too, the next
+   apply agrees with the live object, and the repair holds.
+
+Done in that order it worked first time: patched at ~18:28, `v0.13.3 ready=True` at 18:34:59.
+
+**Why the September order was right THEN and wrong NOW:** in September the RisingWave sources
+tracked `branch: main`, so "merge" and "the cluster has it" were the same moment and clearing
+first avoided a window of failure. Since the tag pinning landed they are days apart, and
+clearing first just hands the old manifest a chance to undo it. **A procedure that encodes an
+ordering assumes a delivery model; when the model changes the ordering can invert.**
+
+**How to apply:** before a live-object repair, read what the cluster is actually applying —
+`kubectl -n flux-system get kustomization <name> -o jsonpath='{.status.lastAppliedRevision}'`.
+If that revision does not contain the fix, repair later, not sooner.
