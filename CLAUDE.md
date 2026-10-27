@@ -83,3 +83,5 @@ original ask from what was discovered doing it, or scope creep reads as confusio
 End every note with what was **proven**, what was **tested and killed**, and the **traps**.
 Correct earlier wrong claims in place rather than deleting them. Numbers carry a scope and a
 timestamp.
+
+Keep meeting-brief.md current: when project status, numbers, decisions or owners change, update it. The meeting copilot answers live questions from it.

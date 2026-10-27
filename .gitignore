@@ -18,3 +18,7 @@ __pycache__/
 # the working tree, where a routine `git add -A` would have pushed it.
 /risingwave-pipeline/
 /repos/
+
+# Meeting Copilot: raw transcripts and local settings stay out of git
+.meeting-copilot/
+meeting-copilot/__pycache__/
