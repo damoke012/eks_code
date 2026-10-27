@@ -46,3 +46,34 @@ cause first, then measure.** Otherwise the test burns a round trip and, worse, i
 failure gets quoted later as evidence of something it never measured.
 
 Related: [[proxy-is-not-the-property]], [[a-guard-can-measure-the-wrong-thing]].
+
+## 2026-10-27 — a whitelist of failures is never complete
+
+`scripts/check-authenticator-webhook-file.sh` reported prod's webhook kubeconfig **ABSENT on
+10.10.82.51** and printed *"Do NOT land the apiserver flag: it would not restart on those
+nodes."* The node was simply unreachable — a dead VPN:
+`rpc error: code = Unavailable ... transport: Error while dialing: dial`.
+
+The script **did** try to handle this. It had a NOT MEASURED branch keyed on
+`x509|handshake|certificate|unauthenticated|deadline`, and everything that matched none of
+them fell through to `ABSENT`. `code = Unavailable` is on no such list.
+
+**Why:** this is the same class as the 2026-08-28 `psql` case, but with the trap one level
+deeper — the author knew transport failures existed and still got it wrong, because the
+structure was *enumerate the ways it can fail*. That list can always be one error string
+short, and the default branch was the damaging verdict. The failure mode was also
+self-concealing: it blocked a correct action, which looks like caution rather than a bug.
+
+**How to apply:**
+* **Enumerate the one way a probe SUCCEEDS; everything else is NOT MEASURED.** Never
+  enumerate failures with a verdict as the default branch.
+* A negative verdict needs **positive evidence**: here, ABSENT requires either a listing that
+  exited `0` without the filename, or an error that explicitly says the directory is missing.
+* **Check the exit code**, not only the text — the original matched text and ignored `$?`.
+* The same run also fell back from three control-plane nodes to the endpoint alone, said
+  *"WARNING: that is ONE node, not the control plane"*, and still left `PASS` reachable. A
+  warning nobody must act on is not a guard: make the degraded path **unable** to emit the
+  reassuring verdict. See [[a-guard-can-measure-the-wrong-thing]].
+* When a probe against on-prem fails oddly, check the VPN **first**:
+  `bash -c 'echo > /dev/tcp/10.10.82.51/50000'`. Expired AWS SSO and a dropped VPN are the
+  two overnight state changes that make yesterday's proven commands fail today.

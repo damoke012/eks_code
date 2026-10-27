@@ -32,3 +32,25 @@ form; keep the plain form too, since it costs nothing and covers the setting bei
 The numeric IDs are stable — they are what makes the claim immutable — so this does not rot.
 Related: [[two-orgs-join-at-ecr-not-github]], [[gha-oidc-needs-environment-claim]],
 [[v1-tag-is-moved-by-hand]].
+
+## Where this is managed, and the comment that nearly undid it
+
+✅ **Codified 2026-10-22** in `variant-inc/iac-tf-manual-runs`,
+`apps/common/gha_ecr_push_roles/` — which is also the answer to "which repo creates the ECR
+OIDC roles in 064859874041". It applies by hand and **commits its `terraform.tfstate` to the
+repo**. Nothing else manages that account.
+
+The module builds each sub from `repo:<org>/<repo>:ref:<ref>` and now concats an
+`extra_subs` list for claims that do not follow that shape. The immutable one lives there.
+
+⚠️ **The code was right and the comment was wrong, which is worse than both being wrong.**
+The first version explained the two entries as a *rename* of `risingwave` to
+`risingwave-poc`, with the numeric string as "the old name in another form". Neither is true:
+the new repo was created fresh on 2026-10-21 and **both repos still exist**. A reader
+following that comment would delete the numeric claim as a legacy alias — and it is the only
+sub that matches Tim's repo. The legacy entry is `risingwave-poc`.
+
+**How to apply:** when reviewing a change that is *correct*, read the comment as carefully as
+the code. A wrong rationale survives longer than a wrong value, because nothing fails until
+someone acts on it. The tell here: a claim about history ("renamed") that one `gh repo view`
+on each name disproves.

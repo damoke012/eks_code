@@ -83,3 +83,43 @@ dev's `risingwave-etl` returns repo `risingwave-pipeline`, path `deploy/chart`,
 targetRevision `master`, valueFiles `values-dev.yaml`. A `gh api …/git/trees/…` filter
 that matches nothing prints nothing and reads exactly like "the file is not there", so it
 is NOT MEASURED until the repo is confirmed from the Application.
+
+## 2026-10-27 — there are FIVE repos, and the fifth holds the version pins
+
+Measured from op-usxpress-prod's own Flux objects, which is the only way to learn this: the
+pin is not in any repo that names the app.
+
+```
+kubectl -n flux-system get gitrepository -o custom-columns=NAME:.metadata.name,URL:.spec.url,REF:.spec.ref
+```
+
+| GitRepository | repo | ref |
+|---|---|---|
+| `flux-system` | **`iaac-talos-flux-cluster`** | branch `master`, path `./clusters/op-usxpress-prod` |
+| `infra` | `iaac-talos-flux-platform` | branch `op-prod` |
+| `iaac-risingwave-onprem` | `iaac-risingwave-onprem` | **tag `v0.11.3`** |
+| `gateway-api-upstream` | kubernetes-sigs/gateway-api | tag `v1.4.0` |
+
+**`iaac-talos-flux-cluster` is the bootstrap repo and nothing else references it.** It is
+`master` with a directory per cluster — path-based, not branch-per-environment like the
+platform repo — so a PR there can move ONE cluster's pins without touching the others. Both
+the `iaac-risingwave-onprem` GitRepository and the `risingwave-onprem` Kustomization carry
+`kustomize.toolkit.fluxcd.io/name: flux-system`, which is the label that leads you here.
+
+⛔ **CORRECTION to [[risingwave-onprem-has-no-promotion-gate]].** I said twice on 2026-10-27
+that every cluster tracks `branch: main` so merging IS deploying to prod. That is **wrong for
+the RisingWave manifests**: they are pinned to an explicit `tag:` per cluster, which is a
+stronger gate than branch-tracking. The belief came from `risingwave-routes`, which really is
+branch-tracking (`op-prod`). **Two Kustomizations in the same namespace, two different source
+models** — and I generalised from the one I happened to look at first.
+
+**The consequence, which is the real finding:** delivery to prod is FOUR steps, and three are
+invisible from the PR — merge to main, a tag gets cut, **someone edits the pin**, Flux
+reconciles. On 2026-10-27 prod ran `v0.11.3` (2026-10-13) while main was at `v0.13.3`; six
+commits had been merged and tagged and none of them had reached any cluster. Nothing reports
+that a cluster is behind its repo. [[gitops-has-four-stale-layers]] now has a fifth layer
+above it: the tag pin.
+
+**How to apply.** Before concluding a merge reached a cluster, read the GitRepository's
+`.status.artifact.revision` and compare it with the repo's HEAD tag. A green Kustomization
+means the PINNED revision applied cleanly, not that your change is on the cluster.

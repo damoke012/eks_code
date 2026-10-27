@@ -122,3 +122,80 @@ Deployment above.
 kopia maintenance and Rook OSD prepare jobs. Hourly Velero backups are running
 on prod across argocd, cert-manager, grafana, istio, kyverno, prometheus,
 reloader, risingwave, rook-ceph and velero itself.
+
+---
+
+## The delivery chain, mapped (added after the RW console fix)
+
+Chasing a three-line YAML change to production took us through five repos. The map, read from
+op-usxpress-prod's own Flux objects — the only authoritative source, since the pin is in no
+repo that names the application:
+
+| GitRepository | repo | ref |
+|---|---|---|
+| `flux-system` | **`iaac-talos-flux-cluster`** | branch `master`, path `./clusters/op-usxpress-prod` |
+| `infra` | `iaac-talos-flux-platform` | branch `op-prod` |
+| `iaac-risingwave-onprem` | `iaac-risingwave-onprem` | **`tag: v0.11.3`** |
+| `gateway-api-upstream` | kubernetes-sigs/gateway-api | `tag: v1.4.0` |
+
+The pin is at `clusters/op-usxpress-prod/flux-system/infra.yaml`, in a 700+ line monolith
+holding every GitRepository and Kustomization for the cluster. `iaac-talos-flux-cluster` is
+path-based on one branch, so a PR there moves ONE cluster without touching the others.
+
+**Delivery is four steps; three are invisible from the PR:**
+
+```
+merge to main  ->  a tag is cut  ->  SOMEONE EDITS THE PIN  ->  Flux reconciles
+```
+
+That is why merging PR #61 looked like it should have fixed prod and did not.
+
+## Proven
+
+* **INFRA-1661's mechanism is live on production.** Both apiserver webhook flags on all three
+  control planes, 13/13 nodes Ready, 3 apiserver pods Ready with 0 restarts, deploy clean in
+  21 minutes.
+* **The RW console failure is a RollingUpdate/ReadWriteOnce deadlock**, not a crash. Old pod
+  Running on platform-2 since 2026-09-01, replacement Pending on platform-3 since 2026-10-13,
+  all five init containers unstarted. Fixed by PR #61, tagged `v0.13.3`.
+* **QA already carried the fix** (`strategy: {type: Recreate}`, with a comment saying why) and
+  its live Deployment shows `{"type":"Recreate"}` with no `rollingUpdate` block — so applying
+  it needs no `force: true` and no manual delete.
+* **Prod ran `v0.11.3` while main was at `v0.13.3`** — six merged, tagged commits on no
+  cluster, every Flux object green.
+* **For prod, those two minor versions carry exactly three lines** (`git diff --stat
+  v0.11.3..origin/main -- manifests/op-usxpress-prod/`). QA's section is empty.
+* **Prod's SSO is blocked on group membership, not on anything in Kubernetes.** The role
+  exists, aws-auth maps it, the permission set is assigned — to `usx-aws-admin`, which the
+  platform team is not in.
+* **IRSA role ARNs are correct on both clusters**, 0 of 7 wrong.
+* **The 56/57 "not Running" pods are all `Succeeded`** — Velero kopia maintenance and Rook OSD
+  prepare jobs. Hourly Velero backups run on prod across ten namespaces.
+
+## Tested and killed
+
+* ⛔ **"Prod carries dev role ARNs in IRSA annotations."** Predicted from
+  [[manifests-copied-across-branches]]; measured 0 of 7 wrong on both clusters.
+* ⛔ **"RisingWave has no promotion gate; merging deploys straight to prod."** Said twice.
+  False for the manifests — they are tag-pinned per cluster. The belief came from
+  `risingwave-routes`, which genuinely is branch-tracking. Two Kustomizations, two models.
+* ⛔ **"The webhook kubeconfig is ABSENT on prod."** The node was unreachable; a dead VPN.
+* ⛔ **"No signed-in profile has `usx-on-prem-admins`, so it is a permission-set problem."**
+  `op-prod` is configured for exactly that role; nobody had logged into it.
+* ⛔ **"No permission set named `usx-on-prem-admins` exists in this Identity Center."** The
+  lookup had passed a two-line string as the instance ARN and never queried the directory.
+* ⛔ **"The merge did not tag, because the commit lacks a conventional prefix."** It tagged
+  `v0.13.3` regardless.
+
+## Traps
+
+* **A failure arrives dressed as a finding.** Four times today: a dead VPN read as a missing
+  file, a wrong kubeconfig read as an unreadable cluster, an unused profile read as a missing
+  grant, a malformed ARN read as an empty directory. Each would have sent us somewhere wrong.
+  Every one was fixed in the instrument, not worked around.
+* **A green Kustomization means the PINNED revision applied**, not that your change is there.
+* **Compare tags with `sort -V`.** Lexically `v0.9.0` beats `v0.13.3`.
+* **`Available=True` survives a permanently stuck rollout** when the old pod keeps serving.
+* **Prod is NOT to be made identical to QA** on two counts: QA pins Helm charts where prod
+  floats (prod is worse), and QA grants cluster access to named users where prod uses a group
+  (QA is worse). Copying either direction blindly degrades something.

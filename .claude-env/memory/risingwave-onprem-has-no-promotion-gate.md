@@ -125,3 +125,28 @@ this path; CRD `generation` moved 1 -> 2, confirming `crds: CreateReplace`; and 
 did NOT move because the CR pins `spec.image` explicitly — all five RisingWave pods stayed on
 v2.8.2 with 0 restarts. A CR that leaves `spec.image` unset would have taken the operator's own
 default (v3.0.3 for v0.18.0) and collapsed two planned steps into one.
+
+## ⛔ CORRECTED 2026-10-27 — the manifests ARE gated; I generalised from the wrong object
+
+The claim above — every cluster tracks `branch: main` at 5m, so merging IS deploying to prod
+— is **false for the RisingWave manifests**. Measured on op-usxpress-prod:
+
+| Kustomization | source | ref |
+|---|---|---|
+| `risingwave-onprem` | `iaac-risingwave-onprem` | **`tag: v0.11.3`** |
+| `risingwave-operator` | `iaac-risingwave-onprem` | same pinned tag |
+| `risingwave-routes` | `iaac-talos-flux-platform` (as `infra`) | **`branch: op-prod`** |
+
+**Two Kustomizations in one namespace, two different source models.** `risingwave-routes` is
+genuinely branch-tracking, which is where the original belief came from; the manifests that
+carry the actual workload are pinned per cluster by tag. A tag pin is a **stronger** gate than
+branch-tracking, not a weaker one.
+
+**What remains true, and is the better version of the finding:** nothing tells you a cluster
+is behind. On 2026-10-27 prod and QA both sat on `v0.11.3` from 2026-10-13 while `main` was at
+`v0.13.3` — six merged, tagged commits on no cluster, every Flux object green. The gate works;
+the reporting does not. Full detail and the check in [[cluster-can-be-behind-its-own-repo]].
+
+**How I got it wrong:** I looked at one Kustomization's source, saw a branch, and described
+the repo. One sample is not a population — the rule I already have for ECR repositories and
+cluster nodes applies to Flux sources too. [[a-proxy-is-not-the-property]].

@@ -110,9 +110,52 @@ instruction to interrupt a running wizard was written as a fenced block containi
 command**, and a key name is not a line. Write it in prose — "press Ctrl-C" — never in
 a fence.
 
-Three instances now: quoted output, a measured value, and a keystroke. The shape they
-share is *something that belongs on a terminal without being a line to execute*. Before
-any fence, ask of every line: is this something the shell should run? If not, it is prose.
+⚠️ **Recurred FOUR times on 2026-10-27 alone**, in a new shape: a stray closing tag
+from the tooling, `</parameter>`, left on the last line of an otherwise correct block.
+Each time it produced `bash: syntax error near unexpected token` — and each time it
+killed the LAST command in the block while every earlier command ran. That is the
+dangerous form, because the block looks like it worked:
+
+* once it swallowed `git --no-pager diff`, so a commit was **pushed unreviewed** —
+  against this repo's own standing rule to read the diff in full before pushing;
+* once it swallowed a `kubectl get nodes` verification;
+* twice it swallowed the final section of a diagnostic, and the missing output was
+  then re-requested, costing round trips.
+
+**Re-read the last line of every block before sending it.** A fence that ends in
+anything other than a runnable line or a closing `'`/`"`/`EOF`/`PY` is malformed. The
+earlier commands running is not evidence the block was right.
+
+Seven instances now: quoted output, a measured value, a keystroke, and four stray tags.
+The shape they share is *something that belongs on a terminal without being a line to
+execute*. Before any fence, ask of every line — including the last — is this something
+the shell should run? If not, it is prose, or it is a mistake.
+
+## 5b. `UID` and friends are readonly — the assignment fails, the old value stays
+
+Handed over 2026-10-27 to look up an Identity Center user:
+
+```
+UID=$(aws identitystore get-user-id ... --query UserId --output text)
+```
+
+bash answered `-bash: UID: readonly variable`, `UID` kept its existing value of **1000**
+(the shell's own user id), and the next command sent `1000` to the AWS API, which
+rejected it against a UUID pattern. The error pointed at AWS; the fault was the variable
+name.
+
+**Why it is nasty:** the assignment fails but the script continues, and the variable
+holds a *plausible* value rather than an empty one. An empty value is often caught by the
+next command; `1000` looks like data.
+
+**How to apply.** Never use shell-reserved or shell-maintained names as your own
+variables: `UID`, `EUID`, `PPID`, `BASHPID`, `RANDOM`, `SECONDS`, `LINENO`, `HOSTNAME`,
+`PWD`, `OLDPWD`, `IFS`, `PATH`, `HOME`, `SHELL`, `FUNCNAME`, `GROUPS`. Prefix anything
+that might collide: `USER_ID`, `PARENT_PID`. And in a script, `set -u` will not save you
+here — the variable IS set, just not by you.
+
+Same family as mode 9: a value that is wrong rather than absent, so nothing downstream
+notices it is not the one you meant.
 
 ## 6. A guard is a measurement, and it can measure the wrong thing
 

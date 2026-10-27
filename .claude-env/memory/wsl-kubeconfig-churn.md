@@ -287,3 +287,56 @@ current-context, so prefer a single-cluster file: `prod.yaml` for cloud prod,
 Then pass `--kubeconfig <file>` on every command. It overrides the exported variable, which
 `--context` does not fix: a context name resolves *within* whatever file the variable points
 at. Known fingerprints are listed above — verify against them, do not assume.
+
+## 2026-10-27 — the host discriminator worked, and `vpnagent` running is not a tunnel
+
+Second occurrence of the 2026-10-09 signature, diagnosed correctly in two commands this time
+because the host was measured first. All six on-prem ports (50000 and 6443 on .50/.51/.52)
+were unreachable from WSL; the host then said:
+
+```
+dev/qa/prod :6443          False False False
+Get-NetRoute 10.10.*       NONE
+adapters UP                Wi-Fi, vEthernet (FSE HostVnic), auraclient (WireGuard Tunnel)
+processes                  AurascapeClient x3, AurascapeUI, vpnagent
+```
+
+**The trap: `vpnagent` was running and there was still no tunnel.** `vpnagent` is the Cisco
+Secure Client / AnyConnect agent *service* and starts at boot regardless of connection state,
+so a process list makes the VPN look present. The decisive evidence is the **adapter** list —
+no Cisco virtual adapter was up, only Aurascape's WireGuard. A service is not an interface.
+
+Aurascape (ZTNA) was up throughout and is irrelevant to this range: it brokers named
+applications, so corp DNS answers while a raw `10.10.82.x:6443` falls outside policy.
+
+**How to apply:**
+* Check **adapters**, not processes, to decide whether a VPN is connected:
+  `Get-NetAdapter | Where-Object Status -eq "Up"`. Better still, ask for the route:
+  `Get-NetRoute -DestinationPrefix "10.10.*"` — no route, no reachability, nothing else to read.
+* Order of the fix is not optional: **connect the VPN first, then `wsl --shutdown`.** WSL reads
+  the host's routes at boot, so a tunnel established after WSL started leaves the guest blind.
+* Overnight, two things expire and both make yesterday's proven commands fail today: the **AWS
+  SSO sessions** and the **VPN tunnel**. Both happened on 2026-10-27 in sequence, and each
+  produced an error that reads like a platform fault. Check them before reading any probe's
+  output as a finding. See [[transport-failure-not-a-verdict]].
+
+### Reconnecting it, measured 2026-10-27
+
+The product is **Cisco Secure Client**, at `C:\Program Files (x86)\Cisco\Cisco Secure Client`,
+and it ships a CLI beside the agent — so a reconnect does not need the GUI hunt:
+
+```
+powershell.exe -NoProfile -Command '& "C:\Program Files (x86)\Cisco\Cisco Secure Client\vpncli.exe" state'
+```
+
+(The sibling `C:\Program Files (x86)\Cisco\Cisco AnyConnect Secure Mobility Client` directory
+holds only `vpndownloader.exe` — a leftover of the rename. The live install is Secure Client.)
+
+Connected, the adapter appears as **`Ethernet 2` — Cisco AnyConnect Virtual Miniport Adapter
+for Windows x64**. That name is the thing to check; `auraclient` being Up means nothing for
+the `10.10.82.x` range.
+
+✅ **No `wsl --shutdown` was needed** — WSL saw the new routes immediately, because
+`networkingMode=mirrored` was left in `%USERPROFILE%\.wslconfig` on 2026-10-09. That change
+was made chasing the wrong cause and kept anyway; this is the day it paid for itself. In NAT
+mode the shutdown step would still be required.
