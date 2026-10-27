@@ -212,10 +212,39 @@ fi
 gate "7. Backup — a real Velero backup, not just the Schedule"
 if "$K" op-prod -- -n velero get schedule risingwave-metastore >/dev/null 2>&1; then
   ok "Schedule risingwave-metastore exists"
-  last=$("$K" op-prod -- -n velero get backups --no-headers 2>/dev/null \
-          | grep risingwave | awk '$2=="Completed"' | tail -1)
-  [ -n "$last" ] && ok "completed backup: $last" \
-                 || no "no COMPLETED risingwave backup yet — the Schedule has not produced one"
+  # Read the phase BY NAME. `kubectl get backups --no-headers` prints only
+  # NAME and AGE on this cluster -- Velero's CRD carries no STATUS print
+  # column -- so the previous `awk '$2=="Completed"'` was testing the AGE
+  # field ("13h", "93m", "29d") and could never match on any cluster. It
+  # reported "no COMPLETED risingwave backup yet" on 2026-10-27 while 29 days
+  # of six-hourly backups sat there Completed with zero errors. Positional awk
+  # over kubectl output has now produced a false finding twice; the fix both
+  # times was custom-columns.
+  last=$("$K" op-prod -- -n velero get backups \
+          -o custom-columns=NAME:.metadata.name,PHASE:.status.phase --no-headers 2>/dev/null \
+          | grep risingwave | awk '$2=="Completed" {print $1}' | tail -1)
+  if [ -n "$last" ]; then
+    ok "completed backup: $last"
+  else
+    # Distinguish "none completed" from "none exist" -- different problems.
+    any=$("$K" op-prod -- -n velero get backups --no-headers 2>/dev/null | grep -c risingwave || true)
+    if [ "${any:-0}" -gt 0 ]; then
+      no "$any risingwave backup(s) exist but NONE is Completed -- read their phase"
+    else
+      no "no risingwave backup objects at all -- the Schedule has not produced one"
+    fi
+  fi
+  # The namespace backup succeeding says nothing about the whole-cluster one.
+  # On 2026-10-27 velero-daily-full had been PartiallyFailed every night for
+  # at least 14 days while risingwave-metastore completed four times a day.
+  df=$("$K" op-prod -- -n velero get backups \
+        -o custom-columns=NAME:.metadata.name,PHASE:.status.phase --no-headers 2>/dev/null \
+        | grep daily-full | tail -1)
+  case "$df" in
+    *Completed*) ok "whole-cluster backup: $df" ;;
+    "")          no "no velero-daily-full backup found at all" ;;
+    *)           no "whole-cluster backup NOT clean: $df" ;;
+  esac
 else
   no "Velero Schedule risingwave-metastore absent"
 fi
