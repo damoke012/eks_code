@@ -30,14 +30,16 @@ aws --profile "$MGMT_PROFILE" sts get-caller-identity >/dev/null 2>&1 \
    Identity Center assignments live there, not in the member accounts:
      aws sso login --profile $MGMT_PROFILE"
 
-INST=$(aws --profile "$MGMT_PROFILE" sso-admin list-instances \
-        --query 'Instances[0].InstanceArn' --output text 2>&1)
-case "$INST" in
-  arn:*) ;;
-  *) die "could not list Identity Center instances from '$MGMT_PROFILE': $INST" ;;
-esac
-IDS=$(aws --profile "$MGMT_PROFILE" sso-admin list-instances \
-       --query 'Instances[0].IdentityStoreId' --output text)
+# Extract by PATTERN, not by position. `--query ... --output text` returned
+# the ARN followed by a line reading "None" on 2026-10-27, and the whole
+# two-line string was then passed to --instance-arn, which failed the service's
+# regex. The value looked right in the output and was wrong in the variable.
+RAW=$(aws --profile "$MGMT_PROFILE" sso-admin list-instances --output json 2>&1)
+INST=$(printf '%s' "$RAW" | grep -oE 'arn:aws[a-z-]*:sso:::instance/(sso)?ins-[A-Za-z0-9.-]{16}' | head -1)
+IDS=$(printf '%s' "$RAW" | grep -oE '"IdentityStoreId"[^"]*"[^"]+"' | grep -oE 'd-[a-z0-9]+' | head -1)
+[ -n "$INST" ] || die "could not read an Identity Center instance ARN from '$MGMT_PROFILE'.
+   The API said: $(printf '%s' "$RAW" | tr -s ' \n' ' ' | head -c 200)"
+[ -n "$IDS" ] || die "found instance $INST but no IdentityStoreId beside it"
 say "instance:        $INST"
 say "identity store:  $IDS"
 
@@ -45,15 +47,26 @@ say "identity store:  $IDS"
 # The ARN is opaque, so every set has to be described. There is no lookup by
 # name in this API; a hardcoded ARN here would rot the first time the set is
 # recreated.
-PSARN=""
-for A in $(aws --profile "$MGMT_PROFILE" sso-admin list-permission-sets \
-             --instance-arn "$INST" --query 'PermissionSets[]' --output text); do
+PSARN=""; SCANNED=0; NAMES=""
+PSLIST=$(aws --profile "$MGMT_PROFILE" sso-admin list-permission-sets \
+           --instance-arn "$INST" --output json 2>&1 \
+         | grep -oE 'arn:aws[a-z-]*:sso:::permissionSet/[A-Za-z0-9/-]+')
+[ -n "$PSLIST" ] || die "listed NO permission sets on $INST.
+   That is a permissions answer, not an empty directory -- the account would
+   need sso-admin read access. The API said:
+   $(aws --profile "$MGMT_PROFILE" sso-admin list-permission-sets --instance-arn "$INST" 2>&1 | tr -s ' \n' ' ' | head -c 200)"
+for A in $PSLIST; do
+  SCANNED=$((SCANNED+1))
   N=$(aws --profile "$MGMT_PROFILE" sso-admin describe-permission-set \
         --instance-arn "$INST" --permission-set-arn "$A" \
         --query 'PermissionSet.Name' --output text 2>/dev/null)
+  NAMES="${NAMES}${NAMES:+ }$N"
   [ "$N" = "$PS_NAME" ] && { PSARN="$A"; break; }
 done
-[ -n "$PSARN" ] || die "no permission set named '$PS_NAME' in this Identity Center instance"
+# "Not found" after scanning zero sets and after scanning forty are different
+# claims. Say which one this is.
+[ -n "$PSARN" ] || die "no permission set named '$PS_NAME' among the $SCANNED scanned.
+   What is there: $NAMES"
 say "permission set:  $PS_NAME"
 say "                 $PSARN"
 
