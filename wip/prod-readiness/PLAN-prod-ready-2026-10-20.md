@@ -388,6 +388,30 @@ correct measurement whose own output recommends the damage.
 **Sequence:** Update Variables on `0.5.0` → deploy to **QA** (the gate; QA has working SSO
 so a regression is visible) → deploy to **Production** with break-glass open.
 
+## ✅ 1f. QA PROVEN on 0.5.0 — 2026-10-26, late
+
+`0.5.0` deployed to op-qa. Terraform applied, outputs captured, all 3 SSM parameters
+validated, no stuck namespaces. The log confirms the variable model:
+`[VARS] authoritative: Octopus TF_VAR_* only (envs/*.tfvars NOT read)`.
+
+**After the deploy, QA still has the flag and SSO still works:**
+
+```
+--authentication-token-webhook-config-file=/var/lib/aws-iam-authenticator/kubeconfig.yaml
+--authentication-token-webhook-cache-ttl=2m0s
+
+Username  sso:doke@usxpress.com
+UID       aws-iam-authenticator:527101283767:AROAXVONPJW3TDIQ5YUMB
+Groups    [onprem-platform-admins system:authenticated]
+```
+
+That is the exact end state wanted on prod, reached by the exact release prod will get.
+
+⚠️ **Expect a 20-minute pause** at `[HEALTH] Waiting for istiod` on any op-qa or op-prod
+deploy — see [[istiod-health-wait-cannot-fail]]. istiod was `1/1` and 111 days old
+throughout. **It does not fail the deploy**, and an earlier note in this file claiming it
+would leave a false Failed record on prod was wrong: the timeout branch has no `exit 1`.
+
 ## 1b. The original delta, for reference
 
 ## 1. AWS SSO on prod — the delta
