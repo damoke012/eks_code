@@ -106,39 +106,74 @@ if [ -n "$KC" ]; then
         -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{" "}{end}' 2>/dev/null)
 fi
 N=$(echo "$IPS" | wc -w)
+# GUESSED records that the node list is the endpoint alone rather than the
+# cluster's own answer. It is kept out of the verdict's way until the end: a
+# one-node sample cannot authorise landing a flag on a three-node control
+# plane, however present the file is on that one node. The earlier version
+# printed a WARNING and then let PASS be reachable anyway, which is a warning
+# nobody is obliged to read.
+GUESSED=no
 if [ "$N" -lt 1 ]; then
   say "no control-plane IPs from a kubeconfig; falling back to the endpoint alone"
-  say "   WARNING: that is ONE node, not the control plane. Not a population."
-  IPS="$ENDPOINT"; N=1
+  say "   This usually means kubectl cannot reach $ENDPOINT:6443 either --"
+  say "   check the VPN before reading anything below as a fact about the file."
+  IPS="$ENDPOINT"; N=1; GUESSED=yes
 fi
-say "control-plane nodes: $N -> $IPS"
+say "control-plane nodes: $N -> $IPS${GUESSED:+}"
+[ "$GUESSED" = yes ] && say "   (node list GUESSED from the endpoint, not read from the cluster)"
 
 # --- the actual question -----------------------------------------------------
 say "-- $HOSTDIR/$WANT on each node"
 OK=0; BAD=0; UNK=0
+# ABSENT requires POSITIVE evidence: the listing has to have succeeded and not
+# contained the file. The first version of this loop whitelisted the errors it
+# would call NOT MEASURED (x509|handshake|certificate|unauthenticated|deadline)
+# and sent everything else to ABSENT. On 2026-10-27 a dead VPN produced
+#   rpc error: code = Unavailable ... transport: Error while dialing: dial
+# which is on no whitelist, so an unreachable node was reported as a node with
+# no kubeconfig.yaml, and the script said "Do NOT land the apiserver flag".
+# A transport failure is not a verdict about the file. Never enumerate the ways
+# a probe can fail -- enumerate the one way it can succeed.
 for IP in $IPS; do
-  R=$(talosctl --talosconfig "$TC" -e "$ENDPOINT" -n "$IP" list -l "$HOSTDIR" 2>&1)
-  if printf '%s' "$R" | grep -q "$WANT"; then
+  R=$(talosctl --talosconfig "$TC" -e "$ENDPOINT" -n "$IP" list -l "$HOSTDIR" 2>&1); RC=$?
+  if [ "$RC" = 0 ] && printf '%s' "$R" | grep -q "$WANT"; then
     say "   $IP  PRESENT  $(printf '%s' "$R" | grep "$WANT" | tail -1 | tr -s ' ')"
     OK=$((OK+1))
-  elif printf '%s' "$R" | grep -qiE 'x509|handshake|certificate|unauthenticated|deadline'; then
-    say "   $IP  NOT MEASURED  talos API refused us: $(printf '%s' "$R" | head -c 90)"
-    UNK=$((UNK+1))
-  else
-    say "   $IP  ABSENT   $(printf '%s' "$R" | head -c 120)"
+  elif [ "$RC" = 0 ]; then
+    # The listing worked. The file is genuinely not in it. This is the ONLY
+    # path to ABSENT, and the directory contents are printed as the evidence.
+    say "   $IP  ABSENT   $HOSTDIR listed OK without $WANT:"
+    say "            $(printf '%s' "$R" | tr -s ' \n' ' ' | head -c 160)"
     BAD=$((BAD+1))
+  elif printf '%s' "$R" | grep -qiE 'no such file or directory|lstat .* not exist'; then
+    # The directory itself is missing, so the file is too. A real finding.
+    say "   $IP  ABSENT   $HOSTDIR does not exist: $(printf '%s' "$R" | head -c 100)"
+    BAD=$((BAD+1))
+  else
+    say "   $IP  NOT MEASURED  talosctl exit $RC: $(printf '%s' "$R" | tr -s ' \n' ' ' | head -c 140)"
+    UNK=$((UNK+1))
   fi
 done
 
 say "-- present=$OK absent=$BAD not-measured=$UNK  (want present=$N)"
 if [ "$UNK" -gt 0 ]; then
   say "VERDICT: NOT MEASURED. The Talos API would not talk to us on $UNK node(s)."
+  say "  This says nothing about the file. Fix the path to the node and re-run."
+  say "  First thing to check: is the VPN up? bash -c 'echo > /dev/tcp/$ENDPOINT/50000'"
   exit 3
 elif [ "$BAD" -gt 0 ]; then
   say "VERDICT: FAIL. $BAD node(s) have no $WANT."
   say "  Do NOT land the apiserver flag: it would not restart on those nodes."
   exit 1
 else
+  if [ "$GUESSED" = yes ]; then
+    say "VERDICT: NOT MEASURED. The file is present on $ENDPOINT, but that is one"
+    say "  node and this control plane has three. The node list could not be read"
+    say "  from the cluster, so this is a sample, not the population -- and the"
+    say "  flag lands on every control-plane node, not just the one we reached."
+    say "  Get kubectl working against $ENDPOINT:6443 and re-run."
+    exit 3
+  fi
   say "VERDICT: PASS on all $N control-plane nodes."
   [ "$ENV" = "qa" ] && say "  qa is the control, so the method is sound. Now run: $0 prod"
   exit 0
